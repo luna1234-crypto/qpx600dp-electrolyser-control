@@ -1,0 +1,3 @@
+# Runtime dependency used by milestones 1 and 2. The wheel includes Qt.
+PySide6==6.10.1
+
