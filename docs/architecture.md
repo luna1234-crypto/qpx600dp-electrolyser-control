@@ -1,9 +1,12 @@
 # Proposed application and communication architecture
 
-**Design only for future milestones.** Current code implements the entrypoints,
-main-window placeholders, source paths and diagnostic logging. The empty package
-boundaries reserve space without introducing mock drivers or half-built protocols.
-This proposal follows the [verified command reference](cpx400dp_commands.md).
+**Worker, GUI connection and test-engine design for future milestones.** Current
+code implements the entrypoints, main-window placeholders, diagnostic logging,
+`PowerSupplyInterface`, immutable capabilities and the configurable two-channel
+`SimulatedPowerSupply`. The backend has no Qt or serial dependency. Its synchronous
+API is exercised through tests and a console example; it is not connected to the
+GUI yet. See [simulator behaviour](simulator.md). The remaining design follows
+the [verified command reference](cpx400dp_commands.md).
 
 ## Ownership and data flow
 
@@ -22,7 +25,8 @@ flowchart TD
     CPX --> T["SerialTransport or future TCP transport"]
 ```
 
-The selected backend is instantiated, connected, used and disconnected only by
+In the planned connected application, the selected backend will be instantiated,
+connected, used and disconnected only by
 the communication worker. There is one worker and one instrument session per
 physical unit, shared by both channel engines. The simulator uses the same queue
 and public interface. One writer per physical connection remains mandatory even
@@ -54,13 +58,17 @@ in its own thread. CH1 waiting 30 seconds at a polarisation point consumes no
 communication-worker time; CH2 continues to receive its own measurements and
 setpoint changes. UTC-aware wall timestamps are recorded separately.
 
-The public instrument abstraction will expose connect/disconnect/identify,
-set_voltage/current, output_on/off, read_voltage/current and is_connected.
-Readback output state, capabilities and status are also needed. is_connected
+The implemented instrument abstraction exposes connect/disconnect/identify,
+set_voltage/current, output_on/off, read_voltage/current, read_set_voltage/current,
+read_output_state, capabilities and is_connected. Status-event support will be
+added with the physical driver without inventing instantaneous mode readbacks.
+is_connected
 means session health, not proof of recent communication or output safety.
 Drivers receive an injected transport; engines receive controller access, never
 the driver's serial object. Store capabilities centrally in a frozen dataclass
 populated from the manual's evidence, not repeated numeric literals in widgets.
+Milestone 3 implements this in `instrument/capabilities.py`; the shared constant
+is immutable, while every simulator instance owns separate channel state and RNGs.
 
 Connection work in milestone 4 must already run off the GUI thread. Milestone 6
 will formalise and test the shared action queue before two-channel controls are
@@ -180,10 +188,11 @@ completed step and use only the measured final averaging window.
 ## Milestone boundaries and acceptance
 
 Milestone 1: launch and verify the offline foundation. Milestone 2: record verified
-commands and this architecture; rerun milestone 1 regression and stop. No real
-connection, simulator or queue implementation is authorised in this delivery.
+commands and this architecture. Milestone 3: implement and test the abstraction,
+capabilities and simulator; rerun the existing application checks and stop.
+The connected GUI, physical driver, shared queue and protocols remain later work.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Later data tests must cover unwritable files, interruption and bounded memory.
 Windows hardware and 24-hour accelerated simulator acceptance belong to their
-specified later milestones; they are not claimed by the current eight tests.
+specified later milestones; they are not claimed by the current test suite.

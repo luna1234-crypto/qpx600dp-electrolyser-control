@@ -29,5 +29,26 @@ Verified on 2026-09-08 after the milestone 1 commit:
 - Reran all 8 milestone 1 tests successfully and launched the application again
   with exit code 0. Documentation relative-link and whitespace checks passed.
 
-See [verification details](verification/milestone2.md). This milestone changes
-documentation only. Development stops here; milestones 3-20 are not implemented.
+See [verification details](verification/milestone2.md). This milestone changed
+documentation only. At that checkpoint, milestones 3-20 remained unimplemented.
+
+## Milestone 3 - Instrument abstraction and simulator
+
+Implemented the synchronous `PowerSupplyInterface`, a frozen capability model
+grounded in the supplied manual, configurable independent simulated channels,
+CC/CV crossover, output enable/readback, bounded command delay and optional
+reproducible measurement noise. Included a console demonstration that turns off
+one output while the other remains active.
+
+Verified on 2026-09-08: **75 tests passed**, comprising 67 new capability/simulator
+cases and the existing 8 application/logging cases. The console demo completed
+successfully and preserved CH2's 2.20 V / 5.18 A readback when CH1 was stopped.
+See [verification details](verification/milestone3.md) and
+[simulator behaviour](simulator.md).
+
+The simulator's 400 W model boundary is deliberately conservative, distinct from
+the hardware's 420 W envelope rating and the future application safety system.
+Disconnect preserves simulated output states; it is not an implicit OFF command.
+No GUI connection controls, physical driver, shared worker queue, experiment
+protocols or experimental data logger were introduced. Stop here after the
+milestone commit; milestones 4-20 are still pending.

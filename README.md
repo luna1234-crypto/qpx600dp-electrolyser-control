@@ -1,12 +1,17 @@
 # CPX400DP Electrolyser
 
 Python 3.12 / PySide6 desktop project for an AIM-TTi CPX400DP dual-output supply.
-**This delivery is limited to milestones 1 and 2. It is an offline application
-skeleton, not yet an instrument-control application ready for laboratory use.**
+**This delivery completes milestones 1-3. It includes an offline GUI skeleton
+and a tested Python simulator backend, not yet a physical instrument-control
+application ready for laboratory use.**
 
 The window launches, processes Qt events, shows two equal channel placeholders,
 and writes diagnostic logs. No serial port is opened and no output command is
 sent. Output states are explicitly unknown.
+
+Milestone 3 adds `PowerSupplyInterface`, immutable `InstrumentCapabilities`,
+and `SimulatedPowerSupply`. The simulator is available through Python and the
+console example below. Its GUI connection controls are scheduled for milestone 4.
 
 ## Windows installation
 
@@ -38,6 +43,30 @@ avoids changing PowerShell execution policy. On subsequent launches, double-clic
 PySide6 is pinned to 6.10.1; pytest is pinned to 9.0.2. PySide6 wheels include Qt,
 so a separate Qt installation is unnecessary ([Qt installation guide](https://doc.qt.io/qtforpython-6/gettingstarted.html)).
 Transitive dependencies are resolved by pip and are not a complete platform lock.
+Milestone 3 adds no dependencies. When updating a previous installation, preserve
+your local changes; this archive is a complete source snapshot including Git
+history. It does not include a virtual environment or generated lab data.
+
+## Running the milestone 3 simulator
+
+From the project root, using the same virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m examples.simulator_demo
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+The example runs entirely in simulation, with CH1 at 10 A under 3 V compliance
+and CH2 at 2.2 V with a 20 A current limit. It prints measured outputs, switches
+CH1 off, shows that CH2 continues unchanged, then explicitly switches both off
+and disconnects. It does not create an experimental CSV or open a serial port.
+
+Use `SimulatorConfig` to set per-channel cell models, communication delay and
+optional seeded measurement noise. See [simulator behaviour and API](docs/simulator.md)
+for configuration, numerical resolution, crossover and lifecycle semantics.
+Backend calls are synchronous and belong on the future communication worker;
+do not invoke them from GUI handlers. The ordinary GUI remains an offline
+placeholder in this milestone.
 
 ## Running and diagnostics
 
@@ -78,7 +107,8 @@ dependency, not an additional Windows installation step
 
 | Operator task | Scheduled milestone | Status in this build |
 | --- | --- | --- |
-| Run Simulation Mode | 3-4 | Not implemented |
+| Use the Python simulator | 3 | Implemented and tested; console example available |
+| Connect Simulation Mode in the GUI | 4 | Not implemented |
 | Connect CPX400DP / choose COM port | 4-6 | Not implemented |
 | Manually control independent outputs | 7 | Not implemented |
 | Find experiment CSVs | 8 onward | No experiment data is generated |
@@ -115,9 +145,9 @@ owner and independent channel scheduling. The supplied manual is preserved in
 delivered files and [hardware acceptance procedure](tests/manual_hardware_test.md)
 for checks required after a driver exists.
 
-Only the offline skeleton can be checked in this delivery. Windows desktop,
+The offline skeleton and simulator backend are verified in this delivery. Windows desktop,
 USB driver and live hardware checks remain to be performed on the lab PC.
-Long-run reliability, CSV recovery and all future safety actions are not yet
+Long-run reliability, CSV recovery and the complete application safety system are not yet
 implemented or tested. The requested Windows path was not accessible from the
 Linux build workspace; extract the delivered archive there before running.
 
