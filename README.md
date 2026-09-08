@@ -107,6 +107,14 @@ Each milestone must run, pass its relevant tests, and be committed before the
 next milestone begins. See [milestone records](docs/milestones.md) and the
 [Windows visual smoke test](tests/manual_smoke_test.md).
 
+The [command reference](docs/cpx400dp_commands.md) records exact syntax,
+terminators, capabilities, status side effects and manual page references.
+The [architecture proposal](docs/architecture.md) explains the shared communication
+owner and independent channel scheduling. The supplied manual is preserved in
+`docs/reference/`. See the [complete project tree](docs/project_tree.md) for the
+delivered files and [hardware acceptance procedure](tests/manual_hardware_test.md)
+for checks required after a driver exists.
+
 Only the offline skeleton can be checked in this delivery. Windows desktop,
 USB driver and live hardware checks remain to be performed on the lab PC.
 Long-run reliability, CSV recovery and all future safety actions are not yet

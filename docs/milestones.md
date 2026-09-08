@@ -17,5 +17,17 @@ milestone 2 documentation is created.
 
 ## Milestone 2 - CPX400DP command documentation
 
-Pending documentation and verification. The supplied manual has been inspected
-before any instrument communication code is introduced.
+Verified on 2026-09-08 after the milestone 1 commit:
+
+- Inspected the supplied Issue 1 manual's specifications, remote interfaces,
+  command tables, status registers and operating limitations.
+- Rendered and visually inspected the power-envelope specification and command
+  tables; checked 22 selected command/page anchors programmatically.
+- Wrote the verified command reference and the proposed ownership/threading,
+  cancellation, data, safety and scheduling architecture.
+- Preserved the original manual byte-for-byte with its SHA-256 recorded.
+- Reran all 8 milestone 1 tests successfully and launched the application again
+  with exit code 0. Documentation relative-link and whitespace checks passed.
+
+See [verification details](verification/milestone2.md). This milestone changes
+documentation only. Development stops here; milestones 3-20 are not implemented.
