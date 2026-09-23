@@ -1,8 +1,10 @@
-# Milestone 3 simulator
+# Simulator backend and milestone 4 GUI connection
 
 The simulator is a Python backend for testing application behaviour without a
-CPX400DP. No serial port, GUI worker, protocol scheduler or experiment logger is
-implemented by this module. The console demo is run from the project root with:
+CPX400DP. Milestone 4 exposes its connection lifecycle in the GUI through one
+dedicated owner thread; the simulator module itself still contains no Qt or
+serial code. No protocol scheduler or experiment logger is implemented. The
+console demo is run from the project root with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m examples.simulator_demo
@@ -18,10 +20,10 @@ Instrument operations require a connection and raise `InstrumentNotConnectedErro
 if the session is closed, including attempts to read or turn an output off.
 
 Calls are synchronous and intentionally may wait for simulated communication
-latency. They belong to one communication-owner thread when integrated in
-milestones 4-6. The current simulator is not a thread-safe replacement for the
-shared queue, and it must not be called directly from GUI callbacks. No thread
-is started by constructing the simulator.
+latency. GUI Connect, Identify and Disconnect calls belong to the milestone 4
+`InstrumentConnectionWorker`. The simulator is not a thread-safe replacement
+for the future shared command queue, and it must not be called directly from GUI
+callbacks. Constructing the simulator itself starts no thread.
 
 ```python
 from cpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface

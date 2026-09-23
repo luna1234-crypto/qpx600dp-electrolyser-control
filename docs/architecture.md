@@ -2,11 +2,10 @@
 
 **Worker, GUI connection and test-engine design for future milestones.** Current
 code implements the entrypoints, main-window placeholders, diagnostic logging,
-`PowerSupplyInterface`, immutable capabilities and the configurable two-channel
-`SimulatedPowerSupply`. The backend has no Qt or serial dependency. Its synchronous
-API is exercised through tests and a console example; it is not connected to the
-GUI yet. See [simulator behaviour](simulator.md). The remaining design follows
-the [verified command reference](cpx400dp_commands.md).
+`PowerSupplyInterface`, immutable capabilities, the configurable two-channel
+`SimulatedPowerSupply`, and the milestone 4 asynchronous connection lifecycle.
+The backend has no Qt or serial dependency. See [simulator behaviour](simulator.md).
+The remaining design follows the [verified command reference](cpx400dp_commands.md).
 
 ## Ownership and data flow
 
@@ -25,9 +24,17 @@ flowchart TD
     CPX --> T["SerialTransport or future TCP transport"]
 ```
 
-In the planned connected application, the selected backend will be instantiated,
-connected, used and disconnected only by
-the communication worker. There is one worker and one instrument session per
+The milestone 4 `InstrumentConnectionWorker` already creates, connects, identifies
+and disconnects the simulator on one dedicated Python thread. Its bounded FIFO
+accepts lifecycle requests only; no setpoint, readback or output operation is
+exposed. The GUI receives immutable state through queued Qt signals. Connection
+or identification failure attempts cleanup, releases the backend reference and
+allows a new instance to be used on retry. Application shutdown sets a stop flag,
+wakes the worker and performs a bounded join; it never terminates a thread unsafely.
+
+In the planned connected application, the selected backend will continue to be
+instantiated, connected, used and disconnected only by the communication worker.
+There is one worker and one instrument session per
 physical unit, shared by both channel engines. The simulator uses the same queue
 and public interface. One writer per physical connection remains mandatory even
 when transport changes.
@@ -70,9 +77,11 @@ populated from the manual's evidence, not repeated numeric literals in widgets.
 Milestone 3 implements this in `instrument/capabilities.py`; the shared constant
 is immutable, while every simulator instance owns separate channel state and RNGs.
 
-Connection work in milestone 4 must already run off the GUI thread. Milestone 6
-will formalise and test the shared action queue before two-channel controls are
-introduced. No interim direct-serial GUI callbacks are acceptable.
+Connection work in milestone 4 runs off the GUI thread through the lifecycle
+worker. Milestone 6 will evolve that same single-owner boundary into the bounded
+priority action queue, adding request/generation metadata, command futures,
+cancellation and fairness before two-channel controls are introduced. It must not
+create a second backend-owning thread. No direct-serial GUI callbacks are acceptable.
 
 ## Transaction, cancellation and fairness rules
 

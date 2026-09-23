@@ -7,13 +7,14 @@ The virtual environment is created locally and is not distributed.
 
 ```text
 CPX 400 DP/
-    .git/  (Git history; three verified milestone commits in the archive)
+    .git/  (Git history; one stable commit per completed milestone)
     config/
         README.md
     cpx_electrolyser/
         app/
             __init__.py
             application.py
+            connection_controller.py
             logging_config.py
             paths.py
         data/
@@ -28,12 +29,14 @@ CPX 400 DP/
             test_setup/
                 __init__.py
             __init__.py
+            connection_panel.py
             main_window.py
         instrument/
             __init__.py
             _validation.py
             base_power_supply.py
             capabilities.py
+            connection_worker.py
             exceptions.py
             simulator.py
             simulator_config.py
@@ -51,6 +54,7 @@ CPX 400 DP/
             milestone1_window.png
             milestone2.md
             milestone3.md
+            milestone4.md
         architecture.md
         cpx400dp_commands.md
         milestones.md
@@ -67,6 +71,8 @@ CPX 400 DP/
         manual_smoke_test.md
         test_application.py
         test_capabilities.py
+        test_connection_gui.py
+        test_connection_worker.py
         test_logging_config.py
         test_simulator.py
     .gitattributes

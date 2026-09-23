@@ -1,4 +1,4 @@
-"""Compose and run the minimal Qt application; no instrument I/O exists yet."""
+"""Compose and run the Qt application with asynchronous simulation connection."""
 
 import argparse
 from collections.abc import Sequence
@@ -10,6 +10,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cpx_electrolyser import __version__
+from cpx_electrolyser.app.connection_controller import ConnectionController
 from cpx_electrolyser.app.logging_config import configure_logging
 from cpx_electrolyser.app.paths import default_paths
 from cpx_electrolyser.gui.main_window import MainWindow
@@ -17,7 +18,7 @@ from cpx_electrolyser.gui.main_window import MainWindow
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a normal window, or briefly exercise its event loop for validation."""
-    parser = argparse.ArgumentParser(description="CPX400DP milestone 1 desktop skeleton")
+    parser = argparse.ArgumentParser(description="CPX400DP milestone 4 simulation connection GUI")
     parser.add_argument("--log-dir", type=Path, help="Override the project's logs directory")
     parser.add_argument(
         "--smoke-test", action="store_true", help="Show the window, process events, then close"
@@ -46,6 +47,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logger = session.logger
     previous_exception_hook = sys.excepthook
     window: MainWindow | None = None
+    connection_controller: ConnectionController | None = None
 
     def handle_unhandled_exception(
         exception_type: type[BaseException],
@@ -65,8 +67,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     sys.excepthook = handle_unhandled_exception
     try:
-        logger.info("Application started: version=%s; instrument access unavailable", __version__)
-        window = MainWindow(log_file=session.file_path)
+        logger.info(
+            "Application started: version=%s; simulation connection available; physical access unavailable",
+            __version__,
+        )
+        connection_controller = ConnectionController()
+        window = MainWindow(
+            log_file=session.file_path,
+            connection_controller=connection_controller,
+        )
         window.show()
 
         if args.smoke_test:
@@ -94,5 +103,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.excepthook = previous_exception_hook
         if window is not None:
             window.close()
+        if connection_controller is not None:
+            connection_controller.shutdown(timeout_s=2.0)
         session.close()
-

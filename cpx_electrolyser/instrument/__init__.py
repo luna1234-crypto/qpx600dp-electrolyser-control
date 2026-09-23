@@ -1,1 +1,1 @@
-"""Backend interface, documented capabilities and simulator; no physical driver yet."""
+"""Backend interface, simulator and single-owner connection lifecycle worker."""

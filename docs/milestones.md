@@ -52,3 +52,23 @@ Disconnect preserves simulated output states; it is not an implicit OFF command.
 No GUI connection controls, physical driver, shared worker queue, experiment
 protocols or experimental data logger were introduced. Stop here after the
 milestone commit; milestones 4-20 are still pending.
+
+## Milestone 4 - Basic connection GUI
+
+Implemented a reusable connection panel and explicit connection-state snapshots.
+Simulation Connect, Identify and Disconnect execute on one dedicated backend-owner
+thread, not the Qt thread. A failed connection or identification attempts cleanup,
+discards the candidate and permits retry with a fresh backend. Application exit
+requests cleanup and uses a bounded thread join.
+
+Verified on 2026-09-23: **80 tests passed** (75 existing and 5 new). Tests cover
+failure cleanup/retry, single-thread backend ownership, bounded shutdown, button
+states, asynchronous GUI transitions and Qt event-loop responsiveness. Both
+disconnected and connected window states were visually inspected after offscreen
+rendering on macOS. See [verification details](verification/milestone4.md).
+
+The lifecycle worker is intentionally limited to connection operations. Milestone
+6 must evolve this same single-owner boundary into the full priority command worker,
+not create a second instrument owner. No serial dependency, COM-port enumeration,
+physical driver, output control or experimental operation was added. Native Windows
+and physical hardware validation remain outstanding.
