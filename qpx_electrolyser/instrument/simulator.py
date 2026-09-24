@@ -26,7 +26,7 @@ class _ChannelSettings:
 class SimulatedPowerSupply(PowerSupplyInterface):
     """Synchronous backend with no ports, Qt objects, worker threads or sample history.
 
-    Call from one owner thread, as required for the future physical backend.
+    Call from the one shared owner thread, as required for the physical backend.
     Latency is deliberate and must never be invoked from a GUI callback.
     Disconnect closes only the simulated link and preserves physical state.
     """

@@ -130,4 +130,31 @@ The GUI remains Simulation Mode only. Its automatic smoke test and manual
 Connect/Disconnect/Reconnect exercise passed on Windows. Output On, loaded
 voltage/current delivery, electrolyser operation, broader firmware variation
 and timeout selection remain pending supervised commissioning. Milestone 6 has
-not started.
+not started at that checkpoint.
+
+## Milestone 6 - Shared asynchronous instrument command queue
+
+Evolved the Milestone 4 lifecycle owner into one `InstrumentCommandWorker` that
+exclusively creates, connects, uses and disconnects the active backend. All
+operations share one priority queue and owner thread. Monotonic sequence numbers
+preserve FIFO order within each priority, while explicit safety, connection,
+normal and background levels provide a tested path for future urgent commands.
+
+Command tickets expose thread-safe completion, exception and pre-dispatch
+cancellation state without making GUI callbacks wait. Optional cancellation keys
+support future channel/run invalidation. Disconnect cancels queued ordinary work
+and runs after an atomic in-flight operation; shutdown stops new submissions,
+cancels queued work, disconnects the backend on its owner thread and performs a
+bounded join. Results and errors cross back to the Qt main thread through queued
+signals.
+
+Simulation and fake-backend tests cover FIFO and priority order, atomic execution,
+concurrent submissions from two logical channels, exception isolation, bounded
+capacity, disconnect, targeted cancellation, duplicate-connect prevention,
+post-shutdown rejection and clean thread termination. The complete suite, source
+compilation, dependency check and Windows Simulation Mode smoke test passed:
+**172 tests passed**. See [verification details](verification/milestone6.md).
+
+The GUI remains Simulation Mode only. This milestone adds no channel controls,
+protocols, data logging, plotting, Emergency Off GUI, Output On path or real
+serial integration. No COM port or physical instrument was accessed.

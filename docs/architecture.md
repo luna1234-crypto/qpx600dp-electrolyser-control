@@ -1,11 +1,12 @@
 # Proposed application and communication architecture
 
-**Worker, GUI connection and test-engine design for future milestones.** Current
+**Worker, GUI connection and test-engine design.** Current
 code implements the entrypoints, main-window placeholders, diagnostic logging,
 `PowerSupplyInterface`, immutable capabilities, the configurable two-channel
 `SimulatedPowerSupply`, the milestone 4 asynchronous simulation lifecycle,
-and the Milestone 5 `SerialTransport` / `QPX600DPDriver`. The physical backend
-has no Qt dependency and is not yet connected to the GUI or owner worker.
+the Milestone 5 `SerialTransport` / `QPX600DPDriver`, and the Milestone 6 shared
+priority command worker. The physical backend has no Qt dependency and is not
+yet connected to the GUI worker.
 See [simulator behaviour](simulator.md).
 The remaining design follows the [QPX600DP command reference](qpx600dp_commands.md).
 
@@ -26,16 +27,18 @@ flowchart TD
     QPX --> T["SerialTransport or future TCP transport"]
 ```
 
-The milestone 4 `InstrumentConnectionWorker` already creates, connects, identifies
-and disconnects the simulator on one dedicated Python thread. Its bounded FIFO
-accepts lifecycle requests only; no setpoint, readback or output operation is
-exposed. The GUI receives immutable state through queued Qt signals. Connection
-or identification failure attempts cleanup, releases the backend reference and
-allows a new instance to be used on retry. Application shutdown sets a stop flag,
-wakes the worker and performs a bounded join; it never terminates a thread unsafely.
+The Milestone 6 `InstrumentCommandWorker` evolves the milestone 4 lifecycle
+owner in place. It creates, connects, identifies, uses and disconnects the
+simulator on one dedicated Python thread. Its bounded submission API uses a
+priority queue with FIFO sequence numbers, command tickets and optional
+cancellation keys. The GUI receives immutable state and command outcomes through
+queued Qt signals. Connection or identification failure attempts cleanup,
+releases the backend reference and permits retry with a fresh instance.
+Application shutdown cancels queued work, wakes the worker and performs a bounded
+join; it never terminates a thread unsafely.
 
-In the planned connected application, the selected backend will continue to be
-instantiated, connected, used and disconnected only by the communication worker.
+The selected backend is instantiated, connected, used and disconnected only by
+the communication worker.
 There is one worker and one instrument session per
 physical unit, shared by both channel engines. The simulator uses the same queue
 and public interface. One writer per physical connection remains mandatory even
@@ -55,8 +58,8 @@ when transport changes.
 
 ## Threads and scheduling
 
-Use one Python communication thread with `queue.PriorityQueue`, plus one
-interruptible engine thread per channel. The Qt GUI stays on the main thread;
+Milestone 6 uses one Python communication thread with `queue.PriorityQueue`.
+Future protocol milestones add one interruptible engine thread per channel. The Qt GUI stays on the main thread;
 typed Qt signals deliver immutable snapshots back to its slots. Signal delivery
 must be queued across threads. Do not call a widget from any worker or wait for
 I/O in a GUI callback.
@@ -79,11 +82,11 @@ populated from the manual's evidence, not repeated numeric literals in widgets.
 Milestone 3 implements this in `instrument/capabilities.py`; the shared constant
 is immutable, while every simulator instance owns separate channel state and RNGs.
 
-Connection work in milestone 4 runs off the GUI thread through the lifecycle
-worker. Milestone 6 will evolve that same single-owner boundary into the bounded
-priority action queue, adding request/generation metadata, command futures,
-cancellation and fairness before two-channel controls are introduced. It must not
-create a second backend-owning thread. No direct-serial GUI callbacks are acceptable.
+All connection and command work runs off the GUI thread through the same worker.
+Milestone 6 adds request IDs, FIFO sequence metadata, command futures, explicit
+priorities and cancellation keys before two-channel controls are introduced.
+Session/run generations and cross-channel telemetry fairness remain engine-level
+work for later milestones. No direct-serial GUI callbacks are acceptable.
 
 ## Transaction, cancellation and fairness rules
 
@@ -210,9 +213,9 @@ Milestones 1-4 remain historical checkpoints created under the original CPX400DP
 assumption. The post-Milestone-4 model correction retargeted current code and
 documentation to QPX600DP without rewriting those commits. Milestone 5 adds an
 offline-tested physical driver and explicit-port transport but deliberately does
-not connect them to the GUI. Milestone 6 must integrate this backend into the
-existing single-owner boundary rather than add a second worker. The shared command
-queue and protocols remain later work.
+not connect them to the GUI. Milestone 6 integrates a shared priority command
+queue into the existing single-owner boundary without adding a second backend
+owner. Protocols remain later work.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Later data tests must cover unwritable files, interruption and bounded memory.

@@ -1,4 +1,4 @@
-"""Compose the GUI; Milestone 5 keeps physical transport outside the GUI."""
+"""Compose the GUI; Milestone 6 keeps physical transport outside the GUI."""
 
 import argparse
 from collections.abc import Sequence
@@ -18,7 +18,7 @@ from qpx_electrolyser.gui.main_window import MainWindow
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a normal window, or briefly exercise its event loop for validation."""
-    parser = argparse.ArgumentParser(description="QPX600DP milestone 5 offline-driver build")
+    parser = argparse.ArgumentParser(description="QPX600DP milestone 6 shared-worker build")
     parser.add_argument("--log-dir", type=Path, help="Override the project's logs directory")
     parser.add_argument(
         "--smoke-test", action="store_true", help="Show the window, process events, then close"
@@ -68,7 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sys.excepthook = handle_unhandled_exception
     try:
         logger.info(
-            "Application started: version=%s; simulation GUI available; physical driver is offline-only",
+            "Application started: version=%s; shared simulation worker available; physical GUI disabled",
             __version__,
         )
         connection_controller = ConnectionController()

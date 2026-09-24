@@ -2,16 +2,16 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.5.0 preserves those historical records and adds the
-Milestone 5 QPX600DP serial transport and physical backend, verified with fake
-serial ports and a partial supervised Windows hardware check.
+assumption. Version 0.6.0 preserves those historical records, the Milestone 5
+QPX600DP serial backend and partial Windows validation, and adds the Milestone 6
+shared asynchronous instrument command queue.
 
-The GUI still connects only to `SimulatedPowerSupply`. `SerialTransport` and
-`QPX600DPDriver` exist as offline-tested backend components but are not exposed
-by the GUI. There is no COM-port discovery, command-worker integration,
-setpoint/output GUI or experiment protocol. Physical validation is limited to
-identification, read-only queries and unloaded voltage-setpoint read-back with
-both outputs OFF.
+The GUI still connects only to `SimulatedPowerSupply`, now through one shared
+backend-owner worker used by both future channels. `SerialTransport` and
+`QPX600DPDriver` remain outside the GUI. There is no COM-port discovery,
+setpoint/output GUI or experiment protocol. Physical validation remains limited
+to identification, read-only queries and unloaded voltage-setpoint read-back
+with both outputs OFF.
 
 ## Windows installation
 
@@ -55,14 +55,32 @@ SIMULATOR,QPX600DP,SIMULATED
 Disconnect closes only the simulated communication session and does not imply
 that an output is off. Failed connection/identification cleans up and permits a
 fresh retry. Physical mode remains disabled. Application shutdown requests
-cleanup and performs a bounded join on the single backend-owner thread; that
-same ownership boundary is reserved for a future command worker.
+cleanup and performs a bounded join on the single backend-owner thread. Every
+backend operation is serialized there; GUI callbacks submit work without waiting
+for simulator latency.
 
 The console demonstration also uses Simulation Mode only:
 
 ```powershell
 .\.venv\Scripts\python.exe -m examples.simulator_demo
 ```
+
+## Milestone 6 shared command worker
+
+One `InstrumentCommandWorker` exclusively creates, connects, uses and disconnects
+the active backend. Its bounded submission API assigns a monotonic request ID and
+FIFO sequence to every command. Equal-priority commands remain FIFO; explicit
+`SAFETY`, `CONNECTION`, `NORMAL` and `BACKGROUND` priorities allow future safety
+work to move ahead of waiting routine work without interrupting an operation
+already in flight.
+
+Each submitted callable is one atomic backend operation. Results and exceptions
+are stored in thread-safe command tickets and relayed to the Qt main thread with
+queued signals. Pending work can be cancelled globally or by logical-channel key;
+an in-flight call finishes atomically. Disconnect cancels waiting ordinary work,
+then closes the backend on the owner thread. Shutdown stops acceptance, cancels
+queued work, disconnects once and performs a bounded join. This milestone adds no
+channel controls, Output On path, protocol engine or physical GUI integration.
 
 ## Milestone 5 offline physical backend
 
@@ -165,8 +183,9 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent simulation backend | Preserved; QPX ranges/envelope corrected |
 | Simulation connection GUI | Preserved from Milestone 4 |
 | Explicit-port `SerialTransport` and QPX600DP backend | Implemented; fake serial plus partial Windows validation |
+| Shared priority instrument command worker | Implemented for Simulation Mode; FIFO, priority, cancellation and shutdown tested |
 | COM-port enumeration | Not implemented and not performed |
-| Physical backend in GUI/single-owner command worker | Not implemented |
+| Physical backend in GUI | Not implemented |
 | Output/setpoint GUI controls | Not implemented |
 | Experiment protocols, CSV data and plots | Not implemented |
 | Complete configurable safety system | Not implemented |
@@ -191,5 +210,5 @@ The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption; the model-correction and Milestone 5 commits record the
-current QPX600DP basis. No remote repository is configured.
+CPX400DP assumption; the model-correction and Milestones 5-6 commits record the
+current QPX600DP basis.

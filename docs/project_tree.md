@@ -66,6 +66,7 @@ QPX 600 DP/
             milestone3.md
             milestone4.md
             milestone5.md
+            milestone6.md
             model_correction_qpx600dp.md
         architecture.md
         qpx600dp_commands.md

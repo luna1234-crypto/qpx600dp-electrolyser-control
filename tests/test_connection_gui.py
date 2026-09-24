@@ -3,6 +3,7 @@
 from collections.abc import Callable, Iterator
 import os
 from pathlib import Path
+from threading import current_thread, main_thread
 import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -111,5 +112,50 @@ def test_controller_reports_failure_cleans_backend_and_allows_retry(
         assert controller.snapshot.instrument_id is not None
         controller.request_disconnect()
         wait_until(qapp, lambda: controller.snapshot.state is ConnectionState.DISCONNECTED)
+    finally:
+        assert controller.shutdown(timeout_s=1.0)
+
+
+def test_command_results_and_errors_return_to_qt_without_blocking_gui(
+    qapp: QApplication,
+) -> None:
+    controller = ConnectionController(
+        lambda: SimulatedPowerSupply(SimulatorConfig(communication_delay_s=0.05))
+    )
+    completed: list[tuple[int, str, object, bool]] = []
+    failed: list[tuple[int, str, object, bool]] = []
+    controller.command_completed.connect(
+        lambda request_id, name, result: completed.append(
+            (request_id, name, result, current_thread() is main_thread())
+        )
+    )
+    controller.command_failed.connect(
+        lambda request_id, name, error: failed.append(
+            (request_id, name, error, current_thread() is main_thread())
+        )
+    )
+
+    def injected_failure(_supply: PowerSupplyInterface) -> object:
+        raise RuntimeError("injected queued failure")
+
+    try:
+        controller.request_connect()
+        wait_until(qapp, lambda: controller.snapshot.state is ConnectionState.CONNECTED)
+
+        before = time.monotonic()
+        ticket = controller.submit_command("identify", lambda supply: supply.identify())
+        assert ticket is not None
+        assert time.monotonic() - before < 0.05
+        wait_until(qapp, lambda: bool(completed))
+        assert completed == [
+            (ticket.request_id, "identify", ticket.result(timeout=0), True)
+        ]
+
+        failed_ticket = controller.submit_command("fails", injected_failure)
+        assert failed_ticket is not None
+        wait_until(qapp, lambda: bool(failed))
+        assert failed[0][0:2] == (failed_ticket.request_id, "fails")
+        assert isinstance(failed[0][2], RuntimeError)
+        assert failed[0][3]
     finally:
         assert controller.shutdown(timeout_s=1.0)

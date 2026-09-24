@@ -1,4 +1,4 @@
-"""Compose the simulation connection GUI and channel placeholders."""
+"""Compose the shared-worker simulation GUI and channel placeholders."""
 
 from pathlib import Path
 
@@ -73,8 +73,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(panels, 1)
 
         notice = QLabel(
-            "The GUI connects only to the simulator. The Milestone 5 physical driver is "
-            "offline-tested and not exposed here; this window cannot control outputs."
+            "The GUI connects only to the simulator through the Milestone 6 shared command "
+            "worker. The physical driver is not exposed here; this window cannot control outputs."
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)
@@ -98,7 +98,7 @@ class MainWindow(QMainWindow):
             self,
             "About QPX600DP Electrolyser",
             f"QPX600DP Electrolyser {__version__}\n\n"
-            "Milestone 5 offline-driver build with Simulation Mode GUI.\n\n"
+            "Milestone 6 shared-command-worker build with Simulation Mode GUI.\n\n"
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
             "The physical driver is not connected to this GUI; output and experiment controls "
             "remain unavailable.",

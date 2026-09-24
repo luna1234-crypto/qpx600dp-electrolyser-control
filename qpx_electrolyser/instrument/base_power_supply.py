@@ -1,4 +1,4 @@
-"""Synchronous backend contract, ready for one communication-owner thread."""
+"""Synchronous backend contract owned by one communication-worker thread."""
 
 from abc import ABC, abstractmethod
 
@@ -8,8 +8,8 @@ from qpx_electrolyser.instrument.capabilities import InstrumentCapabilities
 class PowerSupplyInterface(ABC):
     """No Qt, protocol, filesystem or transport details cross this interface.
 
-    Calls may block for I/O: the future communication worker must own the
-    instance and serialize every call. Do not call backends from GUI handlers.
+    Calls may block for I/O: the shared communication worker owns the instance
+    and serializes every call. Do not call backends from GUI handlers.
     A disconnected session rejects all instrument operations except lifecycle
     calls and local capability/connection inspection. Setters never enable output.
     """
