@@ -1,5 +1,9 @@
 # Milestone 4 verification
 
+> Historical record: this checkpoint and its GUI evidence used the original
+> CPX400DP identity. The later model correction is recorded separately in
+> `model_correction_qpx600dp.md`.
+
 Date: 2026-09-23. Version: 0.4.0. Starting checkpoint: `4238b2a` (milestone 3).
 Environment: macOS, CPython 3.12.14, PySide6 / Qt 6.10.1, pytest 9.0.2.
 No Windows desktop or physical CPX400DP was used.

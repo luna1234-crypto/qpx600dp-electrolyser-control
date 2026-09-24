@@ -1,148 +1,133 @@
-# Simulator backend and milestone 4 GUI connection
+# QPX600DP simulation backend
 
-The simulator is a Python backend for testing application behaviour without a
-CPX400DP. Milestone 4 exposes its connection lifecycle in the GUI through one
-dedicated owner thread; the simulator module itself still contains no Qt or
-serial code. No protocol scheduler or experiment logger is implemented. The
-console demo is run from the project root with:
+`SimulatedPowerSupply` is a deterministic, synchronous, two-channel backend for
+development without hardware. It does not open ports or emit QPX ASCII commands.
+Milestone 4 uses only its connect, identify and disconnect lifecycle through the
+single backend-owner thread.
 
-```powershell
-.\.venv\Scripts\python.exe -m examples.simulator_demo
+The simulator identifies as:
+
+```text
+SIMULATOR,QPX600DP,SIMULATED,<application version>
 ```
 
-## Public contract
+This is intentionally a simulation identity, not a byte-for-byte emulation of
+physical `*IDN?` output.
 
-`instrument/base_power_supply.py` defines `PowerSupplyInterface`. The simulator
-implements every abstract operation, including explicit programmed-setpoint
-readback and output enable-state readback. All units are V, A and s; channel
-identifiers are integers 1 and 2. Capabilities are accessible while disconnected.
-Instrument operations require a connection and raise `InstrumentNotConnectedError`
-if the session is closed, including attempts to read or turn an output off.
-
-Calls are synchronous and intentionally may wait for simulated communication
-latency. GUI Connect, Identify and Disconnect calls belong to the milestone 4
-`InstrumentConnectionWorker`. The simulator is not a thread-safe replacement
-for the future shared command queue, and it must not be called directly from GUI
-callbacks. Constructing the simulator itself starts no thread.
+## Example
 
 ```python
-from cpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
-from cpx_electrolyser.instrument.simulator import SimulatedPowerSupply
-from cpx_electrolyser.instrument.simulator_config import SimulatorConfig
+from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
+from qpx_electrolyser.instrument.simulator import SimulatedPowerSupply
+from qpx_electrolyser.instrument.simulator_config import SimulatorConfig
 
 supply: PowerSupplyInterface = SimulatedPowerSupply(
     SimulatorConfig(communication_delay_s=0.01, random_seed=123)
 )
 supply.connect()
 try:
-    supply.set_voltage(1, 3.0)     # Compliance, V
-    supply.set_current(1, 10.0)    # Requested current, A
+    supply.set_voltage(1, 3.0)
+    supply.set_current(1, 10.0)
     supply.output_on(1)
     print(supply.read_voltage(1), supply.read_current(1))
 finally:
-    try:
-        supply.output_off(1)
-    finally:
-        supply.disconnect()
+    supply.output_off(1)
+    supply.disconnect()
 ```
 
-This example creates a fresh simulator and uses only CH1. The two-channel demo
-attempts both OFF calls independently before disconnecting.
+Calls are synchronous and intentionally may delay. GUI code must route them
+through the backend-owner thread rather than call them from a Qt callback.
 
-## Load and crossover
+## Hardware capabilities
 
-Each output has its own immutable `ElectrolyserModel`, initially:
+`QPX600DP_CAPABILITIES` records the Issue 14 hardware facts:
 
-| Parameter | Default |
-| --- | --- |
-| `onset_voltage_v` | 1.5 V |
-| `resistance_ohm` | 0.1 ohm |
-| `logarithmic_coefficient_v` | 0.1 V |
+- two channels;
+- selectable 60 V / 1 mV and 80 V / 2 mV voltage ranges;
+- current setting range 0.01-50 A in 10 mA steps;
+- current readback resolution 10 mA;
+- up to 600 W per output, subject to the PowerFlex envelope;
+- standard USB virtual COM, RS232, LAN and analogue interfaces, with optional
+  GPIB.
 
-For positive current, the toy load curve is:
+The high-range simulated voltage readback uses 2 mV conservatively. Issue 14
+printed p. 3 lists a generic 1 mV voltage-meter resolution, while printed p. 11
+says both set and actual values are 2 mV in the 80 V range. This ambiguity is
+recorded rather than hidden.
 
-`Vcell = V0 + R * I + a * ln(1 + I / 1 A)`
+`SimulatorConfig.channel_voltage_ranges` selects `"60 V"` or `"80 V"` for each
+simulated channel. Both default to `"60 V"` as a simulator configuration choice,
+not as an experimental safety limit. There is no runtime range-changing API or
+GUI control in this checkpoint.
 
-If the voltage required to support the current limit fits under the voltage
-setpoint, the simulated output operates in CC: current equals its limit and
-voltage follows the load curve. Otherwise, it operates in CV: voltage equals
-its setpoint and current is found by a bounded 64-iteration bisection of the
-monotonic load curve. The current cannot exceed the programmed current limit.
+## Conservative power envelope
 
-Below the model's onset voltage, a nonzero enabled voltage can be present with
-zero current. An output that is disabled reads exactly zero V and A. With an
-enabled zero voltage setpoint or zero current limit, ideal V/I are also zero;
-enabled-output measurement noise may still affect readback. The zero-current
-convention is a simulation simplification, not a CPX400DP specification.
+Issue 14 printed p. 13 explicitly states two guaranteed points:
 
-The load is instantaneous, without capacitance, electrochemical transients,
-open-circuit back EMF, temperature dependence, ageing or fitted scientific
-meaning. V/I are separate read operations, not simultaneous ADC samples.
+- 10 V / 50 A;
+- 80 V / 7.5 A.
 
-## Configuration
+It also says lower output voltages are limited by the 50 A maximum. The manual
+shows the region between the anchors as a graph but provides no complete equation.
+The implementation therefore uses this deliberately restrictive piecewise model:
 
-`SimulatorConfig` is a frozen dataclass; its channel-model tuple and each model
-are immutable. Create a new simulator to change its model or noise settings.
+| Actual simulated voltage | Maximum simulated current |
+| --- | ---: |
+| 0-10 V inclusive | 50 A |
+| Above 10 V through 80 V | 7.5 A |
 
-| Field | Default / allowed values |
-| --- | --- |
-| `channel_models` | Exactly two `ElectrolyserModel` instances in a tuple |
-| `communication_delay_s` | 0.01 s; range 0-5 s per valid instrument operation |
-| `voltage_noise_sd_v` | 0 V; range 0-60 V |
-| `current_noise_sd_a` | 0 A; range 0-20 A |
-| `random_seed` | 0; integer for reproducibility, or None for a fresh seed |
-| `max_modelled_power_w` | 400 W; positive and at most 400 W |
+The 600 W ceiling is also enforced. No line, curve fit or `600 / V` formula is
+invented. Consequently, the simulator may reject points that a physical unit can
+regulate between 10 V and 80 V. `UnsupportedOperatingPointError` reports that
+limitation and the rejected change does not mutate channel state.
 
-Delay/noise ranges are simulation configuration guards, not measured instrument
-characteristics. Tests set delay to zero or inject a delay callback, so they
-exercise latency accounting without actually sleeping. Health/capability lookups,
-repeated connect/disconnect no-ops and rejected arguments do not incur delay.
+## User safety limits are separate
 
-Noise is Gaussian and applied after solving the electrical operating point.
-Readbacks are floored at zero and quantised to 10 mV / 10 mA using Python's
-nearest rounding. Noise may place a reading above its ideal limit; it never
-changes the load, setpoints or output state. Disabled outputs report zero without
-noise. Separate RNGs for each channel and measured quantity ensure that polling
-one channel cannot alter the other's noise sequence. No measurement history is
-retained, and module-level random state is not used.
+Hardware capability is not experiment safety policy. Optional
+`UserSafetyLimits(max_voltage_v, max_current_a, max_power_w)` can impose lower
+setpoint and operating-power limits. `SimulatorConfig.user_safety_limits` is
+`None` by default: no future experiment may interpret that as permission to use
+the hardware maxima. Persistent operator configuration and safe experiment
+defaults have not been implemented.
 
-## Capabilities and rejection semantics
+When limits are provided:
 
-`instrument/capabilities.py` contains immutable `CPX400DP_CAPABILITIES`, with
-60 V, 20 A and a 420 W hardware envelope per channel. Remote programming uses
-10 mV voltage and 1 mA current increments; readback conservatively uses the
-documented 10 mV / 10 mA meter resolution. The 4 Hz meter cadence is not emulated
-and is not promised as a remote sampling specification. Sources remain in the
-[command reference](cpx400dp_commands.md).
+- voltage and current setpoints above them are rejected before delay or mutation;
+- actual simulated voltage/current/power is checked before output enable or a
+  live setting change;
+- the hardware envelope remains independently enforced.
 
-Channel IDs, finite numbers, range and programming increments are validated.
-Booleans and numeric strings are not numbers for this API. Unsupported steps
-raise `InstrumentValueError`; no warning-free rounding or unsafe setpoint clamping
-is performed. Only a few floating-point ULPs of representation error are
-normalised, so `0.1 + 0.2` is accepted on the voltage grid.
+## Load and CC/CV behaviour
 
-The real supply can become unregulated outside its power envelope. This
-simulator does not pretend to model that regime or a perfect constant-power
-controller: it rejects a candidate active operating point above its conservative
-400 W model limit with `UnsupportedOperatingPointError`. The output state and
-previous settings remain unchanged. OFF always remains allowed while connected.
+Each channel has its own immutable `ElectrolyserModel`:
 
-The model checks actual ideal load power, not the product of compliance and
-current limit. Independent in-range V/I settings can be stored while OFF even
-if their product exceeds 400 W; enabling them must pass the operating-point
-check. Full-protocol validation, user safety limits, trip registers, OCP/OVP,
-communication-loss recovery and emergency cancellation are still later work.
-This backend is not evidence that those safety mechanisms have been implemented.
+```text
+V(I) = V0 + R*I + a*ln(1 + I / 1 A)
+```
 
-## Connection lifecycle
+This is a toy monotonic load, not fitted scientific data. At output enable:
 
-A newly constructed simulator is disconnected with both outputs OFF and both
-setpoints zero. First connect makes the session available. Repeated connect
-does not reset an active output. Disconnect closes the simulated communications
-link while preserving setpoints, output latches and RNG state. Reconnecting
-therefore reveals the same output state; it does not silently restart or stop it.
+- at or below onset voltage, applied voltage is shown with zero current;
+- when the configured current is reachable, the channel operates in simulated CC;
+- otherwise a bounded 64-iteration inverse finds the CV crossover;
+- the actual point must pass both the conservative hardware envelope and any
+  explicit user safety limits.
 
-This deliberately exercises the manual's absence of a documented watchdog.
-The session cannot be used to confirm output state while disconnected. The
-future controller must explicitly command and confirm both outputs OFF before
-normal shared shutdown. A link close is never a substitute for that sequence.
+Outputs start disabled with zero internal setpoints. The QPX programming API
+rejects a requested current below 0.01 A; the internal zero is only the simulator's
+unprogrammed initial state. Setting voltage/current never enables an output.
+
+## Resolution, noise and lifecycle
+
+Measurements are independently quantised per channel. Optional Gaussian noise
+is generated from separate voltage/current random streams, so polling one channel
+does not consume another channel's sequence. A seed provides reproducibility.
+
+`disconnect()` closes the simulated session but preserves settings and output
+latches, mirroring the safety rule that communications loss is not evidence of
+OFF. All instrument operations except local capability inspection, connect,
+disconnect and `is_connected` reject a disconnected session.
+
+The backend owns no Qt objects or worker thread. Its state is constant-size and
+does not retain sample history. Experiment logging, plotting, protocol scheduling,
+physical transport and long-run stress acceptance remain out of scope.

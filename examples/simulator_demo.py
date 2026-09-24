@@ -1,7 +1,7 @@
 """Run with python -m examples.simulator_demo from the project root."""
 
-from cpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
-from cpx_electrolyser.instrument.simulator import SimulatedPowerSupply
+from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
+from qpx_electrolyser.instrument.simulator import SimulatedPowerSupply
 
 
 def show_measurements(supply: PowerSupplyInterface, channel: int) -> None:

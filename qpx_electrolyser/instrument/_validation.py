@@ -3,7 +3,7 @@
 import math
 from numbers import Real
 
-from cpx_electrolyser.instrument.exceptions import InstrumentValueError
+from qpx_electrolyser.instrument.exceptions import InstrumentValueError
 
 
 def finite_number(value: float, name: str) -> float:
@@ -19,11 +19,18 @@ def finite_number(value: float, name: str) -> float:
     return number
 
 
-def programming_value(value: float, name: str, maximum: float, resolution: float) -> float:
+def programming_value(
+    value: float,
+    name: str,
+    maximum: float,
+    resolution: float,
+    *,
+    minimum: float = 0.0,
+) -> float:
     """Reject unsupported increments; tolerate only floating-point representation error."""
     number = finite_number(value, name)
-    if not 0.0 <= number <= maximum:
-        raise InstrumentValueError(f"{name} must be between 0 and {maximum:g}.")
+    if not minimum <= number <= maximum:
+        raise InstrumentValueError(f"{name} must be between {minimum:g} and {maximum:g}.")
     ticks = round(number / resolution)
     canonical = ticks * resolution
     tolerance = 4 * max(math.ulp(number), math.ulp(canonical))

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cpx_electrolyser.app.logging_config import configure_logging
+from qpx_electrolyser.app.logging_config import configure_logging
 
 
 def test_unicode_logging_is_flushed_and_appended(tmp_path: Path) -> None:
@@ -62,5 +62,4 @@ def test_file_in_place_of_directory_fails_cleanly(tmp_path: Path) -> None:
     with pytest.raises(OSError):
         configure_logging(blocked)
     assert blocked.read_text(encoding="utf-8") == "preserve this file"
-    assert not logging.getLogger("cpx_electrolyser").handlers
-
+    assert not logging.getLogger("qpx_electrolyser").handlers

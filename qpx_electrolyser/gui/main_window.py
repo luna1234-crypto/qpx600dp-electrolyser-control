@@ -14,9 +14,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from cpx_electrolyser import __version__
-from cpx_electrolyser.app.connection_controller import ConnectionController, ConnectionSnapshot
-from cpx_electrolyser.gui.connection_panel import ConnectionPanel
+from qpx_electrolyser import __version__
+from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionSnapshot
+from qpx_electrolyser.gui.connection_panel import ConnectionPanel
 
 
 def _channel_placeholder(channel: int) -> QGroupBox:
@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
     def __init__(self, log_file: Path, connection_controller: ConnectionController) -> None:
         super().__init__()
         self._connection_controller = connection_controller
-        self.setWindowTitle("CPX400DP Electrolyser - Simulation connection")
+        self.setWindowTitle("QPX600DP Electrolyser - Simulation connection")
         self.resize(1040, 650)
         self.setMinimumSize(760, 540)
 
@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(18)
 
-        title = QLabel("AIM-TTi CPX400DP | Electrolyser testing")
+        title = QLabel("Aim-TTi QPX600DP | Electrolyser testing")
         title_font = title.font()
         title_font.setPointSize(16)
         title_font.setBold(True)
@@ -96,10 +96,10 @@ class MainWindow(QMainWindow):
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
-            "About CPX400DP Electrolyser",
-            f"CPX400DP Electrolyser {__version__}\n\n"
+            "About QPX600DP Electrolyser",
+            f"QPX600DP Electrolyser {__version__}\n\n"
             "Milestone 4 simulation connection GUI.\n\n"
-            "The CPX400DP is a programmable DC power supply, not a potentiostat.\n"
+            "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
             "This build has no physical driver or output/experiment controls.",
         )
 

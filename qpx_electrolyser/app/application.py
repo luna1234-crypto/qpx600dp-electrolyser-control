@@ -9,16 +9,16 @@ from types import TracebackType
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from cpx_electrolyser import __version__
-from cpx_electrolyser.app.connection_controller import ConnectionController
-from cpx_electrolyser.app.logging_config import configure_logging
-from cpx_electrolyser.app.paths import default_paths
-from cpx_electrolyser.gui.main_window import MainWindow
+from qpx_electrolyser import __version__
+from qpx_electrolyser.app.connection_controller import ConnectionController
+from qpx_electrolyser.app.logging_config import configure_logging
+from qpx_electrolyser.app.paths import default_paths
+from qpx_electrolyser.gui.main_window import MainWindow
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a normal window, or briefly exercise its event loop for validation."""
-    parser = argparse.ArgumentParser(description="CPX400DP milestone 4 simulation connection GUI")
+    parser = argparse.ArgumentParser(description="QPX600DP milestone 4 simulation connection GUI")
     parser.add_argument("--log-dir", type=Path, help="Override the project's logs directory")
     parser.add_argument(
         "--smoke-test", action="store_true", help="Show the window, process events, then close"
@@ -31,9 +31,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--screenshot requires --smoke-test")
 
     app = QApplication([sys.argv[0]])
-    app.setApplicationName("CPX400DP Electrolyser")
+    app.setApplicationName("QPX600DP Electrolyser")
     app.setApplicationVersion(__version__)
-    app.setOrganizationName("CPX400DP Lab")
+    app.setOrganizationName("QPX600DP Lab")
 
     try:
         session = configure_logging(args.log_dir or default_paths().log_directory)

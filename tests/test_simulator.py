@@ -5,14 +5,18 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from cpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
-from cpx_electrolyser.instrument.exceptions import (
+from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
+from qpx_electrolyser.instrument.exceptions import (
     InstrumentNotConnectedError,
     InstrumentValueError,
     UnsupportedOperatingPointError,
 )
-from cpx_electrolyser.instrument.simulator import SimulatedPowerSupply
-from cpx_electrolyser.instrument.simulator_config import ElectrolyserModel, SimulatorConfig
+from qpx_electrolyser.instrument.simulator import SimulatedPowerSupply
+from qpx_electrolyser.instrument.simulator_config import (
+    ElectrolyserModel,
+    SimulatorConfig,
+    UserSafetyLimits,
+)
 
 
 @pytest.fixture
@@ -46,7 +50,7 @@ def test_interface_is_abstract_and_simulator_identifies_itself(supply: PowerSupp
         PowerSupplyInterface()  # type: ignore[abstract]
     assert isinstance(supply, PowerSupplyInterface)
     manufacturer, model, serial, version = supply.identify().split(",")
-    assert (manufacturer, model, serial) == ("SIMULATOR", "CPX400DP", "SIMULATED")
+    assert (manufacturer, model, serial) == ("SIMULATOR", "QPX600DP", "SIMULATED")
     assert version
 
 
@@ -70,14 +74,14 @@ def test_setpoints_do_not_energise_output_or_pretend_to_be_measurements(
 ) -> None:
     assert snapshot(supply, channel) == (0, 0, False, 0, 0)
     supply.set_voltage(channel, 3.0)
-    supply.set_current(channel, 0.123)
-    assert snapshot(supply, channel) == pytest.approx((3.0, 0.123, False, 0.0, 0.0))
+    supply.set_current(channel, 0.12)
+    assert snapshot(supply, channel) == pytest.approx((3.0, 0.12, False, 0.0, 0.0))
     supply.output_on(channel)
-    assert supply.read_set_current(channel) == pytest.approx(0.123)
+    assert supply.read_set_current(channel) == pytest.approx(0.12)
     assert supply.read_current(channel) == pytest.approx(0.12)  # 10 mA meter resolution
     assert supply.read_voltage(channel) < supply.read_set_voltage(channel)
     supply.output_off(channel)
-    assert snapshot(supply, channel) == pytest.approx((3.0, 0.123, False, 0.0, 0.0))
+    assert snapshot(supply, channel) == pytest.approx((3.0, 0.12, False, 0.0, 0.0))
 
 
 @pytest.mark.parametrize("current_channel,other_channel", [(1, 2), (2, 1)])
@@ -129,9 +133,10 @@ def test_cv_and_cc_crossover_with_known_linear_load() -> None:
         assert (backend.read_voltage(1), backend.read_current(1)) == (1.0, 0.0)
         backend.set_voltage(1, 0.0)
         assert (backend.read_voltage(1), backend.read_current(1)) == (0.0, 0.0)
-        backend.set_voltage(1, 3.0)
-        backend.set_current(1, 0.0)
-        assert (backend.read_voltage(1), backend.read_current(1)) == (0.0, 0.0)
+        before = snapshot(backend, 1)
+        with pytest.raises(InstrumentValueError, match="between"):
+            backend.set_current(1, 0.0)
+        assert snapshot(backend, 1) == before
     finally:
         backend.output_off(1)
         backend.disconnect()
@@ -170,8 +175,8 @@ def test_invalid_channel_never_aliases_a_real_channel(supply: PowerSupplyInterfa
 
 
 @pytest.mark.parametrize("quantity,value", [
-    ("voltage", -0.01), ("voltage", 60.01), ("voltage", 2.001),
-    ("current", -0.001), ("current", 20.001), ("current", 1.0001),
+    ("voltage", -0.001), ("voltage", 60.001), ("voltage", 2.0001),
+    ("current", 0), ("current", 50.01), ("current", 1.001),
     ("voltage", float("nan")), ("voltage", float("inf")),
     ("current", float("-inf")), ("current", True),
     ("voltage", "2.0"), ("current", None),
@@ -198,16 +203,109 @@ def test_unsupported_power_fails_without_applying_on_or_setpoint() -> None:
         with pytest.raises(UnsupportedOperatingPointError, match="not applied"):
             backend.output_on(1)  # Ideal model would demand 1200 W.
         assert not backend.read_output_state(1)
-        backend.set_current(1, 10)  # 30 V * 10 A = 300 W.
+        backend.set_current(1, 7)  # 21 V * 7 A is inside the conservative segment.
         backend.output_on(1)
         before = snapshot(backend, 1)
         with pytest.raises(UnsupportedOperatingPointError):
-            backend.set_current(1, 12)  # 36 V * 12 A = 432 W.
+            backend.set_current(1, 8)  # 24 V * 8 A is above the conservative 7.5 A segment.
         assert snapshot(backend, 1) == before
         assert not backend.read_output_state(2)
     finally:
         backend.output_off(1)
         backend.disconnect()
+
+
+def test_documented_power_envelope_anchor_points_are_supported() -> None:
+    low_range_model = ElectrolyserModel(
+        onset_voltage_v=0, resistance_ohm=0.2, logarithmic_coefficient_v=0
+    )
+    high_range_model = ElectrolyserModel(
+        onset_voltage_v=5, resistance_ohm=10, logarithmic_coefficient_v=0
+    )
+    backend = SimulatedPowerSupply(SimulatorConfig(
+        channel_models=(low_range_model, high_range_model),
+        channel_voltage_ranges=("60 V", "80 V"),
+        communication_delay_s=0,
+    ))
+    backend.connect()
+    try:
+        backend.set_voltage(1, 10)
+        backend.set_current(1, 50)
+        backend.output_on(1)
+        assert (backend.read_voltage(1), backend.read_current(1)) == (10, 50)
+
+        backend.set_voltage(2, 80)
+        backend.set_current(2, 7.5)
+        backend.output_on(2)
+        assert (backend.read_voltage(2), backend.read_current(2)) == (80, 7.5)
+    finally:
+        backend.output_off(1)
+        backend.output_off(2)
+        backend.disconnect()
+
+
+def test_voltage_range_controls_programming_and_measurement_resolution() -> None:
+    model = ElectrolyserModel(
+        onset_voltage_v=0.003, resistance_ohm=0.2, logarithmic_coefficient_v=0
+    )
+    backend = SimulatedPowerSupply(SimulatorConfig(
+        channel_models=(model, model),
+        channel_voltage_ranges=("60 V", "80 V"),
+        communication_delay_s=0,
+    ))
+    backend.connect()
+    try:
+        with pytest.raises(InstrumentValueError):
+            backend.set_voltage(1, 60.001)
+        with pytest.raises(InstrumentValueError, match="increments"):
+            backend.set_voltage(2, 79.999)
+        for channel in (1, 2):
+            backend.set_voltage(channel, 5)
+            backend.set_current(channel, 10)
+            backend.output_on(channel)
+        assert backend.read_voltage(1) == pytest.approx(2.003)
+        high_range_readback = backend.read_voltage(2)
+        assert high_range_readback / 0.002 == pytest.approx(round(high_range_readback / 0.002))
+    finally:
+        backend.output_off(1)
+        backend.output_off(2)
+        backend.disconnect()
+
+
+def test_user_safety_limits_are_explicit_and_separate_from_hardware() -> None:
+    assert SimulatorConfig().user_safety_limits is None
+    limits = UserSafetyLimits(max_voltage_v=5, max_current_a=5, max_power_w=10)
+    backend = SimulatedPowerSupply(SimulatorConfig(
+        user_safety_limits=limits, communication_delay_s=0
+    ))
+    backend.connect()
+    try:
+        with pytest.raises(UnsupportedOperatingPointError, match="Voltage setpoint"):
+            backend.set_voltage(1, 5.001)
+        backend.set_voltage(1, 5)
+        with pytest.raises(UnsupportedOperatingPointError, match="Current setpoint"):
+            backend.set_current(1, 5.01)
+        backend.set_current(1, 5)
+        with pytest.raises(UnsupportedOperatingPointError, match="user safety"):
+            backend.output_on(1)
+        assert not backend.read_output_state(1)
+        backend.set_current(1, 4)
+        backend.output_on(1)
+        assert backend.read_output_state(1)
+    finally:
+        backend.output_off(1)
+        backend.disconnect()
+
+
+@pytest.mark.parametrize("limits", [
+    {"max_voltage_v": 0, "max_current_a": 1, "max_power_w": 1},
+    {"max_voltage_v": 81, "max_current_a": 1, "max_power_w": 1},
+    {"max_voltage_v": 1, "max_current_a": 51, "max_power_w": 1},
+    {"max_voltage_v": 1, "max_current_a": 1, "max_power_w": 601},
+])
+def test_invalid_user_safety_limits_are_rejected(limits: dict[str, float]) -> None:
+    with pytest.raises(InstrumentValueError):
+        UserSafetyLimits(**limits)
 
 
 def test_connection_lifecycle_does_not_hide_energised_outputs(supply: PowerSupplyInterface) -> None:
@@ -242,7 +340,7 @@ def test_latency_is_applied_once_per_command_without_sleeping_in_tests() -> None
     backend.read_set_current(1)
     backend.read_output_state(1)
     with pytest.raises(InstrumentValueError):
-        backend.set_voltage(1, 2.001)  # Rejected before simulated I/O.
+        backend.set_voltage(1, 2.0001)  # Rejected before simulated I/O.
     backend.output_off(1)
     backend.disconnect()
     backend.disconnect()  # Local no-op.
@@ -269,7 +367,7 @@ def test_noise_is_reproducible_and_independent_of_sibling_reads() -> None:
             samples.append(actual)
         assert len(set(samples)) > 1
         for voltage_v, current_a in samples:
-            assert voltage_v / 0.01 == pytest.approx(round(voltage_v / 0.01))
+            assert voltage_v / 0.001 == pytest.approx(round(voltage_v / 0.001))
             assert current_a / 0.01 == pytest.approx(round(current_a / 0.01))
         baseline.output_off(1)
         assert baseline.read_voltage(1) == 0 and baseline.read_current(1) == 0
@@ -284,7 +382,8 @@ def test_noise_is_reproducible_and_independent_of_sibling_reads() -> None:
 @pytest.mark.parametrize("settings", [
     {"communication_delay_s": -1}, {"communication_delay_s": 6},
     {"voltage_noise_sd_v": float("nan")}, {"current_noise_sd_a": -0.01},
-    {"max_modelled_power_w": 0}, {"max_modelled_power_w": 420},
+    {"channel_voltage_ranges": ("60 V", "invalid")},
+    {"channel_voltage_ranges": ("60 V",)}, {"user_safety_limits": object()},
     {"random_seed": True}, {"channel_models": ()},
 ])
 def test_invalid_simulation_configuration_is_rejected(settings: dict[str, object]) -> None:

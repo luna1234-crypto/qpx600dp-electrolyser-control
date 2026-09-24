@@ -7,14 +7,14 @@ import sys
 
 import pytest
 
-from cpx_electrolyser.app.paths import default_paths
+from qpx_electrolyser.app.paths import default_paths
 
 
 @pytest.mark.parametrize("entrypoint", ["script", "module"])
 def test_application_launches_processes_events_and_exits(tmp_path: Path, entrypoint: str) -> None:
     root = default_paths().project_root
     log_dir = tmp_path / "logs with spaces"
-    arguments = [str(root / "main.py")] if entrypoint == "script" else ["-m", "cpx_electrolyser"]
+    arguments = [str(root / "main.py")] if entrypoint == "script" else ["-m", "qpx_electrolyser"]
     process = subprocess.run(
         [sys.executable, *arguments, "--smoke-test", "--log-dir", str(log_dir)],
         cwd=tmp_path if entrypoint == "script" else root,
@@ -55,4 +55,3 @@ def test_default_paths_do_not_follow_working_directory(tmp_path: Path, monkeypat
     paths = default_paths()
     assert paths.project_root == expected_root
     assert paths.log_directory == expected_root / "logs"
-

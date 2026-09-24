@@ -5,7 +5,7 @@ code implements the entrypoints, main-window placeholders, diagnostic logging,
 `PowerSupplyInterface`, immutable capabilities, the configurable two-channel
 `SimulatedPowerSupply`, and the milestone 4 asynchronous connection lifecycle.
 The backend has no Qt or serial dependency. See [simulator behaviour](simulator.md).
-The remaining design follows the [verified command reference](cpx400dp_commands.md).
+The remaining design follows the [QPX600DP command reference](qpx600dp_commands.md).
 
 ## Ownership and data flow
 
@@ -20,8 +20,8 @@ flowchart TD
     Q --> W["Single communication worker"]
     W --> API["PowerSupplyInterface"]
     API --> SIM["SimulatedPowerSupply"]
-    API --> CPX["CPX400DP driver"]
-    CPX --> T["SerialTransport or future TCP transport"]
+    API --> QPX["Future QPX600DP driver"]
+    QPX --> T["SerialTransport or future TCP transport"]
 ```
 
 The milestone 4 `InstrumentConnectionWorker` already creates, connects, identifies
@@ -44,7 +44,7 @@ when transport changes.
 | MainWindow / reusable ChannelPanel | Compose widgets, collect validated requests, show states and measurements | No serial I/O, protocol loops or waiting on futures |
 | InstrumentController | Submit typed actions, own session/channel generations, coordinate cancellation and faults | No direct transport access from calling threads |
 | InstrumentCommandWorker | Execute bounded actions, maintain query/reply pairing, return results/errors | No protocol dwell, plotting or disk logging |
-| CPX400DP | Validate channels, encode verified commands, parse values/units/status, expose capabilities | No GUI or experiment scheduling |
+| Future QPX600DP driver | Validate channels/ranges, encode verified commands, parse values/units/status, expose capabilities | No GUI or experiment scheduling; not implemented in the model correction |
 | SerialTransport | Open/close, ASCII framing, bounded read/write, terminators and transport errors | No knowledge of CC, CV, CSV or cell area |
 | ChannelEngine, one per channel | Own state transitions, protocol time, local logger and measured results | No shared-port access |
 | TestProtocol implementations | Generate planned steps and averaging rules | No GUI, serial handles or wall-clock sleeps |
@@ -170,14 +170,22 @@ and A/cm2 fields internally. Convert `I = j * area` at the boundary, reject
 non-finite values, and validate every step before arming. Scheduling and final
 polarisation-window averaging must be testable with a fake monotonic clock.
 
+Keep immutable hardware capabilities separate from user-configured safety limits.
+`QPX600DP_CAPABILITIES` records 80 V, 50 A and 600 W ratings; none is an
+experiment default. `UserSafetyLimits` is a separate optional simulation object,
+and future persistent configuration must require explicit operator values rather
+than copying the hardware maxima.
+
 Apply basic capability/output safeguards before the first real manual control;
 milestone 16 completes the safety system, rather than postponing every safeguard
 until then. Validate voltage/current, their programming grids and worst-case
-setpoint/compliance power. The 420 W figure is a power-envelope bound, not a
-60 V by 20 A rectangle. A proposed initial software power budget of at most
-400 W per channel is conservative pending envelope commissioning; it is a
-software policy, not a replacement hardware rating. Keep user limits lower as
-required for each experiment. Recheck measured power and trip events while running.
+setpoint/compliance power. Issue 14 states guaranteed points of 10 V / 50 A and
+80 V / 7.5 A but gives no complete equation for the graph. The current simulator
+therefore uses a documented conservative segment: at most 50 A through 10 V and
+at most 7.5 A above 10 V through 80 V, plus the 600 W ceiling. It deliberately
+does not interpolate or assume `600 / V` and may reject usable physical points.
+Keep user limits lower as required for each experiment. Recheck measured power
+and trip events while running.
 
 Each channel writes rows continuously through its own engine/logger. Reserve
 unique files using exclusive creation and sanitised Windows-safe names, including
@@ -196,10 +204,10 @@ completed step and use only the measured final averaging window.
 
 ## Milestone boundaries and acceptance
 
-Milestone 1: launch and verify the offline foundation. Milestone 2: record verified
-commands and this architecture. Milestone 3: implement and test the abstraction,
-capabilities and simulator; rerun the existing application checks and stop.
-The connected GUI, physical driver, shared queue and protocols remain later work.
+Milestones 1-4 remain historical checkpoints created under the original CPX400DP
+assumption. The post-Milestone-4 model correction retargets their current code and
+active documentation to QPX600DP without rewriting those commits. The physical
+driver, shared command queue and protocols remain later work.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Later data tests must cover unwritable files, interruption and bounded memory.

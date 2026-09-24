@@ -1,179 +1,158 @@
-# CPX400DP Electrolyser
+# QPX600DP Electrolyser
 
-Python 3.12 / PySide6 desktop project for an AIM-TTi CPX400DP dual-output supply.
-**This delivery completes milestones 1-4. It includes a responsive simulation
-connection GUI and a tested Python simulator backend, not yet a physical
-instrument-control application ready for laboratory use.**
+Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
+power supply. Milestones 1-4 were originally completed under a CPX400DP model
+assumption. Version 0.4.1 is a bounded model-correction checkpoint: it preserves
+their application, logging, simulator and connection-thread behaviour while
+correcting current product identity, documented capabilities and simulation
+boundaries. Historical verification records remain historical and are marked as
+superseded where appropriate.
 
-The window can connect to, identify and disconnect a simulator through one
-dedicated backend-owner thread while Qt remains responsive. It also shows two
-equal channel placeholders and writes diagnostic logs. No serial port is opened
-and no output command is available. Output states are explicitly unknown.
-
-Milestone 3 added `PowerSupplyInterface`, immutable `InstrumentCapabilities`,
-and `SimulatedPowerSupply`. Milestone 4 connects that simulator to the GUI for
-lifecycle operations only. It does not expose setpoints, measurements or output
-switching.
+This is not yet a physical instrument-control application. The GUI connects to,
+identifies and disconnects only `SimulatedPowerSupply`, using one dedicated
+backend-owner thread. It has no serial transport, COM-port discovery, physical
+driver, setpoint/output GUI controls or experiment protocols. Output state is
+explicitly unknown outside the simulator.
 
 ## Windows installation
 
-Extract the contents of the project archive directly into:
+Extract the project into a QPX600DP working directory, for example:
 
 ```text
-C:\Users\mo113\OneDrive - Imperial College London\Codex project\CPX 400 DP
+C:\Users\mo113\OneDrive - Imperial College London\Codex project\QPX 600 DP
 ```
 
-`main.py`, `README.md` and `cpx_electrolyser/` should sit directly inside that
-folder. The project root is determined from the source files, so spaces in the
-Windows folder name and launching from another directory are supported.
-
-Install 64-bit CPython 3.12 with the Python launcher, then run in PowerShell:
+`main.py`, `README.md` and `qpx_electrolyser/` must sit directly in that folder.
+Install 64-bit CPython 3.12, then run in PowerShell:
 
 ```powershell
-Set-Location -LiteralPath 'C:\Users\mo113\OneDrive - Imperial College London\Codex project\CPX 400 DP'
+Set-Location -LiteralPath 'C:\Users\mo113\OneDrive - Imperial College London\Codex project\QPX 600 DP'
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe main.py
 ```
 
-Activation is unnecessary: calling the virtual environment's Python directly
-avoids changing PowerShell execution policy. On subsequent launches, double-click
-`Start_App.cmd`. Runtime-only installation may use `requirements.txt` instead;
-`requirements-dev.txt` also installs pytest.
-
-PySide6 is pinned to 6.10.1; pytest is pinned to 9.0.2. PySide6 wheels include Qt,
-so a separate Qt installation is unnecessary ([Qt installation guide](https://doc.qt.io/qtforpython-6/gettingstarted.html)).
-Transitive dependencies are resolved by pip and are not a complete platform lock.
-Milestone 4 adds no dependencies. When updating a previous installation, preserve
-your local changes; this archive is a complete source snapshot including Git
-history. It does not include a virtual environment or generated lab data.
+Activation is unnecessary. Later launches may use `Start_App.cmd`. Runtime-only
+installation may use `requirements.txt`; `requirements-dev.txt` adds pytest.
+PySide6 is pinned to 6.10.1 and pytest to 9.0.2.
 
 ## Running in Simulation Mode
 
-Start the GUI with `Start_App.cmd` or:
+Both supported entrypoints are equivalent:
 
 ```powershell
 .\.venv\Scripts\python.exe main.py
+.\.venv\Scripts\python.exe -m qpx_electrolyser
 ```
 
-`Simulation Mode (no hardware I/O)` is selected by default. Click **Connect**;
-the status changes asynchronously and the identification should begin with
-`SIMULATOR,CPX400DP,SIMULATED`. Click **Disconnect** to close the simulated
-session. Connection failure discards the failed backend and permits a fresh
-retry. Unchecking Simulation Mode disables Connect because physical CPX400DP
-support is deliberately deferred to milestone 5.
+`Simulation Mode (no hardware I/O)` is selected by default. After Connect, the
+identification begins:
 
-Disconnect closes communication only; it is not evidence that a physical output
-is off. This milestone provides no control capable of enabling an output.
+```text
+SIMULATOR,QPX600DP,SIMULATED
+```
 
-The existing console demonstration remains available from the project root:
+Disconnect closes only the simulated communication session and does not imply
+that an output is off. Failed connection/identification cleans up and permits a
+fresh retry. Physical mode remains disabled. Application shutdown requests
+cleanup and performs a bounded join on the single backend-owner thread; that
+same ownership boundary is reserved for a future command worker.
 
-From the project root, using the same virtual environment:
+The console demonstration also uses Simulation Mode only:
 
 ```powershell
 .\.venv\Scripts\python.exe -m examples.simulator_demo
-.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The example runs entirely in simulation, with CH1 at 10 A under 3 V compliance
-and CH2 at 2.2 V with a 20 A current limit. It prints measured outputs, switches
-CH1 off, shows that CH2 continues unchanged, then explicitly switches both off
-and disconnects. It does not create an experimental CSV or open a serial port.
+## Hardware capability versus safety policy
 
-Use `SimulatorConfig` to set per-channel cell models, communication delay and
-optional seeded measurement noise. See [simulator behaviour and API](docs/simulator.md)
-for configuration, numerical resolution, crossover and lifecycle semantics.
-Backend calls are synchronous. The GUI routes only lifecycle requests through
-the milestone 4 single-owner worker and receives immutable state through Qt
-signals; it never invokes the simulator from a GUI callback. Milestone 6 will
-extend this ownership boundary into the complete instrument command worker.
+The QPX600DP hardware has two voltage ranges per output (60 V and 80 V), a
+50 A current rating and up to 600 W per output. Those values are hardware
+capabilities, not safe defaults for an electrolyser experiment.
 
-## Running and diagnostics
+`QPX600DP_CAPABILITIES` contains immutable manual-derived hardware facts.
+`UserSafetyLimits` is a separate optional simulator configuration object. It is
+`None` by default because this checkpoint has no user safety configuration or
+experiment controls; future work must obtain explicit limits rather than copy
+80 V, 50 A or 600 W into experiment defaults.
 
-From the project root, `python main.py` and `python -m cpx_electrolyser` are
-equivalent. Logs are appended to `logs/application_YYYYMMDD.log`; the date is
-the launch date. Each file rotates at 5 MiB with five retained segments. Logs
-include local timestamps with UTC offsets, thread names and detailed exceptions.
-They are diagnostic records, not experimental CSVs. Run one application instance
-per project directory to avoid concurrent processes rotating the same log file.
+Issue 14 gives two guaranteed power-envelope points, 10 V / 50 A and
+80 V / 7.5 A, but no complete mathematical expression for the graph. The
+simulator deliberately avoids interpolation:
 
-An unwritable log directory prevents startup with a concise message. To choose
-another directory, run `python main.py --log-dir <directory>`. Neither this option
-nor the window geometry is persisted yet.
+- through 10 V, it permits at most 50 A;
+- above 10 V through 80 V, it conservatively permits at most 7.5 A;
+- it always enforces the 600 W hardware ceiling.
 
-Automated launch check (opens briefly and exits):
+This may reject real operating points between the documented anchors. It must
+not be interpreted as an exact reconstruction of the instrument curve. See the
+[simulator documentation](docs/simulator.md) and
+[QPX command/capability reference](docs/qpx600dp_commands.md).
+
+## Diagnostics and checks
+
+Logs append to `logs/application_YYYYMMDD.log`, rotate at 5 MiB and retain five
+older segments. They are diagnostic logs, not experimental data. Use
+`--log-dir <directory>` to override the location.
+
+Automated GUI launch check:
 
 ```powershell
 .\.venv\Scripts\python.exe main.py --smoke-test
+.\.venv\Scripts\python.exe -m qpx_electrolyser --smoke-test
 ```
 
-For Linux headless verification only:
+Tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+For headless non-Windows validation only:
 
 ```bash
 QT_QPA_PLATFORM=offscreen python main.py --smoke-test
+QT_QPA_PLATFORM=offscreen python -m qpx_electrolyser --smoke-test
 python -m pytest -q
 ```
 
-No Qt platform override is applied to normal Windows launches. The test suite
-sets `offscreen` for its own subprocesses. An optional `--screenshot path.png`
-argument with `--smoke-test` records the actual Qt window.
+No Qt platform override is applied to ordinary Windows launches. An optional
+`--screenshot path.png` argument is accepted only with `--smoke-test`.
 
-Minimal Ubuntu containers may also need the system `libegl1` package before Qt
-Widgets can import, even with offscreen rendering. This is a Linux validation
-dependency, not an additional Windows installation step
-([Ubuntu package reference](https://packages.ubuntu.com/noble/libegl1)).
+## Current scope and deferred work
 
-## Features scheduled for later milestones
+| Area | Status |
+| --- | --- |
+| Application skeleton, paths and diagnostic logging | Preserved from Milestone 1 |
+| Backend contract and documented architecture | Preserved; QPX facts corrected |
+| Independent simulation backend | Preserved; QPX ranges/envelope corrected |
+| Simulation connection GUI | Preserved from Milestone 4 |
+| Physical QPX600DP connection and transport | Not implemented |
+| COM-port enumeration | Not implemented and not performed |
+| Output/setpoint GUI controls | Not implemented |
+| Experiment protocols, CSV data and plots | Not implemented |
+| Complete configurable safety system | Not implemented |
+| Windows and real-hardware validation | Not performed |
 
-| Operator task | Scheduled milestone | Status in this build |
-| --- | --- | --- |
-| Use the Python simulator | 3 | Implemented and tested; console example available |
-| Connect Simulation Mode in the GUI | 4 | Implemented and tested |
-| Connect CPX400DP / choose COM port | 5 | Not implemented; no COM controls are shown |
-| Manually control independent outputs | 7 | Not implemented |
-| Find experiment CSVs | 8 onward | No experiment data is generated |
-| Start CC / simultaneous tests | 9 | Not implemented |
-| View live time plots | 10 | Not implemented |
-| Run CV / voltage sweep / current sweep | 11-13 | Not implemented |
-| Run a polarisation curve | 14 | Not implemented |
-| Edit custom sequences | 15 | Not implemented |
-| Emergency all-off and complete fault handling | 16 | No software stop control exists yet |
-| Restore settings / refine UI | 17-18 | Not implemented |
-| Build Windows executable | 19 | Deferred; no executable is included |
-| Final regression and accelerated stress tests | 20 | Deferred |
+The QPX600DP is a programmable DC power supply, not a potentiostat. Any later
+voltage sweep would apply discrete two-terminal voltage steps and would not
+control potential against a reference electrode.
 
-The CPX400DP is a programmable power supply, **not a potentiostat**. A later
-"Voltage Sweep / Staircase LSV" feature will apply discrete voltage steps across
-the two-terminal cell; it will not control potential against a reference electrode.
+## Documentation and history
 
-The planned stack retains pyserial for serial transport, pyqtgraph for plotting,
-the standard-library CSV/JSON modules for data, pytest for tests, and PyInstaller
-for packaging. Unused plotting, communication and packaging dependencies will be
-added and pinned when their milestones are implemented.
+- [QPX600DP capability and command reference](docs/qpx600dp_commands.md)
+- [Architecture](docs/architecture.md)
+- [Simulator behaviour](docs/simulator.md)
+- [Project tree](docs/project_tree.md)
+- [Historical milestone records](docs/milestones.md)
+- [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
+- [Deferred hardware acceptance outline](tests/manual_hardware_test.md)
 
-## Development and verification
+The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
+`docs/reference/`. The prior CPX manual is retained only under
+`docs/reference/superseded/`; it must not be used for QPX implementation.
 
-Each milestone must run, pass its relevant tests, and be committed before the
-next milestone begins. See [milestone records](docs/milestones.md) and the
-[Windows visual smoke test](tests/manual_smoke_test.md).
-
-The [command reference](docs/cpx400dp_commands.md) records exact syntax,
-terminators, capabilities, status side effects and manual page references.
-The [architecture proposal](docs/architecture.md) explains the shared communication
-owner and independent channel scheduling. The supplied manual is preserved in
-`docs/reference/`. See the [complete project tree](docs/project_tree.md) for the
-delivered files and [hardware acceptance procedure](tests/manual_hardware_test.md)
-for checks required after a driver exists.
-
-The application skeleton, simulator backend and asynchronous simulation connection
-GUI are verified in this delivery. Windows desktop, USB driver and live hardware
-checks remain to be performed on the lab PC.
-Long-run reliability, CSV recovery and the complete application safety system are not yet
-implemented or tested. The requested Windows lab path was not exercised during
-this macOS milestone; copy the committed project there before Windows validation.
-
-Git history is maintained in separate stable milestone commits. The archive
-includes the repository's `.git/` directory. With Git installed, run
-`git log --oneline` from the extracted project root to inspect the milestones;
-Git is not required to run the application. No remote repository is configured.
+Git history is left intact. Milestone 1-4 commits continue to show the original
+CPX400DP assumption, and the ordinary model-correction commit records when that
+assumption was replaced. No remote repository is configured.

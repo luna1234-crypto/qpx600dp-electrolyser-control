@@ -1,5 +1,8 @@
 # Milestone 1 verification
 
+> Historical record: this checkpoint used the original CPX400DP assumption.
+> It has not been rewritten as QPX validation; see `model_correction_qpx600dp.md`.
+
 Date: 2026-09-08. Target: source-based Windows application skeleton.
 Execution environment: Linux x86-64, CPython 3.12.13, PySide6 / Qt 6.10.1,
 pytest 9.0.2. No Windows desktop or physical CPX400DP was available.

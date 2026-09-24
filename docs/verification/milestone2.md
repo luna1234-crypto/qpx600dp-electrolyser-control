@@ -1,5 +1,9 @@
 # Milestone 2 verification
 
+> Superseded model reference: this accurately records the CPX400DP material used
+> at the time. It is not authority for QPX600DP implementation; see
+> `model_correction_qpx600dp.md`.
+
 Date: 2026-09-08. Scope: manual-derived command reference and architecture design.
 Prerequisite: milestone 1 committed as `1f9031f` after successful verification.
 

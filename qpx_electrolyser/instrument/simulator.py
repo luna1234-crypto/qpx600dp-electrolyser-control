@@ -6,14 +6,14 @@ import logging
 import random
 import time
 
-from cpx_electrolyser import __version__
-from cpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
-from cpx_electrolyser.instrument.capabilities import CPX400DP_CAPABILITIES, InstrumentCapabilities
-from cpx_electrolyser.instrument.exceptions import (
+from qpx_electrolyser import __version__
+from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
+from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES, InstrumentCapabilities
+from qpx_electrolyser.instrument.exceptions import (
     InstrumentNotConnectedError,
     UnsupportedOperatingPointError,
 )
-from cpx_electrolyser.instrument.simulator_config import ElectrolyserModel, SimulatorConfig
+from qpx_electrolyser.instrument.simulator_config import ElectrolyserModel, SimulatorConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,11 +46,11 @@ class SimulatedPowerSupply(PowerSupplyInterface):
         # (or polling current more often) cannot consume its voltage-noise sequence.
         self._voltage_rng = [random.Random(seed_source.getrandbits(128)) for _ in self._channels]
         self._current_rng = [random.Random(seed_source.getrandbits(128)) for _ in self._channels]
-        self._logger = logging.getLogger("cpx_electrolyser.instrument.simulator")
+        self._logger = logging.getLogger("qpx_electrolyser.instrument.simulator")
 
     @property
     def capabilities(self) -> InstrumentCapabilities:
-        return CPX400DP_CAPABILITIES
+        return QPX600DP_CAPABILITIES
 
     @property
     def config(self) -> SimulatorConfig:
@@ -74,11 +74,13 @@ class SimulatedPowerSupply(PowerSupplyInterface):
     def identify(self) -> str:
         self._require_connection()
         self._wait()
-        return f"SIMULATOR,CPX400DP,SIMULATED,{__version__}"
+        return f"SIMULATOR,QPX600DP,SIMULATED,{__version__}"
 
     def set_voltage(self, channel: int, voltage_v: float) -> None:
         index = self._channel_index(channel)
-        value = self.capabilities.validate_voltage(voltage_v)
+        value = self.capabilities.validate_voltage(
+            voltage_v, self._config.channel_voltage_ranges[index]
+        )
         self._apply(index, replace(self._channels[index], voltage_v=value))
         self._logger.debug("Simulator CH%d voltage set to %g V", channel, value)
 
@@ -120,7 +122,10 @@ class SimulatedPowerSupply(PowerSupplyInterface):
             return 0.0
         return self._readback(
             voltage_v, self._config.voltage_noise_sd_v,
-            self.capabilities.measurement_voltage_resolution_v, self._voltage_rng[index],
+            self.capabilities.voltage_range(
+                self._config.channel_voltage_ranges[index]
+            ).measurement_resolution_v,
+            self._voltage_rng[index],
         )
 
     def read_current(self, channel: int) -> float:
@@ -136,6 +141,7 @@ class SimulatedPowerSupply(PowerSupplyInterface):
     def _apply(self, index: int, candidate: _ChannelSettings) -> None:
         # Validate before latency and mutation. Rejected settings/ON requests leave
         # both outputs unchanged; an OFF request is always model-compatible.
+        self._validate_user_setpoints(candidate)
         self._operating_point(candidate, self._config.channel_models[index])
         self._wait()
         self._channels[index] = candidate
@@ -165,12 +171,36 @@ class SimulatedPowerSupply(PowerSupplyInterface):
                     high = middle
             voltage_v, current_a = settings.voltage_v, low  # CV
 
-        if voltage_v * current_a > self._config.max_modelled_power_w:
+        if not self.capabilities.power_envelope.contains(voltage_v, current_a):
             raise UnsupportedOperatingPointError(
-                f"Simulated operating point exceeds {self._config.max_modelled_power_w:g} W. "
-                "Power-envelope/UNREG behaviour is not modelled; the change was not applied."
+                "Simulated operating point is outside the conservative QPX600DP hardware "
+                "power envelope. The undocumented part of the Issue 14 curve is not "
+                "interpolated; the change was not applied."
+            )
+        limits = self._config.user_safety_limits
+        if limits is not None and (
+            voltage_v > limits.max_voltage_v
+            or current_a > limits.max_current_a
+            or voltage_v * current_a > limits.max_power_w
+        ):
+            raise UnsupportedOperatingPointError(
+                "Simulated operating point exceeds the configured user safety limits; "
+                "the change was not applied."
             )
         return voltage_v, current_a
+
+    def _validate_user_setpoints(self, settings: _ChannelSettings) -> None:
+        limits = self._config.user_safety_limits
+        if limits is None:
+            return
+        if settings.voltage_v > limits.max_voltage_v:
+            raise UnsupportedOperatingPointError(
+                f"Voltage setpoint exceeds the configured {limits.max_voltage_v:g} V safety limit."
+            )
+        if settings.current_a > limits.max_current_a:
+            raise UnsupportedOperatingPointError(
+                f"Current setpoint exceeds the configured {limits.max_current_a:g} A safety limit."
+            )
 
     @staticmethod
     def _readback(value: float, noise_sd: float, resolution: float, rng: random.Random) -> float:

@@ -1,16 +1,18 @@
 # Delivered project tree
 
-Extract the archive contents into the requested `CPX 400 DP` directory.
-The `cpx_electrolyser/` subdirectory is the importable Python package.
+Extract the corrected archive contents into a `QPX 600 DP` directory.
+The current macOS checkout may retain its legacy outer `CPX400DP_Project(1)`
+container name, but no tracked runtime code depends on it.
+The `qpx_electrolyser/` subdirectory is the importable Python package.
 Packages containing only `__init__.py` are reserved boundaries for later work.
 The virtual environment is created locally and is not distributed.
 
 ```text
-CPX 400 DP/
+QPX 600 DP/
     .git/  (Git history; one stable commit per completed milestone)
     config/
         README.md
-    cpx_electrolyser/
+    qpx_electrolyser/
         app/
             __init__.py
             application.py
@@ -48,15 +50,21 @@ CPX 400 DP/
         .gitkeep
     docs/
         reference/
-            cpx400dp_manual_issue1.pdf
+            README.md
+            qpx600_addendum_48511-1461_issue1.pdf
+            qpx600d_dp_instruction_manual_48511-1460_issue14.pdf
+            superseded/
+                README.md
+                cpx400dp_manual_issue1.pdf
         verification/
             milestone1.md
             milestone1_window.png
             milestone2.md
             milestone3.md
             milestone4.md
+            model_correction_qpx600dp.md
         architecture.md
-        cpx400dp_commands.md
+        qpx600dp_commands.md
         milestones.md
         project_tree.md
         simulator.md

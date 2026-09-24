@@ -12,7 +12,7 @@ import logging
 from queue import Full, Queue
 from threading import Event, Thread
 
-from cpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
+from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
 
 
 class _LifecycleCommand(Enum):
@@ -49,7 +49,7 @@ class InstrumentConnectionWorker:
         self._stop_requested = Event()
         self._stopped = Event()
         self._backend: PowerSupplyInterface | None = None
-        self._logger = logging.getLogger("cpx_electrolyser.instrument.connection_worker")
+        self._logger = logging.getLogger("qpx_electrolyser.instrument.connection_worker")
         self._thread = Thread(
             target=self._run,
             name="InstrumentConnectionWorker",

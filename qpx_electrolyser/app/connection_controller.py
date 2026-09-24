@@ -7,9 +7,9 @@ import logging
 
 from PySide6.QtCore import QObject, Qt, Signal, Slot
 
-from cpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
-from cpx_electrolyser.instrument.connection_worker import InstrumentConnectionWorker
-from cpx_electrolyser.instrument.simulator import SimulatedPowerSupply
+from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
+from qpx_electrolyser.instrument.connection_worker import InstrumentConnectionWorker
+from qpx_electrolyser.instrument.simulator import SimulatedPowerSupply
 
 
 class ConnectionState(str, Enum):
@@ -48,7 +48,7 @@ class ConnectionController(QObject):
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self._logger = logging.getLogger("cpx_electrolyser.app.connection_controller")
+        self._logger = logging.getLogger("qpx_electrolyser.app.connection_controller")
         self._snapshot = ConnectionSnapshot(
             state=ConnectionState.DISCONNECTED,
             simulation_mode=True,
@@ -87,7 +87,7 @@ class ConnectionController(QObject):
         message = (
             "Simulation mode ready. No hardware I/O is performed."
             if enabled
-            else "Physical CPX400DP connections are not available in Milestone 4."
+            else "Physical QPX600DP connections are not available in Milestone 4."
         )
         self._publish(
             ConnectionSnapshot(ConnectionState.DISCONNECTED, enabled, None, message)

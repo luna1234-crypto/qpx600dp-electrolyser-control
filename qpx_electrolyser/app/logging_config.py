@@ -29,7 +29,7 @@ def configure_logging(log_directory: Path) -> LoggingSession:
     Configure once per process. Fail visibly if another active session exists;
     never remove third-party or root logger handlers to force configuration.
     """
-    logger = logging.getLogger("cpx_electrolyser")
+    logger = logging.getLogger("qpx_electrolyser")
     if logger.handlers:
         raise RuntimeError("Application logging is already configured.")
 
@@ -55,4 +55,3 @@ def configure_logging(log_directory: Path) -> LoggingSession:
     logger.setLevel(logging.INFO)
     logger.propagate = False
     return LoggingSession(logger, file_path, (file_handler, console_handler))
-

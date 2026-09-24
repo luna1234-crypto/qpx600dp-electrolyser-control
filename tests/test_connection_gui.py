@@ -11,11 +11,11 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 import pytest
 
-from cpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
-from cpx_electrolyser.gui.main_window import MainWindow
-from cpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
-from cpx_electrolyser.instrument.simulator import SimulatedPowerSupply
-from cpx_electrolyser.instrument.simulator_config import SimulatorConfig
+from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
+from qpx_electrolyser.gui.main_window import MainWindow
+from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
+from qpx_electrolyser.instrument.simulator import SimulatedPowerSupply
+from qpx_electrolyser.instrument.simulator_config import SimulatorConfig
 
 
 @pytest.fixture(scope="module")
@@ -61,7 +61,7 @@ def test_connection_panel_is_responsive_and_tracks_simulator_lifecycle(
         )
         assert panel.disconnect_button.isEnabled()
         assert not panel.simulation_checkbox.isEnabled()
-        assert panel.identification_value.text().startswith("SIMULATOR,CPX400DP")
+        assert panel.identification_value.text().startswith("SIMULATOR,QPX600DP")
 
         panel.disconnect_button.click()
         assert controller.snapshot.state is ConnectionState.DISCONNECTING

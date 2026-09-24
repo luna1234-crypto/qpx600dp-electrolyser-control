@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-from cpx_electrolyser.instrument.capabilities import InstrumentCapabilities
+from qpx_electrolyser.instrument.capabilities import InstrumentCapabilities
 
 
 class PowerSupplyInterface(ABC):

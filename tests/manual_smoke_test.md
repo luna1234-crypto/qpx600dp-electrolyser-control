@@ -8,7 +8,7 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
 4. Confirm Simulation Mode is checked, status is Disconnected, Connect is enabled,
    Disconnect is disabled and the instrument identification is Unavailable.
 5. Click Connect. Confirm the window remains responsive, status becomes Connected,
-   and identification begins `SIMULATOR,CPX400DP,SIMULATED`. Confirm Connect and
+   and identification begins `SIMULATOR,QPX600DP,SIMULATED`. Confirm Connect and
    Simulation Mode are disabled while Disconnect is enabled.
 6. Click Disconnect. Confirm status returns to Disconnected and identification
    returns to Unavailable. Uncheck Simulation Mode and confirm Connect is disabled
@@ -23,4 +23,6 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
    from both runs. The first run's records must remain.
 
 Record the Windows edition, Python/PySide6 versions, date and observed result.
-This visual Windows check has not been performed in the Linux build workspace.
+The historical Milestone 4 visual check used the earlier CPX model identity.
+The corrected QPX600DP build still requires a native Windows visual check; no
+physical supply should be connected for this procedure.

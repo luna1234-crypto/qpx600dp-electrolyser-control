@@ -1,5 +1,10 @@
 # Milestone verification log
 
+> Milestones 1-4 below are historical records created under the original
+> CPX400DP assumption. Their claims are intentionally not rewritten as QPX600DP
+> results. The post-Milestone-4 model correction is recorded separately at the
+> end of this file and in `verification/model_correction_qpx600dp.md`.
+
 ## Milestone 1 - Project skeleton
 
 Scope: source layout, Python requirements, minimal PySide6 window, application
@@ -72,3 +77,26 @@ The lifecycle worker is intentionally limited to connection operations. Mileston
 not create a second instrument owner. No serial dependency, COM-port enumeration,
 physical driver, output control or experimental operation was added. Native Windows
 and physical hardware validation remain outstanding.
+
+## Post-Milestone-4 model correction - QPX600DP
+
+Implemented on 2026-09-24 after the field target was confirmed as Aim-TTi
+QPX600DP. This is a correction checkpoint, not Milestone 5. The canonical package,
+current UI identity, capabilities, simulator ID, voltage ranges, resolutions,
+tests and active documentation now target QPX600DP. The Issue 14 manual and
+Issue 1 addendum are the active references; CPX material remains only as clearly
+marked historical/superseded evidence.
+
+The simulator uses only manual-stated power-envelope anchors: 50 A through 10 V
+and 7.5 A above 10 V through 80 V, with the separate 600 W ceiling. It does not
+interpolate the undocumented graph. Hardware ratings remain separate from the
+optional `UserSafetyLimits`; no experiment safety defaults were introduced.
+
+Verified with CPython 3.12.14: **90 tests passed**. `python main.py` completed a
+visible Simulation Mode connect/disconnect/reconnect/close check, and
+`python -m qpx_electrolyser --smoke-test` processed a visible Qt event loop and
+stopped cleanly. See [verification details](verification/model_correction_qpx600dp.md).
+
+No COM port was enumerated, no physical transport or driver was added, no
+instrument command was sent and no real output was controlled. Stop at this
+correction checkpoint; Milestone 5 remains unstarted.

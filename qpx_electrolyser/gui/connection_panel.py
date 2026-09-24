@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from cpx_electrolyser.app.connection_controller import ConnectionSnapshot, ConnectionState
+from qpx_electrolyser.app.connection_controller import ConnectionSnapshot, ConnectionState
 
 
 class ConnectionPanel(QGroupBox):

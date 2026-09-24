@@ -1,5 +1,9 @@
 # Milestone 3 verification
 
+> Historical record: these results and simulated values were produced under the
+> original CPX400DP assumption. They are not retroactively QPX600DP results; see
+> `model_correction_qpx600dp.md`.
+
 Date: 2026-09-08. Version: 0.3.0. Starting checkpoint: `e3e1baa` (milestone 2).
 Environment: Linux x86-64, CPython 3.12.13, PySide6 / Qt 6.10.1, pytest 9.0.2.
 

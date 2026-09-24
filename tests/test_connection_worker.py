@@ -7,10 +7,10 @@ import time
 
 import pytest
 
-from cpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
-from cpx_electrolyser.instrument.connection_worker import InstrumentConnectionWorker
-from cpx_electrolyser.instrument.simulator import SimulatedPowerSupply
-from cpx_electrolyser.instrument.simulator_config import SimulatorConfig
+from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
+from qpx_electrolyser.instrument.connection_worker import InstrumentConnectionWorker
+from qpx_electrolyser.instrument.simulator import SimulatedPowerSupply
+from qpx_electrolyser.instrument.simulator_config import SimulatorConfig
 
 
 class TrackingSimulator(SimulatedPowerSupply):
@@ -58,7 +58,7 @@ def test_failed_connection_is_cleaned_and_a_fresh_backend_can_retry() -> None:
         assert worker.request_connect()
         operation, identity = outcomes.get(timeout=2)
         assert operation == "connected"
-        assert identity.startswith("SIMULATOR,CPX400DP")
+        assert identity.startswith("SIMULATOR,QPX600DP")
         assert second.is_connected()
         assert set(second.operation_threads) == {"InstrumentConnectionWorker"}
 
