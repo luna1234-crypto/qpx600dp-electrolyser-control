@@ -120,11 +120,14 @@ reported no errors. See [verification details](verification/milestone5.md).
 
 The explicit-port hardware helper is read-only by default. Every mutation
 requires a write-confirmation token; Output On additionally requires a separate
-Output-On token, explicit setpoints and explicit user safety limits. It was not
-run against a port. No port was enumerated, no hardware connection was attempted
-and no instrument command was sent.
+Output-On token, explicit setpoints and explicit user safety limits. Partial
+supervised Windows validation identified a QPX600DP, passed the default
+read-only check, and verified unloaded programmed-voltage read-back at 10 V on
+channel 1 and 5 V on channel 2. Current limits and 80 V ranges remained
+unchanged, both outputs remained OFF, and the status byte was 0.
 
-The GUI remains Simulation Mode only. Physical response precision, serial/USB
-behaviour, firmware variation, timeout selection and the Issue 14 identification
-field ambiguity remain pending supervised commissioning. Milestone 6 has not
-started.
+The GUI remains Simulation Mode only. Its automatic smoke test and manual
+Connect/Disconnect/Reconnect exercise passed on Windows. Output On, loaded
+voltage/current delivery, electrolyser operation, broader firmware variation
+and timeout selection remain pending supervised commissioning. Milestone 6 has
+not started.

@@ -1,4 +1,4 @@
-# Milestone 5 verification - offline QPX600DP serial driver
+# Milestone 5 verification - QPX600DP serial driver and partial Windows validation
 
 Date: 2026-09-24
 
@@ -82,11 +82,35 @@ Both returned exit code 0, showed version 0.5.0, processed Qt events and stopped
 the connection worker cleanly. The GUI deliberately remains Simulation Mode;
 the physical driver is not connected to the Milestone 4 GUI.
 
-The hardware helper was invoked only with `--help`. No `--port` was supplied,
-no port discovery exists in the code, and no serial factory was opened outside
-fake tests.
+During the original offline verification, the hardware helper was invoked only
+with `--help`. No `--port` was supplied, no port discovery exists in the code,
+and no serial factory was opened outside fake tests.
 
-## Conservative boundaries pending hardware validation
+## Windows validation - partial
+
+Supervised Windows validation was performed on Windows 11 Pro 24H2, AMD64,
+using 64-bit CPython 3.12.10. Before physical-hardware validation, the complete
+automated suite passed with 162 tests. The automatic Simulation Mode smoke test
+also passed. A manual Windows Simulation Mode exercise opened the GUI, connected,
+displayed the simulated identity, disconnected, reconnected and closed normally;
+it did not access a COM port or physical instrument.
+
+The explicit-port helper subsequently identified a QPX600DP on COM3. Its default
+read-only check completed successfully. With no load or electrolyser connected
+and the operator visually confirming both outputs OFF, guarded voltage-setpoint
+writes and read-backs produced this final state:
+
+- channel 1: 10 V programmed, 5 A current limit unchanged, 80 V range unchanged,
+  output OFF;
+- channel 2: 5 V programmed, 0.055 A current limit unchanged, 80 V range unchanged,
+  output OFF;
+- status byte: 0.
+
+No current-limit, voltage-range or output-control command was sent. The
+instrument serial number is intentionally excluded from this committed record.
+Each serial session was closed normally.
+
+## Conservative boundaries and remaining validation
 
 - `connect()` and `disconnect()` only open/close the host handle. They do not
   issue reset, range, configuration, status-clear, lock or output commands.
@@ -107,5 +131,7 @@ fake tests.
   it attempts Output Off in a `finally` block but cannot guarantee OFF after a
   cable, process or hardware failure.
 
-No Windows or physical-instrument validation was performed. No real instrument
-was connected and no real command was sent. Milestone 6 was not started.
+This is partial hardware validation only. Output On remains untested. Loaded
+voltage delivery, loaded current delivery and operation with an electrolyser
+remain pending and must not be inferred from the unloaded setpoint read-backs.
+Milestone 6 was not started.

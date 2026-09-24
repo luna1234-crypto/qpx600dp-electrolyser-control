@@ -3,13 +3,15 @@
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
 assumption. Version 0.5.0 preserves those historical records and adds the
-Milestone 5 QPX600DP serial transport and physical backend, verified entirely
-with fake serial ports.
+Milestone 5 QPX600DP serial transport and physical backend, verified with fake
+serial ports and a partial supervised Windows hardware check.
 
 The GUI still connects only to `SimulatedPowerSupply`. `SerialTransport` and
 `QPX600DPDriver` exist as offline-tested backend components but are not exposed
 by the GUI. There is no COM-port discovery, command-worker integration,
-setpoint/output GUI or experiment protocol. No physical instrument has been used.
+setpoint/output GUI or experiment protocol. Physical validation is limited to
+identification, read-only queries and unloaded voltage-setpoint read-back with
+both outputs OFF.
 
 ## Windows installation
 
@@ -162,13 +164,13 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Backend contract and documented architecture | Preserved; QPX facts corrected |
 | Independent simulation backend | Preserved; QPX ranges/envelope corrected |
 | Simulation connection GUI | Preserved from Milestone 4 |
-| Explicit-port `SerialTransport` and QPX600DP backend | Implemented; fake serial only |
+| Explicit-port `SerialTransport` and QPX600DP backend | Implemented; fake serial plus partial Windows validation |
 | COM-port enumeration | Not implemented and not performed |
 | Physical backend in GUI/single-owner command worker | Not implemented |
 | Output/setpoint GUI controls | Not implemented |
 | Experiment protocols, CSV data and plots | Not implemented |
 | Complete configurable safety system | Not implemented |
-| Windows and real-hardware validation | Not performed |
+| Windows and real-hardware validation | Partial: identification, read-only check and unloaded setpoint read-back passed; Output On, loaded delivery and electrolyser validation pending |
 
 The QPX600DP is a programmable DC power supply, not a potentiostat. Any later
 voltage sweep would apply discrete two-terminal voltage steps and would not
