@@ -2,17 +2,14 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.4.1 is a bounded model-correction checkpoint: it preserves
-their application, logging, simulator and connection-thread behaviour while
-correcting current product identity, documented capabilities and simulation
-boundaries. Historical verification records remain historical and are marked as
-superseded where appropriate.
+assumption. Version 0.5.0 preserves those historical records and adds the
+Milestone 5 QPX600DP serial transport and physical backend, verified entirely
+with fake serial ports.
 
-This is not yet a physical instrument-control application. The GUI connects to,
-identifies and disconnects only `SimulatedPowerSupply`, using one dedicated
-backend-owner thread. It has no serial transport, COM-port discovery, physical
-driver, setpoint/output GUI controls or experiment protocols. Output state is
-explicitly unknown outside the simulator.
+The GUI still connects only to `SimulatedPowerSupply`. `SerialTransport` and
+`QPX600DPDriver` exist as offline-tested backend components but are not exposed
+by the GUI. There is no COM-port discovery, command-worker integration,
+setpoint/output GUI or experiment protocol. No physical instrument has been used.
 
 ## Windows installation
 
@@ -35,7 +32,7 @@ py -3.12 -m venv .venv
 
 Activation is unnecessary. Later launches may use `Start_App.cmd`. Runtime-only
 installation may use `requirements.txt`; `requirements-dev.txt` adds pytest.
-PySide6 is pinned to 6.10.1 and pytest to 9.0.2.
+PySide6 is pinned to 6.10.1, pyserial to 3.5 and pytest to 9.0.2.
 
 ## Running in Simulation Mode
 
@@ -64,6 +61,43 @@ The console demonstration also uses Simulation Mode only:
 ```powershell
 .\.venv\Scripts\python.exe -m examples.simulator_demo
 ```
+
+## Milestone 5 offline physical backend
+
+`SerialTransport` opens only an explicitly supplied port. It never enumerates
+ports, clears buffers or transmits during `connect()`. RS232 configuration is
+9600 baud, 8N1 with XON/XOFF. Commands are printable ASCII plus LF; queries
+require a complete ASCII response ending CRLF. A timeout, partial frame or
+non-ASCII frame invalidates and closes the session so a late response cannot be
+mistaken for the next transaction.
+
+`QPX600DPDriver` implements the shared `PowerSupplyInterface` for identification,
+voltage/current set and readback, measured voltage/current, per-channel output
+state/control, voltage-range query and non-destructive status-byte query. Connect
+and disconnect do not issue `*RST`, `CONFIG`, `VRANGE`, `IFLOCK`, `LOCAL` or any
+output command. Setting voltage first queries the existing range and validates
+against it; the driver never changes the range automatically.
+
+The optional commissioning helper requires an explicit port and is read-only by
+default:
+
+```powershell
+.\.venv\Scripts\python.exe -m qpx_electrolyser.instrument.hardware_check --port COM7
+```
+
+Even read-only queries put the instrument into remote state according to Issue 14.
+Do not run this command until a supervised hardware-test plan is approved.
+Any setting or OFF write additionally requires
+`--confirm-write WRITE-QPX600DP`. Output On is available only as a bounded
+`--output-on-for` action and also requires:
+
+- `--confirm-output-on ENABLE-QPX600DP-OUTPUT`;
+- explicit voltage and current in the same invocation;
+- explicit voltage, current and power safety maxima.
+
+The helper attempts OFF in a `finally` block after the requested interval, but
+software cannot guarantee OFF after cable loss, OS failure or instrument failure.
+Use an independent physical shutdown method during any future test.
 
 ## Hardware capability versus safety policy
 
@@ -128,8 +162,9 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Backend contract and documented architecture | Preserved; QPX facts corrected |
 | Independent simulation backend | Preserved; QPX ranges/envelope corrected |
 | Simulation connection GUI | Preserved from Milestone 4 |
-| Physical QPX600DP connection and transport | Not implemented |
+| Explicit-port `SerialTransport` and QPX600DP backend | Implemented; fake serial only |
 | COM-port enumeration | Not implemented and not performed |
+| Physical backend in GUI/single-owner command worker | Not implemented |
 | Output/setpoint GUI controls | Not implemented |
 | Experiment protocols, CSV data and plots | Not implemented |
 | Complete configurable safety system | Not implemented |
@@ -147,12 +182,12 @@ control potential against a reference electrode.
 - [Project tree](docs/project_tree.md)
 - [Historical milestone records](docs/milestones.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
-- [Deferred hardware acceptance outline](tests/manual_hardware_test.md)
+- [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 
 The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/`. The prior CPX manual is retained only under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption, and the ordinary model-correction commit records when that
-assumption was replaced. No remote repository is configured.
+CPX400DP assumption; the model-correction and Milestone 5 commits record the
+current QPX600DP basis. No remote repository is configured.

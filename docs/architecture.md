@@ -3,8 +3,10 @@
 **Worker, GUI connection and test-engine design for future milestones.** Current
 code implements the entrypoints, main-window placeholders, diagnostic logging,
 `PowerSupplyInterface`, immutable capabilities, the configurable two-channel
-`SimulatedPowerSupply`, and the milestone 4 asynchronous connection lifecycle.
-The backend has no Qt or serial dependency. See [simulator behaviour](simulator.md).
+`SimulatedPowerSupply`, the milestone 4 asynchronous simulation lifecycle,
+and the Milestone 5 `SerialTransport` / `QPX600DPDriver`. The physical backend
+has no Qt dependency and is not yet connected to the GUI or owner worker.
+See [simulator behaviour](simulator.md).
 The remaining design follows the [QPX600DP command reference](qpx600dp_commands.md).
 
 ## Ownership and data flow
@@ -20,7 +22,7 @@ flowchart TD
     Q --> W["Single communication worker"]
     W --> API["PowerSupplyInterface"]
     API --> SIM["SimulatedPowerSupply"]
-    API --> QPX["Future QPX600DP driver"]
+    API --> QPX["QPX600DPDriver"]
     QPX --> T["SerialTransport or future TCP transport"]
 ```
 
@@ -44,8 +46,8 @@ when transport changes.
 | MainWindow / reusable ChannelPanel | Compose widgets, collect validated requests, show states and measurements | No serial I/O, protocol loops or waiting on futures |
 | InstrumentController | Submit typed actions, own session/channel generations, coordinate cancellation and faults | No direct transport access from calling threads |
 | InstrumentCommandWorker | Execute bounded actions, maintain query/reply pairing, return results/errors | No protocol dwell, plotting or disk logging |
-| Future QPX600DP driver | Validate channels/ranges, encode verified commands, parse values/units/status, expose capabilities | No GUI or experiment scheduling; not implemented in the model correction |
-| SerialTransport | Open/close, ASCII framing, bounded read/write, terminators and transport errors | No knowledge of CC, CV, CSV or cell area |
+| QPX600DPDriver | Validate channels/current range, query the existing voltage range, encode the Milestone 5 command subset, parse exact values/units/status, expose capabilities | No GUI, scheduling, implicit range change, reset, lock or output action on connect |
+| SerialTransport | Open an explicit port, apply 9600/8N1/XON-XOFF, serialize one LF/CRLF transaction, invalidate uncertain sessions | No port enumeration or knowledge of CC, CV, CSV or cell area |
 | ChannelEngine, one per channel | Own state transitions, protocol time, local logger and measured results | No shared-port access |
 | TestProtocol implementations | Generate planned steps and averaging rules | No GUI, serial handles or wall-clock sleeps |
 | SafetyValidator | Validate full protocol against software and documented hardware capability before Start | No silent clamping or device writes |
@@ -205,9 +207,12 @@ completed step and use only the measured final averaging window.
 ## Milestone boundaries and acceptance
 
 Milestones 1-4 remain historical checkpoints created under the original CPX400DP
-assumption. The post-Milestone-4 model correction retargets their current code and
-active documentation to QPX600DP without rewriting those commits. The physical
-driver, shared command queue and protocols remain later work.
+assumption. The post-Milestone-4 model correction retargeted current code and
+documentation to QPX600DP without rewriting those commits. Milestone 5 adds an
+offline-tested physical driver and explicit-port transport but deliberately does
+not connect them to the GUI. Milestone 6 must integrate this backend into the
+existing single-owner boundary rather than add a second worker. The shared command
+queue and protocols remain later work.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Later data tests must cover unwritable files, interruption and bounded memory.

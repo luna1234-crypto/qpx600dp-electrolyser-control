@@ -1,8 +1,8 @@
 # QPX600DP authoritative capability and command reference
 
-This is the active model reference after the post-Milestone-4 model correction.
-It is documentation only: the project still has no physical driver, transport,
-COM-port discovery or code that sends an instrument command.
+This is the active model reference. Milestone 5 implements the explicitly listed
+subset below through an offline-tested serial transport and QPX600DP driver.
+There is still no COM-port discovery, physical GUI integration or hardware result.
 
 ## Authoritative sources
 
@@ -74,7 +74,29 @@ record behaviour but must not silently broaden this documented software model.
 USB is a virtual COM interface. RS232 is fixed at 9600 baud, 8 data bits,
 1 stop bit, no parity; USB ignores the baud setting (Issue 14 pp. 21-23).
 LAN raw socket service uses TCP port 9221 and permits two simultaneous connections
-(Issue 14 p. 25). None of these transports is implemented in this correction.
+(Issue 14 p. 25). Milestone 5 implements RS232/USB virtual-COM framing only.
+
+## Milestone 5 implemented subset
+
+| Driver operation | Exact command | Source |
+| --- | --- | --- |
+| Identify | `*IDN?` | Issue 14 p. 36; identification example p. 25 |
+| Set voltage | `V<N> <NRF>`; preceded by range query, never a range change | Issue 14 pp. 33-34 |
+| Read voltage setpoint | `V<N>?` | Issue 14 p. 33 |
+| Read measured voltage | `V<N>O?` | Issue 14 p. 33 |
+| Set current limit | `I<N> <NRF>` | Issue 14 p. 33 |
+| Read current setpoint | `I<N>?` | Issue 14 p. 33 |
+| Read measured current | `I<N>O?` | Issue 14 p. 33 |
+| Output On/Off | `OP<N> 1` / `OP<N> 0` | Issue 14 p. 33 |
+| Read output state | `OP<N>?` | Issue 14 p. 33 |
+| Read existing voltage range | `VRANGE<N>?` | Issue 14 p. 34 |
+| Read non-destructive status byte | `*STB?` | Issue 14 p. 35 |
+
+`connect()` and `disconnect()` operate only on the host serial handle and send no
+instrument bytes. The driver does not implement or automatically issue `*RST`,
+`CONFIG`, `VRANGE<N>`, `IFLOCK`, `IFUNLOCK`, `LOCAL`, `*CLS`, `*ESR?`, `EER?`,
+`LSR<N>?`, protection settings or combined-output commands. In particular,
+destructive status-register queries are not hidden inside setters.
 
 ## Command catalogue
 
@@ -179,7 +201,15 @@ is recorded (Addendum 48511-1461 Issue 1, p. 1).
 
 ## Implementation boundary
 
-The current executable implements only the generic synchronous backend API and
-Simulation Mode lifecycle. It does not implement any ASCII remote command listed
-above. No QPX600DP physical driver may be added as part of this model-correction
-checkpoint.
+Milestone 5 implements only the subset table above. The GUI remains Simulation
+Mode only; the driver has not been integrated into the Milestone 4 lifecycle
+worker because all instrument commands must ultimately share the single Milestone
+6 owner. Tests use injected fake serial ports and do not enumerate or open a real
+port. Hardware behaviour, response precision, firmware compatibility, USB driver
+behaviour and timeout values remain pending supervised commissioning.
+
+The parser conservatively requires the documented fixed-point response forms and
+exact units. It accepts either `0` or a serial-like nonempty third `*IDN?` field,
+preserving the Issue 14 pp. 25/36 ambiguity. Set commands have no documented
+acknowledgement, so the driver does not invent one or clear error registers to
+simulate confirmation.

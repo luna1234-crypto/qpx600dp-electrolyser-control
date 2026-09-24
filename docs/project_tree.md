@@ -40,6 +40,9 @@ QPX 600 DP/
             capabilities.py
             connection_worker.py
             exceptions.py
+            hardware_check.py
+            qpx600dp.py
+            serial_transport.py
             simulator.py
             simulator_config.py
         safety/
@@ -62,6 +65,7 @@ QPX 600 DP/
             milestone2.md
             milestone3.md
             milestone4.md
+            milestone5.md
             model_correction_qpx600dp.md
         architecture.md
         qpx600dp_commands.md
@@ -81,7 +85,11 @@ QPX 600 DP/
         test_capabilities.py
         test_connection_gui.py
         test_connection_worker.py
+        test_hardware_check.py
         test_logging_config.py
+        test_model_identity.py
+        test_qpx600dp_driver.py
+        test_serial_transport.py
         test_simulator.py
     .gitattributes
     .gitignore

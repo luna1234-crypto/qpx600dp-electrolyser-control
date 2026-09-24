@@ -12,7 +12,7 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
    Simulation Mode are disabled while Disconnect is enabled.
 6. Click Disconnect. Confirm status returns to Disconnected and identification
    returns to Unavailable. Uncheck Simulation Mode and confirm Connect is disabled
-   with a message that physical connection is unavailable in milestone 4.
+   with a message that the offline-tested physical driver is not exposed by the GUI.
 7. Confirm both channel outputs remain unknown and that no setpoint, measurement,
    output or experiment controls exist.
 8. Resize the window and open Help > About. Text should remain readable and the

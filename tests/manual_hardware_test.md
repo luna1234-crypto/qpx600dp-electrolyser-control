@@ -1,14 +1,42 @@
 # Deferred QPX600DP hardware acceptance outline
 
-**Do not execute this procedure in the model-correction checkpoint.** The current
-application has no physical driver or transport and must not enumerate COM ports,
-connect to an instrument or send commands. This outline is retained only so later
-commissioning starts from the corrected model.
+**Not executed in Milestone 5.** The driver and serial transport have only been
+tested against fake serial ports. The GUI cannot use them, and the project never
+enumerates COM ports. Perform this procedure only as a separately authorised,
+supervised commissioning task with an independent physical means of shutdown.
 
 Use only the active QPX references in `../docs/reference/` and the page-cited
 `../docs/qpx600dp_commands.md`. Never use the superseded CPX400DP manual.
 
-When a future physical-driver milestone is explicitly authorised:
+## Commissioning helper safeguards
+
+The helper requires an explicitly supplied port and defaults to the read-only
+queries listed in the driver reference:
+
+```text
+python -m qpx_electrolyser.instrument.hardware_check --port COM7
+```
+
+It does not discover or select a port. Even queries cause the instrument to enter
+remote mode and lock its keyboard according to Issue 14 p. 22, so "read-only"
+means no setting/output changes, not no instrument-side mode indication.
+
+Any setting or OFF command requires the exact token
+`--confirm-write WRITE-QPX600DP`. Output On is exposed only through a bounded
+`--output-on-for` action and additionally requires:
+
+- `--confirm-output-on ENABLE-QPX600DP-OUTPUT`;
+- explicit `--set-voltage` and `--set-current` for the selected channel;
+- explicit positive `--safety-max-voltage`, `--safety-max-current` and
+  `--safety-max-power` values that contain the requested setpoints.
+
+The tool attempts `OP<N> 0` in a `finally` block after the interval. It cannot
+guarantee OFF after cable loss, process/OS failure, instrument failure or loss of
+PC power. Never use that attempt as the independent shutdown provision.
+
+## Future supervised procedure
+
+When hardware commissioning is explicitly authorised:
 
 1. Record model, serial number, main/interface firmware, Windows version, USB
    driver and chosen interface. Confirm the model field is QPX600DP.
@@ -20,8 +48,9 @@ When a future physical-driver milestone is explicitly authorised:
 4. Capture raw `*IDN?` including terminators. Accept and record the third field
    rather than assuming the command-table `0` or the VXI-11 example's serial form
    (Issue 14 pp. 25, 36).
-5. Acquire `IFLOCK`, consume its reply and confirm `IFLOCK?`. A denied lock must
-   stop commissioning. Release with `IFUNLOCK` and consume its reply (p. 35).
+5. The Milestone 5 driver deliberately does not acquire `IFLOCK`. Before adding
+   lock handling later, capture and verify `IFLOCK`, `IFLOCK?` and `IFUNLOCK`
+   replies in an isolated test because each produces a response (p. 35).
 6. With both outputs OFF, query `VRANGE1?` and `VRANGE2?`; record actual power-on
    ranges. Do not assume the simulator's 60 V configuration is a hardware or
    safety default (p. 34).
@@ -47,5 +76,6 @@ When a future physical-driver milestone is explicitly authorised:
     means. Communications loss must leave output state unknown.
 
 This outline is not evidence that any Windows, USB, serial, LAN, GPIB or hardware
-test has passed. Future reports must contain actual raw replies, timestamps,
-loads, external measurements and pass/fail results.
+test has passed. Milestone 5 evidence is fake/mock serial only. Future reports
+must contain actual raw replies, timestamps, loads, external measurements and
+pass/fail results.

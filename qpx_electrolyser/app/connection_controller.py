@@ -87,7 +87,7 @@ class ConnectionController(QObject):
         message = (
             "Simulation mode ready. No hardware I/O is performed."
             if enabled
-            else "Physical QPX600DP connections are not available in Milestone 4."
+            else "Physical connection is not available in this GUI; the Milestone 5 driver is offline-only."
         )
         self._publish(
             ConnectionSnapshot(ConnectionState.DISCONNECTED, enabled, None, message)
@@ -101,7 +101,7 @@ class ConnectionController(QObject):
         }:
             return
         if not self._snapshot.simulation_mode:
-            self._reject("Enable Simulation Mode to connect in Milestone 4.")
+            self._reject("Enable Simulation Mode; physical GUI connection is not implemented.")
             return
         self._publish(
             ConnectionSnapshot(

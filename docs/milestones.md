@@ -100,3 +100,31 @@ stopped cleanly. See [verification details](verification/model_correction_qpx600
 No COM port was enumerated, no physical transport or driver was added, no
 instrument command was sent and no real output was controlled. Stop at this
 correction checkpoint; Milestone 5 remains unstarted.
+
+## Milestone 5 - Offline QPX600DP serial driver
+
+Implemented the explicit-port `SerialTransport` and synchronous
+`QPX600DPDriver` from the QPX600D & DP Issue 14 command reference. The driver
+supports connection lifecycle, identification, dual-channel voltage/current
+set and read, measured values, explicit output On/Off, output-state query,
+existing voltage-range query and non-destructive status-byte query. Connecting
+and disconnecting send no instrument bytes and do not reset, reconfigure or
+enable an output.
+
+Verified on 2026-09-24 with CPython 3.12.14: **162 tests passed**. Fake serial
+tests cover exact command bytes and terminators, both channels, parsing,
+timeouts, malformed frames and values, lifecycle cleanup, error propagation and
+numeric boundaries. Both application entrypoints completed offscreen smoke
+tests, source compilation and dependency checks passed, and `git diff --check`
+reported no errors. See [verification details](verification/milestone5.md).
+
+The explicit-port hardware helper is read-only by default. Every mutation
+requires a write-confirmation token; Output On additionally requires a separate
+Output-On token, explicit setpoints and explicit user safety limits. It was not
+run against a port. No port was enumerated, no hardware connection was attempted
+and no instrument command was sent.
+
+The GUI remains Simulation Mode only. Physical response precision, serial/USB
+behaviour, firmware variation, timeout selection and the Issue 14 identification
+field ambiguity remain pending supervised commissioning. Milestone 6 has not
+started.

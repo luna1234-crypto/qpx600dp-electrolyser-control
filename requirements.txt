@@ -1,2 +1,4 @@
 # Current GUI runtime dependency. The wheel includes Qt.
 PySide6==6.10.1
+# Milestone 5 explicit-port serial/USB-VCP transport. No port enumeration is used.
+pyserial==3.5

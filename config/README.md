@@ -1,6 +1,8 @@
 # Configuration
 
-No connection, safety or experiment defaults are loaded yet. Configuration
+No connection, safety or experiment defaults are loaded yet. Milestone 5 does
+not persist or discover a serial port; its commissioning helper requires an
+explicit `--port` on every invocation. Configuration
 persistence is scheduled for milestone 17. Diagnostic logs default to the
 project’s `logs/` directory; `--log-dir` provides an explicit override.
 

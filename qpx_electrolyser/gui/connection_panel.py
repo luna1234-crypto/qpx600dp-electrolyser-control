@@ -1,4 +1,4 @@
-"""Milestone 4 connection controls; this widget performs no backend calls."""
+"""Simulation connection controls; this widget performs no backend calls."""
 
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
