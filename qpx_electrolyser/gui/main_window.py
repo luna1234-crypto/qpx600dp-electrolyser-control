@@ -1,11 +1,9 @@
-"""Compose the shared-worker simulation GUI and channel placeholders."""
+"""Compose the shared-worker simulation GUI and manual channel controls."""
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -15,22 +13,10 @@ from PySide6.QtWidgets import (
 )
 
 from qpx_electrolyser import __version__
+from qpx_electrolyser.app.channel_controller import ManualChannelController
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionSnapshot
+from qpx_electrolyser.gui.channel_panel import ChannelPanel
 from qpx_electrolyser.gui.connection_panel import ConnectionPanel
-
-
-def _channel_placeholder(channel: int) -> QGroupBox:
-    panel = QGroupBox(f"Channel {channel}")
-    layout = QVBoxLayout(panel)
-    layout.setContentsMargins(24, 28, 24, 24)
-    layout.addWidget(QLabel("No experiment running"))
-    layout.addWidget(QLabel("Output state: unknown (not queried in this milestone)"))
-    detail = QLabel("Instrument control, measurements and test protocols are not available in this build.")
-    detail.setWordWrap(True)
-    detail.setAlignment(Qt.AlignmentFlag.AlignTop)
-    layout.addWidget(detail)
-    layout.addStretch(1)
-    return panel
 
 
 class MainWindow(QMainWindow):
@@ -39,8 +25,8 @@ class MainWindow(QMainWindow):
     def __init__(self, log_file: Path, connection_controller: ConnectionController) -> None:
         super().__init__()
         self._connection_controller = connection_controller
-        self.setWindowTitle("QPX600DP Electrolyser - Simulation connection")
-        self.resize(1040, 650)
+        self.setWindowTitle("QPX600DP Electrolyser - Simulation manual control")
+        self.resize(1120, 720)
         self.setMinimumSize(760, 540)
 
         root = QWidget()
@@ -68,13 +54,26 @@ class MainWindow(QMainWindow):
 
         panels = QHBoxLayout()
         panels.setSpacing(18)
+        self.channel_controllers: dict[int, ManualChannelController] = {}
+        self.channel_panels: dict[int, ChannelPanel] = {}
         for channel in (1, 2):
-            panels.addWidget(_channel_placeholder(channel), 1)
+            controller = ManualChannelController(channel, connection_controller, self)
+            panel = ChannelPanel(channel)
+            panel.refresh_requested.connect(controller.request_refresh)
+            panel.voltage_requested.connect(controller.request_set_voltage)
+            panel.current_requested.connect(controller.request_set_current)
+            panel.output_on_requested.connect(controller.request_output_on)
+            panel.output_off_requested.connect(controller.request_output_off)
+            controller.snapshot_changed.connect(panel.apply_snapshot)
+            panel.apply_snapshot(controller.snapshot)
+            self.channel_controllers[channel] = controller
+            self.channel_panels[channel] = panel
+            panels.addWidget(panel, 1)
         layout.addLayout(panels, 1)
 
         notice = QLabel(
-            "The GUI connects only to the simulator through the Milestone 6 shared command "
-            "worker. The physical driver is not exposed here; this window cannot control outputs."
+            "Manual controls operate only on the simulator through one shared command queue. "
+            "The physical driver and serial-port selection are not exposed in this GUI."
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)
@@ -98,10 +97,10 @@ class MainWindow(QMainWindow):
             self,
             "About QPX600DP Electrolyser",
             f"QPX600DP Electrolyser {__version__}\n\n"
-            "Milestone 6 shared-command-worker build with Simulation Mode GUI.\n\n"
+            "Milestone 7 dual-channel manual-control build for Simulation Mode.\n\n"
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
-            "The physical driver is not connected to this GUI; output and experiment controls "
-            "remain unavailable.",
+            "The physical driver is not connected to this GUI. Automated protocols, logging, "
+            "plotting and emergency-all-off remain future work.",
         )
 
     def _apply_connection_snapshot(self, snapshot: ConnectionSnapshot) -> None:

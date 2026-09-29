@@ -2,7 +2,10 @@
 
 from abc import ABC, abstractmethod
 
-from qpx_electrolyser.instrument.capabilities import InstrumentCapabilities
+from qpx_electrolyser.instrument.capabilities import (
+    InstrumentCapabilities,
+    VoltageRangeCapability,
+)
 
 
 class PowerSupplyInterface(ABC):
@@ -50,6 +53,10 @@ class PowerSupplyInterface(ABC):
     @abstractmethod
     def read_set_current(self, channel: int) -> float:
         """Return programmed current limit in A, distinct from measured current."""
+
+    @abstractmethod
+    def read_voltage_range(self, channel: int) -> VoltageRangeCapability:
+        """Return the selected voltage range without changing it."""
 
     @abstractmethod
     def output_on(self, channel: int) -> None:

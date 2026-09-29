@@ -8,7 +8,11 @@ import time
 
 from qpx_electrolyser import __version__
 from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
-from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES, InstrumentCapabilities
+from qpx_electrolyser.instrument.capabilities import (
+    QPX600DP_CAPABILITIES,
+    InstrumentCapabilities,
+    VoltageRangeCapability,
+)
 from qpx_electrolyser.instrument.exceptions import (
     InstrumentNotConnectedError,
     UnsupportedOperatingPointError,
@@ -99,6 +103,11 @@ class SimulatedPowerSupply(PowerSupplyInterface):
         index = self._channel_index(channel)
         self._wait()
         return self._channels[index].current_a
+
+    def read_voltage_range(self, channel: int) -> VoltageRangeCapability:
+        index = self._channel_index(channel)
+        self._wait()
+        return self.capabilities.voltage_range(self._config.channel_voltage_ranges[index])
 
     def output_on(self, channel: int) -> None:
         index = self._channel_index(channel)

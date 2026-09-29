@@ -1,4 +1,4 @@
-"""Compose the GUI; Milestone 6 keeps physical transport outside the GUI."""
+"""Compose the Milestone 7 simulation-only manual-control GUI."""
 
 import argparse
 from collections.abc import Sequence
@@ -18,7 +18,7 @@ from qpx_electrolyser.gui.main_window import MainWindow
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a normal window, or briefly exercise its event loop for validation."""
-    parser = argparse.ArgumentParser(description="QPX600DP milestone 6 shared-worker build")
+    parser = argparse.ArgumentParser(description="QPX600DP milestone 7 simulation manual controls")
     parser.add_argument("--log-dir", type=Path, help="Override the project's logs directory")
     parser.add_argument(
         "--smoke-test", action="store_true", help="Show the window, process events, then close"

@@ -1,12 +1,12 @@
 # Proposed application and communication architecture
 
 **Worker, GUI connection and test-engine design.** Current
-code implements the entrypoints, main-window placeholders, diagnostic logging,
+code implements the entrypoints, dual-channel manual-control GUI, diagnostic logging,
 `PowerSupplyInterface`, immutable capabilities, the configurable two-channel
 `SimulatedPowerSupply`, the milestone 4 asynchronous simulation lifecycle,
-the Milestone 5 `SerialTransport` / `QPX600DPDriver`, and the Milestone 6 shared
-priority command worker. The physical backend has no Qt dependency and is not
-yet connected to the GUI worker.
+the Milestone 5 `SerialTransport` / `QPX600DPDriver`, the Milestone 6 shared
+priority command worker and Milestone 7 per-channel controllers. The physical
+backend has no Qt dependency and is not yet connected to the GUI worker.
 See [simulator behaviour](simulator.md).
 The remaining design follows the [QPX600DP command reference](qpx600dp_commands.md).
 
@@ -14,8 +14,12 @@ The remaining design follows the [QPX600DP command reference](qpx600dp_commands.
 
 ```mermaid
 flowchart TD
-    GUI["Qt GUI thread"] --> E1["ChannelEngine 1"]
-    GUI --> E2["ChannelEngine 2"]
+    GUI["Qt GUI thread"] --> C1["ManualChannelController 1"]
+    GUI --> C2["ManualChannelController 2"]
+    C1 --> IC
+    C2 --> IC
+    GUI --> E1["Future ChannelEngine 1"]
+    GUI --> E2["Future ChannelEngine 2"]
     GUI --> IC["InstrumentController"]
     E1 --> IC
     E2 --> IC
@@ -56,6 +60,21 @@ when transport changes.
 | SafetyValidator | Validate full protocol against software and documented hardware capability before Start | No silent clamping or device writes |
 | DataLogger, one per channel | Exclusive creation, CSV rows, metadata, flush/sync/close and file errors | No plot buffer or software diagnostic logging |
 
+Milestone 7 instantiates two `ManualChannelController` objects in the Qt thread.
+They share the same `ConnectionController` and therefore the same worker/backend.
+Each validates user text before submission, assigns a channel cancellation key,
+tracks one pending request ID, and accepts only its matching result. A queued
+callable performs a selected mutation (if any) and a complete channel read-back
+without yielding the shared worker, so another channel cannot interleave a
+query/response. Backend errors preserve the last successful display, fault and
+disable only the affected channel, and leave Refresh available for explicit
+recovery. Connection loss clears both displays to a disabled, unknown state.
+
+`ChannelPanel` owns presentation only. It shows programmed voltage, current
+limit, measured voltage/current, voltage range and output state. Output On needs
+an explicit confirmation dialog and Output Off uses the queue's safety priority.
+Neither widget nor manual controller creates a backend, transport or thread.
+
 ## Threads and scheduling
 
 Milestone 6 uses one Python communication thread with `queue.PriorityQueue`.
@@ -72,7 +91,7 @@ setpoint changes. UTC-aware wall timestamps are recorded separately.
 
 The implemented instrument abstraction exposes connect/disconnect/identify,
 set_voltage/current, output_on/off, read_voltage/current, read_set_voltage/current,
-read_output_state, capabilities and is_connected. Status-event support will be
+read_output_state, read_voltage_range, capabilities and is_connected. Status-event support will be
 added with the physical driver without inventing instantaneous mode readbacks.
 is_connected
 means session health, not proof of recent communication or output safety.
@@ -84,7 +103,8 @@ is immutable, while every simulator instance owns separate channel state and RNG
 
 All connection and command work runs off the GUI thread through the same worker.
 Milestone 6 adds request IDs, FIFO sequence metadata, command futures, explicit
-priorities and cancellation keys before two-channel controls are introduced.
+priorities and cancellation keys; Milestone 7 uses them for two-channel manual
+controls.
 Session/run generations and cross-channel telemetry fairness remain engine-level
 work for later milestones. No direct-serial GUI callbacks are acceptable.
 
@@ -215,7 +235,9 @@ documentation to QPX600DP without rewriting those commits. Milestone 5 adds an
 offline-tested physical driver and explicit-port transport but deliberately does
 not connect them to the GUI. Milestone 6 integrates a shared priority command
 queue into the existing single-owner boundary without adding a second backend
-owner. Protocols remain later work.
+owner. Milestone 7 adds simulation-only manual control without exposing the
+physical driver, serial-port selection, protocols, logging, plotting or global
+emergency control. Protocols remain later work.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Later data tests must cover unwritable files, interruption and bounded memory.

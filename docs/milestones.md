@@ -158,3 +158,31 @@ compilation, dependency check and Windows Simulation Mode smoke test passed:
 The GUI remains Simulation Mode only. This milestone adds no channel controls,
 protocols, data logging, plotting, Emergency Off GUI, Output On path or real
 serial integration. No COM port or physical instrument was accessed.
+
+## Milestone 7 - Independent dual-channel manual-control GUI
+
+Replaced both channel placeholders with reusable independent control panels.
+Each displays programmed voltage, current limit, measured voltage/current,
+selected voltage range and a conspicuous output state. Validated voltage and
+current-limit setters, Refresh, simulated Output On with deliberate confirmation,
+and simulated Output Off all use the one Milestone 6 queue. Each mutation and its
+read-back are atomic; request IDs and cancellation keys keep channel state
+isolated and prevent repeated-click duplicates.
+
+Input validation uses the repository capability definitions and rejects empty,
+invalid, negative, non-finite, out-of-range and off-grid values before queueing.
+Backend failures retain the last successful display and fault only the affected
+panel. Disconnect, cancellation and shutdown return the UI to a disabled state.
+Tests cover both channel targets, read-back, output confirmation/state, invalid
+input, duplicate clicks, concurrent submissions, exceptions, cancellation,
+disconnect and clean shutdown. See [verification details](verification/milestone7.md).
+
+Verified on Windows 11 Pro 24H2 with 64-bit CPython 3.12.10: **195 tests
+passed**. Full source compilation and `pip check` passed. The native Windows
+Simulation Mode GUI opened, rendered the two disabled disconnected panels,
+processed Qt events and closed with clean worker shutdown. No residual worker or
+QThread-destroyed warning was observed, and `git diff --check` passed.
+
+The GUI remains strictly Simulation Mode only. No serial-port selection, real
+hardware integration, protocol/sequencing, data logging, plotting, Emergency All
+Outputs Off or later-milestone feature is included.

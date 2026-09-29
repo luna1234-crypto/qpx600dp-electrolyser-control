@@ -196,7 +196,7 @@ class ConnectionController(QObject):
                 ConnectionState.CONNECTED,
                 True,
                 instrument_id,
-                "Simulator connected. Outputs remain unavailable in this milestone.",
+                "Simulator connected. Manual channel controls are available.",
             )
         )
 

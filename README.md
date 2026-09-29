@@ -2,14 +2,15 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.6.0 preserves those historical records, the Milestone 5
-QPX600DP serial backend and partial Windows validation, and adds the Milestone 6
-shared asynchronous instrument command queue.
+assumption. Version 0.7.0 preserves those historical records, the Milestone 5
+QPX600DP serial backend and partial Windows validation, the Milestone 6 shared
+asynchronous command queue, and adds Milestone 7 dual-channel manual controls.
 
-The GUI still connects only to `SimulatedPowerSupply`, now through one shared
-backend-owner worker used by both future channels. `SerialTransport` and
-`QPX600DPDriver` remain outside the GUI. There is no COM-port discovery,
-setpoint/output GUI or experiment protocol. Physical validation remains limited
+The GUI connects only to `SimulatedPowerSupply` through one shared backend-owner
+worker. Its two independent channel panels provide validated setpoint entry,
+read-back, measurements and deliberately confirmed simulated output control.
+`SerialTransport` and `QPX600DPDriver` remain outside the GUI. There is no
+COM-port discovery or experiment protocol. Physical validation remains limited
 to identification, read-only queries and unloaded voltage-setpoint read-back
 with both outputs OFF.
 
@@ -59,6 +60,14 @@ cleanup and performs a bounded join on the single backend-owner thread. Every
 backend operation is serialized there; GUI callbacks submit work without waiting
 for simulator latency.
 
+After connection, each channel is refreshed independently. Programmed voltage,
+current limit, measured voltage/current, voltage range and an unambiguous output
+state are displayed. Setpoint input is checked against `QPX600DP_CAPABILITIES`
+before queue submission. Output On always opens a confirmation dialog; Output
+Off is queued at safety priority. Controls are disabled while their channel has
+a pending command, after a backend fault, and whenever disconnected. Refresh can
+recover a channel display after a command fault.
+
 The console demonstration also uses Simulation Mode only:
 
 ```powershell
@@ -79,8 +88,25 @@ are stored in thread-safe command tickets and relayed to the Qt main thread with
 queued signals. Pending work can be cancelled globally or by logical-channel key;
 an in-flight call finishes atomically. Disconnect cancels waiting ordinary work,
 then closes the backend on the owner thread. Shutdown stops acceptance, cancels
-queued work, disconnects once and performs a bounded join. This milestone adds no
-channel controls, Output On path, protocol engine or physical GUI integration.
+queued work, disconnects once and performs a bounded join. Milestone 7 builds the
+simulation-only manual controls on this worker; it does not add a protocol engine
+or physical GUI integration.
+
+## Milestone 7 dual-channel manual controls
+
+Channel 1 and Channel 2 each have their own immutable display state and controller,
+but share the one Milestone 6 worker and backend. A refresh or mutation plus its
+complete read-back is one atomic queued operation. Request IDs ensure that a
+result or error updates only the channel that submitted it. Pending-state guards
+prevent repeated clicks from creating duplicate work, and channel cancellation
+keys remove queued work during disconnect or shutdown.
+
+The controls use central capability definitions for range-specific voltage and
+current validation. Empty, nonnumeric, negative, non-finite, out-of-range and
+off-grid values are rejected before submission. A failure preserves the last
+successful values, disables mutations on that channel, and does not corrupt the
+other channel. This functionality is simulation-only; it is not authorization or
+an implementation path for real output control.
 
 ## Milestone 5 offline physical backend
 
@@ -186,7 +212,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Shared priority instrument command worker | Implemented for Simulation Mode; FIFO, priority, cancellation and shutdown tested |
 | COM-port enumeration | Not implemented and not performed |
 | Physical backend in GUI | Not implemented |
-| Output/setpoint GUI controls | Not implemented |
+| Dual-channel manual controls | Implemented for Simulation Mode only; validated setpoints, read-back and confirmed simulated output control |
 | Experiment protocols, CSV data and plots | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Partial: identification, read-only check and unloaded setpoint read-back passed; Output On, loaded delivery and electrolyser validation pending |
@@ -210,5 +236,5 @@ The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption; the model-correction and Milestones 5-6 commits record the
+CPX400DP assumption; the model-correction and Milestones 5-7 commits record the
 current QPX600DP basis.

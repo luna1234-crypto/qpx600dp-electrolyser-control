@@ -57,6 +57,7 @@ def test_interface_is_abstract_and_simulator_identifies_itself(supply: PowerSupp
 @pytest.mark.parametrize("operation", [
     lambda s: s.identify(), lambda s: s.set_voltage(1, 2), lambda s: s.set_current(1, 1),
     lambda s: s.read_set_voltage(1), lambda s: s.read_set_current(1),
+    lambda s: s.read_voltage_range(1),
     lambda s: s.output_on(1), lambda s: s.output_off(1),
     lambda s: s.read_output_state(1), lambda s: s.read_voltage(1), lambda s: s.read_current(1),
 ])
@@ -338,13 +339,14 @@ def test_latency_is_applied_once_per_command_without_sleeping_in_tests() -> None
     backend.read_current(1)
     backend.read_set_voltage(1)
     backend.read_set_current(1)
+    backend.read_voltage_range(1)
     backend.read_output_state(1)
     with pytest.raises(InstrumentValueError):
         backend.set_voltage(1, 2.0001)  # Rejected before simulated I/O.
     backend.output_off(1)
     backend.disconnect()
     backend.disconnect()  # Local no-op.
-    assert waits == [0.025] * 12
+    assert waits == [0.025] * 13
 
 
 def test_noise_is_reproducible_and_independent_of_sibling_reads() -> None:

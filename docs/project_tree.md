@@ -16,6 +16,7 @@ QPX 600 DP/
         app/
             __init__.py
             application.py
+            channel_controller.py
             connection_controller.py
             logging_config.py
             paths.py
@@ -32,6 +33,7 @@ QPX 600 DP/
                 __init__.py
             __init__.py
             connection_panel.py
+            channel_panel.py
             main_window.py
         instrument/
             __init__.py
@@ -67,6 +69,7 @@ QPX 600 DP/
             milestone4.md
             milestone5.md
             milestone6.md
+            milestone7.md
             model_correction_qpx600dp.md
         architecture.md
         qpx600dp_commands.md
@@ -84,6 +87,7 @@ QPX 600 DP/
         manual_smoke_test.md
         test_application.py
         test_capabilities.py
+        test_channel_gui.py
         test_connection_gui.py
         test_connection_worker.py
         test_hardware_check.py
