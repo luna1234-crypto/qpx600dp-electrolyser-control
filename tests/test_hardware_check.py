@@ -211,11 +211,13 @@ def test_output_off_requires_write_confirmation_but_not_output_on_confirmation()
 class FakeClock:
     def __init__(self) -> None:
         self.now = 0.0
+        self.sleeps: list[float] = []
 
     def monotonic(self) -> float:
         return self.now
 
     def sleep(self, duration: float) -> None:
+        self.sleeps.append(duration)
         self.now += duration
 
 
@@ -299,6 +301,7 @@ def monitored_args(*arguments: str) -> Namespace:
         "--min-measured-voltage", "4.5",
         "--max-measured-voltage", "5.5",
         "--poll-interval", "0.1",
+        "--voltage-settle-time", "0.1",
         "--confirm-write", WRITE_CONFIRMATION,
         "--confirm-monitored-output-on", MONITORED_OUTPUT_CONFIRMATION,
     )
@@ -384,12 +387,47 @@ def test_monitored_output_stops_at_overcurrent_and_attempts_off() -> None:
     assert driver.operations[-1] == ("disconnect",)
 
 
-@pytest.mark.parametrize("voltage", [4.49, 5.51])
-def test_monitored_output_stops_outside_voltage_window(voltage: float) -> None:
+def test_monitored_output_allows_initial_zero_then_normal_voltage() -> None:
     driver = MonitoredDriver()
-    driver.measurement_voltage[1] = voltage
-    with pytest.raises(MonitoredOutputSafetyError, match="outside"):
+    driver.script("read_voltage", 1, 0.0, 0.0, 5.0, 5.0)
+    output = run_monitored(driver)
+    samples = [line for line in output if line.startswith("2026-")]
+    assert "| 0 | 0.005 | ON | SETTLING" in samples[0]
+    assert "| 5 | 0.005 | ON | MONITORING" in samples[1]
+    assert driver.output_states[1] is False
+
+
+def test_monitored_output_stops_on_persistent_low_voltage_after_settling() -> None:
+    driver = MonitoredDriver()
+    driver.measurement_voltage[1] = 0.0
+    with pytest.raises(MonitoredOutputSafetyError, match="below.*after settling"):
         run_monitored(driver)
+    assert driver.operations.count(("output_off", 1)) == 1
+    assert driver.output_states[1] is False
+
+
+def test_monitored_output_stops_on_immediate_over_voltage_during_settling() -> None:
+    driver = MonitoredDriver()
+    driver.measurement_voltage[1] = 5.51
+    clock = FakeClock()
+    with pytest.raises(MonitoredOutputSafetyError, match="exceeds"):
+        run_check(
+            monitored_args(),
+            driver_factory=lambda _port, _timeout: driver,
+            sleep=clock.sleep,
+            monotonic=clock.monotonic,
+            timestamp=lambda: "timestamp",
+            emit=lambda _message: None,
+        )
+    assert clock.now == 0.0
+    assert driver.output_states[1] is False
+
+
+def test_monitored_output_stops_on_under_voltage_when_settle_time_is_zero() -> None:
+    driver = MonitoredDriver()
+    driver.measurement_voltage[1] = 4.49
+    with pytest.raises(MonitoredOutputSafetyError, match="below"):
+        run_monitored(driver, monitored_args("--voltage-settle-time", "0"))
     assert driver.output_states[1] is False
 
 
@@ -414,6 +452,39 @@ def test_monitored_output_measurement_failure_attempts_off_and_closes(
         run_monitored(driver)
     assert driver.operations.count(("output_off", 1)) == 1
     assert driver.operations[-1] == ("disconnect",)
+
+
+def test_monitored_output_communication_failure_during_settling_cleans_up() -> None:
+    driver = MonitoredDriver()
+    driver.script("read_current", 1, 0.0, InstrumentTimeoutError("settling timeout"))
+    with pytest.raises(InstrumentTimeoutError, match="settling timeout"):
+        run_monitored(driver)
+    assert driver.operations.count(("output_off", 1)) == 1
+    assert driver.output_states[1] is False
+    assert driver.operations[-1] == ("disconnect",)
+
+
+def test_voltage_settling_does_not_extend_total_output_on_duration() -> None:
+    driver = MonitoredDriver()
+    clock = FakeClock()
+    output: list[str] = []
+    run_check(
+        monitored_args(
+            "--monitor-output-for", "0.2",
+            "--voltage-settle-time", "0.15",
+            "--poll-interval", "0.1",
+        ),
+        driver_factory=lambda _port, _timeout: driver,
+        sleep=clock.sleep,
+        monotonic=clock.monotonic,
+        timestamp=lambda: "timestamp",
+        emit=output.append,
+    )
+    assert clock.sleeps == [0.1, 0.1]
+    assert clock.now == pytest.approx(0.2)
+    assert "CH1 elapsed Output-On monitoring time: 0.200 s" in output
+    assert driver.operations.count(("output_on", 1)) == 1
+    assert driver.operations.count(("output_off", 1)) == 1
 
 
 def test_monitored_output_failure_during_output_on_never_retries_and_attempts_off() -> None:
@@ -453,6 +524,10 @@ def test_monitored_output_reports_when_off_cannot_be_confirmed() -> None:
     (("--monitor-output-for", str(MAX_MONITORED_DURATION_S + 1)), "duration"),
     (("--monitor-output-for", "nan"), "finite"),
     (("--poll-interval", "0"), "Poll interval"),
+    (("--voltage-settle-time", "nan"), "finite"),
+    (("--voltage-settle-time", "-0.1"), "settling time"),
+    (("--voltage-settle-time", "5.1"), "settling time"),
+    (("--monitor-output-for", "1", "--voltage-settle-time", "2"), "total"),
     (("--max-measured-current", "0"), "current"),
     (("--min-measured-voltage", "6", "--max-measured-voltage", "5"), "Minimum"),
     (("--set-voltage", "5"), "does not accept"),

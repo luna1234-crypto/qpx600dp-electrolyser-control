@@ -110,14 +110,32 @@ No current-limit, voltage-range or output-control command was sent. The
 instrument serial number is intentionally excluded from this committed record.
 Each serial session was closed normally.
 
+### First monitored-output attempt - safely aborted
+
+A subsequently authorised CH1 monitored-output attempt used a 5.000 V
+programmed voltage, 0.010 A current limit, 0.010 A maximum measured-current
+threshold, a 4.5 V to 5.5 V acceptable measured-voltage window, 0.25-second
+polling and a 15-second total Output-On limit. The instrument identified as a
+QPX600DP; preflight confirmed both outputs OFF, CH1 at 5.000 V / 0.010 A in the
+80 V range, and unloaded measurements of 0 V / 0 A. The instrument serial
+number is intentionally omitted.
+
+`OP1 1` succeeded. The first sample at elapsed 0.000 seconds reported OP1 ON
+with 0 V / 0 A. The original implementation immediately treated 0 V as below
+the approved minimum and stopped. It sent `OP1 0`, confirmed CH1 physically OFF,
+and then confirmed OP1 and OP2 both OFF. Total monitored Output-On time was
+0.016 seconds. There was no retry. This safely aborted startup sample is not a
+successful loaded-voltage or loaded-current validation.
+
 ## Conservative boundaries and remaining validation
 
 ### Guarded monitored-output safety follow-up
 
-The explicit-port helper now provides a separate monitored-output mode for a
-future supervised loaded test. This implementation was developed and tested
-offline only. It has not been used against COM3 or any physical instrument, so
-real monitored-output validation remains pending.
+The explicit-port helper provides a separate monitored-output mode for a future
+supervised loaded test. The startup-settling revision described below was
+developed and tested offline only and has not been used against COM3 or any
+physical instrument. Successful real monitored-output validation remains
+pending.
 
 The mode requires every safety value and both independent confirmation tokens:
 
@@ -132,16 +150,18 @@ python -m qpx_electrolyser.instrument.hardware_check \
   --min-measured-voltage <VOLTS> \
   --max-measured-voltage <VOLTS> \
   --poll-interval <SECONDS> \
+  --voltage-settle-time <SECONDS> \
   --confirm-write WRITE-QPX600DP \
   --confirm-monitored-output-on MONITOR-QPX600DP-OUTPUT
 ```
 
-Duration is limited to 60 seconds and the polling interval to 0.05 through
-1.0 seconds. All monitored-mode arguments are checked before the driver is
-created or a serial port can be opened. The mode conflicts with set-voltage,
-set-current, Output-Off, legacy timed-Output-On and legacy safety-limit options;
-it never changes programmed voltage, current limit, voltage range, protection
-settings or the other channel.
+Duration is limited to 60 seconds, voltage settling time to 0 through 5 seconds,
+and the polling interval to 0.05 through 1.0 seconds. Settling time cannot exceed
+the total monitored duration and never extends its deadline. All monitored-mode
+arguments are checked before the driver is created or a serial port can be
+opened. The mode conflicts with set-voltage, set-current, Output-Off, legacy
+timed-Output-On and legacy safety-limit options; it never changes programmed
+voltage, current limit, voltage range, protection settings or the other channel.
 
 Before Output On it requires the exact supported manufacturer/model identity,
 queries both output states, and queries the selected channel's programmed
@@ -150,11 +170,16 @@ must be OFF. Programmed values must match the explicitly expected values within
 half of the documented programming resolution for the active range/current
 grid. After `OP<N> 1`, each bounded polling cycle queries `OP<N>?`, `V<N>O?`
 and `I<N>O?` and prints a UTC timestamp, elapsed time, measured voltage,
-measured current and output state.
+measured current, output state and SETTLING/MONITORING phase. Output-state,
+communication, parsing, maximum-current and maximum-voltage checks apply from
+the first sample. During the explicitly bounded settling phase only the minimum
+voltage check is deferred. Both minimum and maximum voltage checks apply as soon
+as settling expires.
 
-The run stops immediately on the supplied current threshold, outside the
-supplied voltage window, unexpected Output Off, parsing/communication failure,
-or the deadline. A cleanup scope is active before `OP<N> 1` is attempted. It
+The run stops immediately on the supplied current threshold, voltage above the
+supplied maximum, unexpected Output Off, parsing/communication failure, or the
+deadline; voltage below the supplied minimum also stops the run once settling
+expires. A cleanup scope is active before `OP<N> 1` is attempted. It
 attempts `OP<N> 0` exactly once even if the Output-On transaction raises after
 partial transmission, then queries `OP<N>?` when communication remains
 available and reports explicitly when physical OFF cannot be confirmed. After
@@ -165,8 +190,10 @@ Offline fake-driver and stateful fake-serial coverage includes successful
 polling, exact command order, either output already ON, identity/setpoint
 mismatch, overcurrent, under/over-voltage, unexpected Output Off, malformed and
 timed-out responses, failures during and after Output On, guaranteed cleanup
-attempt, no automatic retry, other-channel isolation, serial closure, and CLI
-validation before driver creation.
+attempt, no automatic retry, other-channel isolation, serial closure, initial
+zero voltage followed by normal voltage, persistent post-settling undervoltage,
+and CLI validation before driver creation. Fake-clock tests prove settling does
+not extend the total authorised Output-On duration.
 
 - `connect()` and `disconnect()` only open/close the host handle. They do not
   issue reset, range, configuration, status-clear, lock or output commands.

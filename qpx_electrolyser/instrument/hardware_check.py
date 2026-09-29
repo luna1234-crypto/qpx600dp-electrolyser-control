@@ -20,6 +20,7 @@ WRITE_CONFIRMATION = "WRITE-QPX600DP"
 OUTPUT_ON_CONFIRMATION = "ENABLE-QPX600DP-OUTPUT"
 MONITORED_OUTPUT_CONFIRMATION = "MONITOR-QPX600DP-OUTPUT"
 MAX_MONITORED_DURATION_S = 60.0
+MAX_VOLTAGE_SETTLE_TIME_S = 5.0
 MIN_POLL_INTERVAL_S = 0.05
 MAX_POLL_INTERVAL_S = 1.0
 
@@ -93,6 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--poll-interval", type=float, help="Monitored-output polling interval in seconds"
+    )
+    parser.add_argument(
+        "--voltage-settle-time",
+        type=float,
+        metavar="SECONDS",
+        help="Bounded startup interval before enforcing minimum measured voltage",
     )
     parser.add_argument(
         "--confirm-monitored-output-on",
@@ -184,6 +191,7 @@ def _validate_monitored_authorization(args: argparse.Namespace) -> None:
         "minimum measured voltage": args.min_measured_voltage,
         "maximum measured voltage": args.max_measured_voltage,
         "poll interval": args.poll_interval,
+        "voltage settling time": args.voltage_settle_time,
     }
     missing = [name for name, value in required.items() if value is None]
     if missing:
@@ -200,6 +208,15 @@ def _validate_monitored_authorization(args: argparse.Namespace) -> None:
         raise HardwareCheckAuthorizationError(
             f"Poll interval must be between {MIN_POLL_INTERVAL_S:g} and "
             f"{MAX_POLL_INTERVAL_S:g} s."
+        )
+    if not 0 <= args.voltage_settle_time <= MAX_VOLTAGE_SETTLE_TIME_S:
+        raise HardwareCheckAuthorizationError(
+            f"Voltage settling time must be non-negative and no more than "
+            f"{MAX_VOLTAGE_SETTLE_TIME_S:g} s."
+        )
+    if args.voltage_settle_time > args.monitor_output_for:
+        raise HardwareCheckAuthorizationError(
+            "Voltage settling time cannot exceed the total monitored duration."
         )
     if args.expected_voltage < 0 or args.expected_current_limit <= 0:
         raise HardwareCheckAuthorizationError(
@@ -323,7 +340,7 @@ def _run_monitored_output(
         f"set={programmed_voltage:g} V/{programmed_current:g} A; "
         f"measured={measured_voltage:g} V/{measured_current:g} A"
     )
-    emit("Timestamp (UTC) | Elapsed (s) | Voltage (V) | Current (A) | Output")
+    emit("Timestamp (UTC) | Elapsed (s) | Voltage (V) | Current (A) | Output | Phase")
 
     started = monotonic()
     deadline = started + args.monitor_output_for
@@ -337,13 +354,15 @@ def _run_monitored_output(
             # transport error may occur after some or all bytes have been transmitted.
             driver.output_on(channel)
             while True:
-                elapsed = monotonic() - started
                 output_on = driver.read_output_state(channel)
                 voltage = driver.read_voltage(channel)
                 current = driver.read_current(channel)
+                elapsed = max(0.0, monotonic() - started)
+                settling = elapsed < args.voltage_settle_time
                 emit(
                     f"{timestamp()} | {elapsed:.3f} | {voltage:.6g} | "
-                    f"{current:.6g} | {'ON' if output_on else 'OFF'}"
+                    f"{current:.6g} | {'ON' if output_on else 'OFF'} | "
+                    f"{'SETTLING' if settling else 'MONITORING'}"
                 )
                 if not output_on:
                     raise MonitoredOutputSafetyError(
@@ -354,10 +373,15 @@ def _run_monitored_output(
                         f"CH{channel} measured current {current:g} A reached or exceeded "
                         f"the {args.max_measured_current:g} A limit."
                     )
-                if not args.min_measured_voltage <= voltage <= args.max_measured_voltage:
+                if voltage > args.max_measured_voltage:
                     raise MonitoredOutputSafetyError(
-                        f"CH{channel} measured voltage {voltage:g} V is outside "
-                        f"{args.min_measured_voltage:g}..{args.max_measured_voltage:g} V."
+                        f"CH{channel} measured voltage {voltage:g} V exceeds the "
+                        f"{args.max_measured_voltage:g} V maximum."
+                    )
+                if not settling and voltage < args.min_measured_voltage:
+                    raise MonitoredOutputSafetyError(
+                        f"CH{channel} measured voltage {voltage:g} V is below the "
+                        f"{args.min_measured_voltage:g} V minimum after settling."
                     )
                 remaining = deadline - monotonic()
                 if remaining <= 0:
