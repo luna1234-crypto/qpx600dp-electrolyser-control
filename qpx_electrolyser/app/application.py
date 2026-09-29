@@ -1,16 +1,17 @@
-"""Compose the Milestone 7 simulation-only manual-control GUI."""
+"""Compose the Milestone 7 guarded simulation/real manual-control GUI."""
 
 import argparse
 from collections.abc import Sequence
 from pathlib import Path
 import sys
+import time
 from types import TracebackType
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from qpx_electrolyser import __version__
-from qpx_electrolyser.app.connection_controller import ConnectionController
+from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
 from qpx_electrolyser.app.logging_config import configure_logging
 from qpx_electrolyser.app.paths import default_paths
 from qpx_electrolyser.gui.main_window import MainWindow
@@ -18,7 +19,7 @@ from qpx_electrolyser.gui.main_window import MainWindow
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a normal window, or briefly exercise its event loop for validation."""
-    parser = argparse.ArgumentParser(description="QPX600DP milestone 7 simulation manual controls")
+    parser = argparse.ArgumentParser(description="QPX600DP milestone 7 guarded manual controls")
     parser.add_argument("--log-dir", type=Path, help="Override the project's logs directory")
     parser.add_argument(
         "--smoke-test", action="store_true", help="Show the window, process events, then close"
@@ -68,7 +69,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sys.excepthook = handle_unhandled_exception
     try:
         logger.info(
-            "Application started: version=%s; shared simulation worker available; physical GUI disabled",
+            "Application started: version=%s; Simulation Mode default; guarded explicit-port mode available",
             __version__,
         )
         connection_controller = ConnectionController()
@@ -79,15 +80,45 @@ def main(argv: Sequence[str] | None = None) -> int:
         window.show()
 
         if args.smoke_test:
+            smoke_deadline = time.monotonic() + 5
+
+            def fail_smoke_test(message: str) -> None:
+                raise RuntimeError(message)
+
             def finish_smoke_test() -> None:
+                if connection_controller.snapshot.state is not ConnectionState.DISCONNECTED:
+                    if time.monotonic() >= smoke_deadline:
+                        fail_smoke_test("Simulation Mode smoke test did not disconnect in time.")
+                    QTimer.singleShot(25, finish_smoke_test)
+                    return
+                logger.info("Smoke test: simulator disconnected cleanly")
+                window.close()
+
+            def verify_connected_smoke_test() -> None:
+                state = connection_controller.snapshot.state
+                if state is ConnectionState.ERROR:
+                    fail_smoke_test("Simulation Mode smoke-test connection failed.")
+                if state is not ConnectionState.CONNECTED:
+                    if time.monotonic() >= smoke_deadline:
+                        fail_smoke_test("Simulation Mode smoke test did not connect in time.")
+                    QTimer.singleShot(25, verify_connected_smoke_test)
+                    return
+                if len(connection_controller.snapshot.initial_readbacks) != 2:
+                    fail_smoke_test("Simulation Mode smoke test did not read both channels.")
                 if args.screenshot is not None:
                     args.screenshot.parent.mkdir(parents=True, exist_ok=True)
                     if not window.grab().save(str(args.screenshot), "PNG"):
                         raise OSError("Could not write the requested window screenshot.")
-                logger.info("Smoke test: window visible=%s; Qt event loop processed events", window.isVisible())
-                window.close()
+                logger.info(
+                    "Smoke test: window visible=%s; Qt event loop processed events; "
+                    "simulator connected and both channels read",
+                    window.isVisible(),
+                )
+                connection_controller.request_disconnect()
+                QTimer.singleShot(25, finish_smoke_test)
 
-            QTimer.singleShot(350, finish_smoke_test)
+            connection_controller.request_connect()
+            QTimer.singleShot(0, verify_connected_smoke_test)
 
         exit_code = app.exec()
         logger.info("Application stopped: exit_code=%d", exit_code)

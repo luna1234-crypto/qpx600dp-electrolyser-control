@@ -2,15 +2,16 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.7.0 preserves those historical records, the Milestone 5
+assumption. Version 0.7.1 preserves those historical records, the Milestone 5
 QPX600DP serial backend and partial Windows validation, the Milestone 6 shared
-asynchronous command queue, and adds Milestone 7 dual-channel manual controls.
+asynchronous command queue, and adds Milestone 7 dual-channel manual controls
+with a guarded explicit-port hardware connection.
 
-The GUI connects only to `SimulatedPowerSupply` through one shared backend-owner
-worker. Its two independent channel panels provide validated setpoint entry,
-read-back, measurements and deliberately confirmed simulated output control.
-`SerialTransport` and `QPX600DPDriver` remain outside the GUI. There is no
-COM-port discovery or experiment protocol. Physical validation remains limited
+Simulation Mode remains the default. A deliberately selected Real Hardware mode
+accepts only a manually entered COM name and never enumerates ports. The one
+shared backend-owner worker constructs `SerialTransport` and `QPX600DPDriver`
+only after explicit Real Hardware Connect. There is no experiment protocol.
+Physical validation remains limited
 to identification, read-only queries and unloaded voltage-setpoint read-back
 with both outputs OFF.
 
@@ -53,14 +54,15 @@ identification begins:
 SIMULATOR,QPX600DP,SIMULATED
 ```
 
-Disconnect closes only the simulated communication session and does not imply
+Disconnect closes only the selected communication session and does not imply
 that an output is off. Failed connection/identification cleans up and permits a
-fresh retry. Physical mode remains disabled. Application shutdown requests
+fresh manual retry. Application shutdown requests
 cleanup and performs a bounded join on the single backend-owner thread. Every
 backend operation is serialized there; GUI callbacks submit work without waiting
 for simulator latency.
 
-After connection, each channel is refreshed independently. Programmed voltage,
+Connection identifies the backend and reads both channels before enabling any
+manual control. Programmed voltage,
 current limit, measured voltage/current, voltage range and an unambiguous output
 state are displayed. Setpoint input is checked against `QPX600DP_CAPABILITIES`
 before queue submission. Output On always opens a confirmation dialog; Output
@@ -89,8 +91,8 @@ queued signals. Pending work can be cancelled globally or by logical-channel key
 an in-flight call finishes atomically. Disconnect cancels waiting ordinary work,
 then closes the backend on the owner thread. Shutdown stops acceptance, cancels
 queued work, disconnects once and performs a bounded join. Milestone 7 builds the
-simulation-only manual controls on this worker; it does not add a protocol engine
-or physical GUI integration.
+manual controls and guarded connection on this worker; it does not add a protocol
+engine or automatic hardware action.
 
 ## Milestone 7 dual-channel manual controls
 
@@ -105,8 +107,23 @@ The controls use central capability definitions for range-specific voltage and
 current validation. Empty, nonnumeric, negative, non-finite, out-of-range and
 off-grid values are rejected before submission. A failure preserves the last
 successful values, disables mutations on that channel, and does not corrupt the
-other channel. This functionality is simulation-only; it is not authorization or
-an implementation path for real output control.
+other channel.
+
+### Guarded Real Hardware mode
+
+Selecting Real Hardware requires a warning confirmation. The operator must then
+type an explicit `COM<N>` name and press `Connect Real Hardware`; selecting the
+mode or typing the name opens nothing. The worker constructs the transport and
+driver only for that Connect request, opens only that port, sends `*IDN?`, rejects
+any non-QPX600DP identity, and reads CH1 then CH2. This connection transaction
+sends no reset, setpoint, range or output-control command. Controls remain
+disabled until every initial query succeeds.
+
+Real Output On uses a stronger warning that names the channel and shows the
+programmed voltage and current limit. Output Off needs no Output-On confirmation
+and retains safety queue priority. A real-session command error closes the shared
+transport and requires a manual reconnect; the application never retries or
+reconnects automatically. Real-hardware GUI acceptance remains pending.
 
 ## Milestone 5 offline physical backend
 
@@ -207,12 +224,12 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Application skeleton, paths and diagnostic logging | Preserved from Milestone 1 |
 | Backend contract and documented architecture | Preserved; QPX facts corrected |
 | Independent simulation backend | Preserved; QPX ranges/envelope corrected |
-| Simulation connection GUI | Preserved from Milestone 4 |
+| Simulation connection GUI | Preserved; still the default mode |
 | Explicit-port `SerialTransport` and QPX600DP backend | Implemented; fake serial plus partial Windows validation |
-| Shared priority instrument command worker | Implemented for Simulation Mode; FIFO, priority, cancellation and shutdown tested |
+| Shared priority instrument command worker | Implemented for simulator and guarded explicit-port backend; FIFO, priority, cancellation and shutdown tested |
 | COM-port enumeration | Not implemented and not performed |
-| Physical backend in GUI | Not implemented |
-| Dual-channel manual controls | Implemented for Simulation Mode only; validated setpoints, read-back and confirmed simulated output control |
+| Physical backend in GUI | Guarded explicit-port path implemented with fake-transport validation; real acceptance pending |
+| Dual-channel manual controls | Implemented for simulator and identified QPX600DP; stronger confirmation for real Output On |
 | Experiment protocols, CSV data and plots | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Partial: identification, read-only check and unloaded setpoint read-back passed; Output On, loaded delivery and electrolyser validation pending |
@@ -228,6 +245,7 @@ control potential against a reference electrode.
 - [Simulator behaviour](docs/simulator.md)
 - [Project tree](docs/project_tree.md)
 - [Historical milestone records](docs/milestones.md)
+- [Guarded real-hardware follow-up verification](docs/verification/milestone7_real_hardware.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 

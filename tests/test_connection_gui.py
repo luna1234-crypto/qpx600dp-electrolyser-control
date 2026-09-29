@@ -9,7 +9,7 @@ import time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 import pytest
 
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
@@ -35,7 +35,7 @@ def wait_until(qapp: QApplication, predicate: Callable[[], bool], timeout_s: flo
 
 
 def test_connection_panel_is_responsive_and_tracks_simulator_lifecycle(
-    qapp: QApplication, tmp_path: Path,
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     controller = ConnectionController(
         lambda: SimulatedPowerSupply(SimulatorConfig(communication_delay_s=0.05))
@@ -70,10 +70,14 @@ def test_connection_panel_is_responsive_and_tracks_simulator_lifecycle(
         assert panel.connect_button.isEnabled()
         assert panel.identification_value.text() == "Unavailable"
 
-        panel.simulation_checkbox.setChecked(False)
+        monkeypatch.setattr(
+            QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Yes
+        )
+        panel.real_hardware_radio.setChecked(True)
         assert not controller.snapshot.simulation_mode
         assert not panel.connect_button.isEnabled()
-        assert "not available" in panel.detail_label.text()
+        assert "REAL HARDWARE" in panel.detail_label.text()
+        assert panel.port_input.isEnabled()
     finally:
         window.close()
         assert controller.shutdown(timeout_s=1.0)
@@ -114,6 +118,27 @@ def test_controller_reports_failure_cleans_backend_and_allows_retry(
         wait_until(qapp, lambda: controller.snapshot.state is ConnectionState.DISCONNECTED)
     finally:
         assert controller.shutdown(timeout_s=1.0)
+
+
+def test_real_mode_warning_cancel_keeps_simulation_selected(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = ConnectionController()
+    window = MainWindow(tmp_path / "application.log", controller)
+    panel = window.connection_panel
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Cancel
+    )
+    try:
+        panel.real_hardware_radio.click()
+        qapp.processEvents()
+        assert controller.snapshot.simulation_mode
+        assert panel.simulation_checkbox.isChecked()
+        assert not panel.real_hardware_radio.isChecked()
+        assert panel.connect_button.text() == "Connect Simulator"
+    finally:
+        window.close()
+        assert controller.shutdown(timeout_s=1)
 
 
 def test_command_results_and_errors_return_to_qt_without_blocking_gui(

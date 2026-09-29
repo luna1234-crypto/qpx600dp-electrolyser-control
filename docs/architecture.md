@@ -5,8 +5,9 @@ code implements the entrypoints, dual-channel manual-control GUI, diagnostic log
 `PowerSupplyInterface`, immutable capabilities, the configurable two-channel
 `SimulatedPowerSupply`, the milestone 4 asynchronous simulation lifecycle,
 the Milestone 5 `SerialTransport` / `QPX600DPDriver`, the Milestone 6 shared
-priority command worker and Milestone 7 per-channel controllers. The physical
-backend has no Qt dependency and is not yet connected to the GUI worker.
+priority command worker and Milestone 7 per-channel controllers. The guarded
+follow-up connects the physical backend through that same worker only after an
+explicit mode, port and Connect action.
 See [simulator behaviour](simulator.md).
 The remaining design follows the [QPX600DP command reference](qpx600dp_commands.md).
 
@@ -33,7 +34,7 @@ flowchart TD
 
 The Milestone 6 `InstrumentCommandWorker` evolves the milestone 4 lifecycle
 owner in place. It creates, connects, identifies, uses and disconnects the
-simulator on one dedicated Python thread. Its bounded submission API uses a
+selected simulator or explicit-port backend on one dedicated Python thread. Its bounded submission API uses a
 priority queue with FIFO sequence numbers, command tickets and optional
 cancellation keys. The GUI receives immutable state and command outcomes through
 queued Qt signals. Connection or identification failure attempts cleanup,
@@ -74,6 +75,25 @@ recovery. Connection loss clears both displays to a disabled, unknown state.
 limit, measured voltage/current, voltage range and output state. Output On needs
 an explicit confirmation dialog and Output Off uses the queue's safety priority.
 Neither widget nor manual controller creates a backend, transport or thread.
+
+The connection controller defaults to Simulation Mode. Real Hardware selection
+requires a warning acknowledgement and a manually typed `COM<N>` name; neither
+action constructs a backend or opens a port. Only explicit Connect lets the
+worker call the selected factory. The worker then opens the named port,
+identifies the model, reads CH1 completely and reads CH2 completely as one
+connection initialization operation. Only a QPX600DP with two successful
+read-backs reaches CONNECTED, so channel controls cannot become active on a
+partial session. Candidate cleanup closes the transport after open, identity or
+read failure. There is no port enumeration, probing, automatic retry or
+automatic reconnect.
+
+The initial physical command order is `*IDN?`, followed for each channel by
+`VRANGE<N>?`, `V<N>?`, `I<N>?`, `V<N>O?`, `I<N>O?` and `OP<N>?`. All are
+queries. Connect/disconnect never reset, set voltage/current/range or alter an
+output. Subsequent reads and writes use the same queue as the simulator. Real
+Output On displays channel, programmed voltage and current limit in a stronger
+confirmation; Output Off remains available at safety priority. Any asynchronous
+real command failure closes the shared session and requires manual recovery.
 
 ## Threads and scheduling
 
@@ -235,9 +255,10 @@ documentation to QPX600DP without rewriting those commits. Milestone 5 adds an
 offline-tested physical driver and explicit-port transport but deliberately does
 not connect them to the GUI. Milestone 6 integrates a shared priority command
 queue into the existing single-owner boundary without adding a second backend
-owner. Milestone 7 adds simulation-only manual control without exposing the
-physical driver, serial-port selection, protocols, logging, plotting or global
-emergency control. Protocols remain later work.
+owner. Milestone 7 adds manual control and a guarded explicit-port follow-up
+without adding port discovery, protocols, logging, plotting or global emergency
+control. Real-hardware acceptance of the GUI path remains pending. Protocols
+remain later work.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Later data tests must cover unwritable files, interruption and bounded memory.

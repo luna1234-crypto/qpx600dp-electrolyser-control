@@ -12,6 +12,7 @@ from qpx_electrolyser.app.connection_controller import (
 )
 from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
 from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES
+from qpx_electrolyser.instrument.channel_readback import ChannelReadback, read_channel
 from qpx_electrolyser.instrument.connection_worker import BackendOperation, CommandPriority
 from qpx_electrolyser.instrument.exceptions import InstrumentValueError
 
@@ -32,18 +33,16 @@ class ChannelSnapshot:
     faulted: bool = False
 
 
-def _read_channel(supply: PowerSupplyInterface, channel: int) -> ChannelSnapshot:
-    """Read one channel as a single queue operation, so values cannot interleave."""
-    voltage_range = supply.read_voltage_range(channel)
+def _display_snapshot(readback: ChannelReadback) -> ChannelSnapshot:
     return ChannelSnapshot(
-        channel=channel,
+        channel=readback.channel,
         connected=True,
-        programmed_voltage_v=supply.read_set_voltage(channel),
-        current_limit_a=supply.read_set_current(channel),
-        measured_voltage_v=supply.read_voltage(channel),
-        measured_current_a=supply.read_current(channel),
-        voltage_range_name=voltage_range.name,
-        output_enabled=supply.read_output_state(channel),
+        programmed_voltage_v=readback.programmed_voltage_v,
+        current_limit_a=readback.current_limit_a,
+        measured_voltage_v=readback.measured_voltage_v,
+        measured_current_a=readback.measured_current_a,
+        voltage_range_name=readback.voltage_range_name,
+        output_enabled=readback.output_enabled,
         message="Read-back complete",
     )
 
@@ -76,7 +75,10 @@ class ManualChannelController(QObject):
 
     @Slot()
     def request_refresh(self) -> None:
-        self._submit("refresh", lambda supply: _read_channel(supply, self._channel))
+        self._submit(
+            "refresh",
+            lambda supply: _display_snapshot(read_channel(supply, self._channel)),
+        )
 
     @Slot(str)
     def request_set_voltage(self, text: str) -> None:
@@ -95,7 +97,7 @@ class ManualChannelController(QObject):
 
         def operation(supply: PowerSupplyInterface) -> ChannelSnapshot:
             supply.set_voltage(self._channel, voltage)
-            return _read_channel(supply, self._channel)
+            return _display_snapshot(read_channel(supply, self._channel))
 
         self._submit("set-voltage", operation)
 
@@ -112,7 +114,7 @@ class ManualChannelController(QObject):
 
         def operation(supply: PowerSupplyInterface) -> ChannelSnapshot:
             supply.set_current(self._channel, current)
-            return _read_channel(supply, self._channel)
+            return _display_snapshot(read_channel(supply, self._channel))
 
         self._submit("set-current", operation)
 
@@ -124,7 +126,7 @@ class ManualChannelController(QObject):
 
         def operation(supply: PowerSupplyInterface) -> ChannelSnapshot:
             supply.output_on(self._channel)
-            return _read_channel(supply, self._channel)
+            return _display_snapshot(read_channel(supply, self._channel))
 
         self._submit("output-on", operation)
 
@@ -132,7 +134,7 @@ class ManualChannelController(QObject):
     def request_output_off(self) -> None:
         def operation(supply: PowerSupplyInterface) -> ChannelSnapshot:
             supply.output_off(self._channel)
-            return _read_channel(supply, self._channel)
+            return _display_snapshot(read_channel(supply, self._channel))
 
         self._submit("output-off", operation, priority=CommandPriority.SAFETY)
 
@@ -153,7 +155,7 @@ class ManualChannelController(QObject):
         if self._pending_request_id is not None:
             return
         if self._connection.snapshot.state is not ConnectionState.CONNECTED:
-            self._validation_failed("Connect the simulator before controlling a channel.")
+            self._validation_failed("Connect and initialize the selected instrument first.")
             return
         ticket = self._connection.submit_command(
             f"ch{self._channel}-{action}",
@@ -176,12 +178,19 @@ class ManualChannelController(QObject):
     def _connection_changed(self, snapshot: ConnectionSnapshot) -> None:
         if snapshot.state is ConnectionState.CONNECTED:
             if not self._snapshot.connected and self._pending_request_id is None:
-                self._publish(ChannelSnapshot(
-                    channel=self._channel,
-                    connected=True,
-                    message="Initial read-back pending...",
-                ))
-                self.request_refresh()
+                matching = next(
+                    (item for item in snapshot.initial_readbacks if item.channel == self._channel),
+                    None,
+                )
+                if matching is None:
+                    self._publish(ChannelSnapshot(
+                        channel=self._channel,
+                        message="Initial read-back missing",
+                        error=True,
+                        faulted=True,
+                    ))
+                else:
+                    self._publish(_display_snapshot(matching))
             return
         self._connection.cancel_commands(self._cancellation_key)
         self._pending_request_id = None

@@ -29,6 +29,8 @@ class ChannelPanel(QGroupBox):
         super().__init__(f"Channel {channel}")
         QPX600DP_CAPABILITIES.validate_channel(channel)
         self.channel = channel
+        self._real_hardware = False
+        self._snapshot = ChannelSnapshot(channel=channel)
 
         self.programmed_voltage_value = QLabel("Unavailable")
         self.current_limit_value = QLabel("Unavailable")
@@ -102,6 +104,7 @@ class ChannelPanel(QGroupBox):
     def apply_snapshot(self, snapshot: ChannelSnapshot) -> None:
         if snapshot.channel != self.channel:
             return
+        self._snapshot = snapshot
         available = snapshot.connected and not snapshot.pending
         for widget in (
             self.voltage_input,
@@ -137,15 +140,34 @@ class ChannelPanel(QGroupBox):
         self.message_label.setText(snapshot.message)
         self.message_label.setStyleSheet("color: #a61b1b;" if snapshot.error else "")
 
+    @Slot(bool)
+    def set_real_hardware_mode(self, enabled: bool) -> None:
+        self._real_hardware = enabled
+
     @Slot()
     def _confirm_output_on(self) -> None:
-        response = QMessageBox.question(
-            self,
-            f"Confirm Channel {self.channel} Output On",
-            f"Enable simulated Channel {self.channel} output at the displayed setpoints?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
+        if self._real_hardware:
+            voltage = self._quantity(self._snapshot.programmed_voltage_v, "V")
+            current = self._quantity(self._snapshot.current_limit_a, "A")
+            response = QMessageBox.warning(
+                self,
+                f"Confirm REAL Channel {self.channel} Output On",
+                "REAL HARDWARE OUTPUT ENABLE\n\n"
+                f"Channel: {self.channel}\n"
+                f"Programmed voltage: {voltage}\n"
+                f"Current limit: {current}\n\n"
+                "Confirm the load and physical setup are safe before enabling this output.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+        else:
+            response = QMessageBox.question(
+                self,
+                f"Confirm Channel {self.channel} Output On",
+                f"Enable simulated Channel {self.channel} output at the displayed setpoints?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
         if response == QMessageBox.StandardButton.Yes:
             self.output_on_requested.emit(True)
 

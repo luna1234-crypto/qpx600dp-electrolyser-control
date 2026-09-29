@@ -67,3 +67,6 @@ Bridge and the physical QPX600DP were not enumerated, opened, probed or commande
 Real-hardware GUI connection, serial-port selection, protocols and automated
 sequences, pause/resume, CSV logging, plotting, Emergency All Outputs Off and all
 Milestone 8+ functionality remain unimplemented.
+
+The guarded explicit-port connection was added in the subsequent Milestone 7
+follow-up; see [its separate verification record](milestone7_real_hardware.md).

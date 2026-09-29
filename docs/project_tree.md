@@ -40,6 +40,7 @@ QPX 600 DP/
             _validation.py
             base_power_supply.py
             capabilities.py
+            channel_readback.py
             connection_worker.py
             exceptions.py
             hardware_check.py
@@ -70,6 +71,7 @@ QPX 600 DP/
             milestone5.md
             milestone6.md
             milestone7.md
+            milestone7_real_hardware.md
             model_correction_qpx600dp.md
         architecture.md
         qpx600dp_commands.md
@@ -94,6 +96,7 @@ QPX 600 DP/
         test_logging_config.py
         test_model_identity.py
         test_qpx600dp_driver.py
+        test_real_hardware_gui.py
         test_serial_transport.py
         test_simulator.py
     .gitattributes

@@ -186,3 +186,30 @@ QThread-destroyed warning was observed, and `git diff --check` passed.
 The GUI remains strictly Simulation Mode only. No serial-port selection, real
 hardware integration, protocol/sequencing, data logging, plotting, Emergency All
 Outputs Off or later-milestone feature is included.
+
+### Milestone 7 follow-up - guarded real-hardware connection
+
+Added an explicit Real Hardware mode while retaining Simulation Mode as the
+default. Entering real mode requires a warning acknowledgement, a manually typed
+`COM<N>` name and a separate Connect action. Port selection performs no I/O and
+there is no enumeration or probing. Only the shared worker constructs the
+`SerialTransport` / `QPX600DPDriver`, and only after Connect.
+
+Connection opens the selected port, identifies a QPX600DP and atomically reads
+both channel states before enabling controls. The sequence contains queries only;
+it does not reset, change voltage/current/range or alter outputs. Wrong identity,
+timeout, malformed reply, busy port and incomplete initial state close the
+candidate session without retry. Real Output On has a stronger channel/setpoint
+confirmation, while Output Off remains directly available at safety priority.
+Any later real command error closes the shared session and requires manual
+reconnection.
+
+Fake-serial tests cover exact query order, absence of connection writes, both
+channel mappings, setpoint writes with outputs OFF, Output-On confirmation and
+cancellation, duplicate suppression, failure cleanup/recovery, disconnect and
+shutdown. The complete suite passed with **206 tests**. See
+[follow-up verification](verification/milestone7_real_hardware.md).
+
+No real port was enumerated, opened or probed during development or validation.
+COM3, Test Bridge and the physical QPX600DP were not accessed. Real-hardware GUI
+acceptance remains pending; this follow-up is not Milestone 8.

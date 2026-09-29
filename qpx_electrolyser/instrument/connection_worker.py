@@ -24,6 +24,7 @@ ResultT = TypeVar("ResultT")
 BackendOperation = Callable[[PowerSupplyInterface], ResultT]
 ResultCallback = Callable[[int, str, object], None]
 ErrorCallback = Callable[[int, str, BaseException], None]
+ConnectionInitializer = Callable[[PowerSupplyInterface, str], object]
 
 
 class CommandPriority(IntEnum):
@@ -97,9 +98,10 @@ class InstrumentCommandWorker:
         self,
         backend_factory: Callable[[], PowerSupplyInterface],
         *,
-        on_connected: Callable[[str], None] | None = None,
+        on_connected: Callable[[object], None] | None = None,
         on_disconnected: Callable[[], None] | None = None,
         on_failed: Callable[[str, str], None] | None = None,
+        connection_initializer: ConnectionInitializer | None = None,
         queue_capacity: int = 64,
     ) -> None:
         if isinstance(queue_capacity, bool) or queue_capacity < 1:
@@ -110,6 +112,7 @@ class InstrumentCommandWorker:
         self._on_connected = on_connected or (lambda _identity: None)
         self._on_disconnected = on_disconnected or (lambda: None)
         self._on_failed = on_failed or (lambda _operation, _message: None)
+        self._connection_initializer = connection_initializer
         self._queue_capacity = queue_capacity
         # Lifecycle and shutdown commands are never blocked by regular-command
         # capacity, so disconnect and teardown always have a queue path.
@@ -148,7 +151,7 @@ class InstrumentCommandWorker:
                 priority=CommandPriority.CONNECTION,
                 regular=False,
                 on_result=lambda _request_id, _name, result: self._safe_callback(
-                    self._on_connected, cast(str, result)
+                    self._on_connected, result
                 ),
                 on_error=lambda _request_id, _name, error: self._safe_callback(
                     self._on_failed, "connect", str(error)
@@ -337,7 +340,7 @@ class InstrumentCommandWorker:
                 self._queued_regular = 0
             self._stopped.set()
 
-    def _connect(self) -> str:
+    def _connect(self) -> object:
         if self._backend is not None:
             raise CommandWorkerError("A connection is already active.")
         candidate: PowerSupplyInterface | None = None
@@ -347,16 +350,20 @@ class InstrumentCommandWorker:
             identification = candidate.identify()
             if not identification.strip():
                 raise RuntimeError("The instrument returned an empty identification string.")
+            result: object = identification
+            if self._connection_initializer is not None:
+                result = self._connection_initializer(candidate, identification)
         except Exception as error:
-            self._logger.exception("Simulation connection or identification failed")
+            self._logger.exception("Instrument connection, identification or initialization failed")
             self._cleanup_candidate(candidate)
+            detail = str(error).strip() or type(error).__name__
             raise CommandWorkerError(
-                "Could not connect to the simulator. The failed session was cleaned up; "
-                "you may retry."
+                f"Could not connect and initialize the selected instrument: {detail}. "
+                "The failed session was cleaned up; no automatic retry was attempted."
             ) from error
         self._backend = candidate
-        self._logger.info("Simulation connection ready: %s", identification)
-        return identification
+        self._logger.info("Instrument connection ready: %s", identification)
+        return result
 
     def _disconnect(self) -> None:
         backend = self._backend
@@ -366,11 +373,11 @@ class InstrumentCommandWorker:
         try:
             backend.disconnect()
         except Exception as error:
-            self._logger.exception("Simulation disconnect failed; backend reference released")
+            self._logger.exception("Instrument disconnect failed; backend reference released")
             raise CommandWorkerError(
-                "The simulator session did not close cleanly. It was discarded; you may reconnect."
+                "The instrument session did not close cleanly. It was discarded; reconnect manually."
             ) from error
-        self._logger.info("Simulation connection closed")
+        self._logger.info("Instrument connection closed")
 
     def _cleanup_candidate(self, backend: PowerSupplyInterface | None) -> None:
         if backend is None:

@@ -11,8 +11,8 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
    and identification begins `SIMULATOR,QPX600DP,SIMULATED`. Confirm Connect and
    Simulation Mode are disabled while Disconnect is enabled.
 6. Click Disconnect. Confirm status returns to Disconnected and identification
-   returns to Unavailable. Uncheck Simulation Mode and confirm Connect is disabled
-   with a message that the offline-tested physical driver is not exposed by the GUI.
+   returns to Unavailable. Keep Simulation Mode selected; do not select Real
+   Hardware or enter a port during this smoke test.
 7. Confirm both channel panels populate programmed voltage, current limit,
    measured voltage/current, voltage range and `OUTPUT OFF` after their initial
    read-back. Confirm each panel can be refreshed independently.
@@ -32,5 +32,5 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
 
 Record the Windows edition, Python/PySide6 versions, date and observed result.
 The historical Milestone 4 visual check used the earlier CPX model identity.
-This Milestone 7 procedure is Simulation Mode only: do not select a port, invoke
-the hardware checker or connect the GUI to a physical supply.
+This Milestone 7 procedure is Simulation Mode only: do not select Real Hardware,
+enter a port, invoke the hardware checker or connect the GUI to a physical supply.

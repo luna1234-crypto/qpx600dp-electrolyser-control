@@ -1,4 +1,4 @@
-"""Compose the shared-worker simulation GUI and manual channel controls."""
+"""Compose guarded simulation/real connection and manual channel controls."""
 
 from pathlib import Path
 
@@ -25,7 +25,7 @@ class MainWindow(QMainWindow):
     def __init__(self, log_file: Path, connection_controller: ConnectionController) -> None:
         super().__init__()
         self._connection_controller = connection_controller
-        self.setWindowTitle("QPX600DP Electrolyser - Simulation manual control")
+        self.setWindowTitle("QPX600DP Electrolyser - Guarded manual control")
         self.resize(1120, 720)
         self.setMinimumSize(760, 540)
 
@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
         self.connection_panel.simulation_mode_changed.connect(
             connection_controller.set_simulation_mode
         )
+        self.connection_panel.port_name_changed.connect(connection_controller.set_port_name)
         connection_controller.snapshot_changed.connect(self._apply_connection_snapshot)
         connection_controller.error_reported.connect(self._show_connection_error)
         self.connection_panel.apply_snapshot(connection_controller.snapshot)
@@ -72,8 +73,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(panels, 1)
 
         notice = QLabel(
-            "Manual controls operate only on the simulator through one shared command queue. "
-            "The physical driver and serial-port selection are not exposed in this GUI."
+            "Simulation is the default. Real Hardware requires deliberate mode selection, a "
+            "manually entered COM port and explicit Connect; ports are never enumerated."
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)
@@ -97,14 +98,16 @@ class MainWindow(QMainWindow):
             self,
             "About QPX600DP Electrolyser",
             f"QPX600DP Electrolyser {__version__}\n\n"
-            "Milestone 7 dual-channel manual-control build for Simulation Mode.\n\n"
+            "Milestone 7 guarded dual-channel manual-control build.\n\n"
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
-            "The physical driver is not connected to this GUI. Automated protocols, logging, "
-            "plotting and emergency-all-off remain future work.",
+            "Simulation is the default. Real Hardware uses only a manually entered COM port. "
+            "Automated protocols, logging, plotting and emergency-all-off remain future work.",
         )
 
     def _apply_connection_snapshot(self, snapshot: ConnectionSnapshot) -> None:
         self.connection_panel.apply_snapshot(snapshot)
+        for panel in self.channel_panels.values():
+            panel.set_real_hardware_mode(not snapshot.simulation_mode)
         self.statusBar().showMessage(snapshot.message)
 
     def _show_connection_error(self, message: str) -> None:
