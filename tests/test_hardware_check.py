@@ -1,18 +1,28 @@
 """Safety gates for the explicit-port hardware check; all tests use a fake driver."""
 
 from argparse import Namespace
+from collections import deque
 from types import SimpleNamespace
 
 import pytest
 
 from qpx_electrolyser.instrument.hardware_check import (
     HardwareCheckAuthorizationError,
+    MAX_MONITORED_DURATION_S,
+    MONITORED_OUTPUT_CONFIRMATION,
+    MonitoredOutputSafetyError,
     OUTPUT_ON_CONFIRMATION,
     WRITE_CONFIRMATION,
     build_parser,
     run_check,
     validate_authorization,
 )
+from qpx_electrolyser.instrument.exceptions import (
+    InstrumentProtocolError,
+    InstrumentTimeoutError,
+)
+from qpx_electrolyser.instrument.qpx600dp import QPX600DPDriver
+from qpx_electrolyser.instrument.serial_transport import SerialTransport
 
 
 class RecordingDriver:
@@ -196,3 +206,386 @@ def test_output_off_requires_write_confirmation_but_not_output_on_confirmation()
     run_check(args, driver_factory=lambda _port, _timeout: driver, emit=lambda _message: None)
     assert ("output_off", 1) in driver.operations
     assert not any(operation[0] == "output_on" for operation in driver.operations)
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, duration: float) -> None:
+        self.now += duration
+
+
+class MonitoredDriver(RecordingDriver):
+    def __init__(self) -> None:
+        super().__init__()
+        self.output_states = {1: False, 2: False}
+        self.programmed_voltage = {1: 5.0, 2: 2.0}
+        self.programmed_current = {1: 0.01, 2: 0.1}
+        self.measurement_voltage = {1: 5.0, 2: 0.0}
+        self.measurement_current = {1: 0.005, 2: 0.0}
+        self.scripted: dict[tuple[str, int], deque[object]] = {}
+        self.output_on_error: BaseException | None = None
+        self.output_off_error: BaseException | None = None
+        self.identity = "THURLBY THANDAR,QPX600DP,123,1.00"
+
+    def identify(self) -> str:
+        self.operations.append(("identify",))
+        return self.identity
+
+    def script(self, name: str, channel: int, *values: object) -> None:
+        self.scripted[(name, channel)] = deque(values)
+
+    def _value(self, name: str, channel: int, default: object) -> object:
+        values = self.scripted.get((name, channel))
+        value = values.popleft() if values else default
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    def output_on(self, channel: int) -> None:
+        self.operations.append(("output_on", channel))
+        self.output_states[channel] = True
+        if self.output_on_error is not None:
+            raise self.output_on_error
+
+    def output_off(self, channel: int) -> None:
+        self.operations.append(("output_off", channel))
+        if self.output_off_error is not None:
+            raise self.output_off_error
+        self.output_states[channel] = False
+
+    def read_voltage_range(self, channel: int) -> SimpleNamespace:
+        self.operations.append(("read_voltage_range", channel))
+        return SimpleNamespace(
+            name="80 V",
+            programming_resolution_v=0.002,
+            measurement_resolution_v=0.002,
+        )
+
+    def read_set_voltage(self, channel: int) -> float:
+        self.operations.append(("read_set_voltage", channel))
+        return float(self._value("read_set_voltage", channel, self.programmed_voltage[channel]))
+
+    def read_set_current(self, channel: int) -> float:
+        self.operations.append(("read_set_current", channel))
+        return float(self._value("read_set_current", channel, self.programmed_current[channel]))
+
+    def read_output_state(self, channel: int) -> bool:
+        self.operations.append(("read_output_state", channel))
+        return bool(self._value("read_output_state", channel, self.output_states[channel]))
+
+    def read_voltage(self, channel: int) -> float:
+        self.operations.append(("read_voltage", channel))
+        default = self.measurement_voltage[channel] if self.output_states[channel] else 0.0
+        return float(self._value("read_voltage", channel, default))
+
+    def read_current(self, channel: int) -> float:
+        self.operations.append(("read_current", channel))
+        default = self.measurement_current[channel] if self.output_states[channel] else 0.0
+        return float(self._value("read_current", channel, default))
+
+
+def monitored_args(*arguments: str) -> Namespace:
+    base = (
+        "--channel", "1",
+        "--monitor-output-for", "0.2",
+        "--expected-voltage", "5",
+        "--expected-current-limit", "0.01",
+        "--max-measured-current", "0.01",
+        "--min-measured-voltage", "4.5",
+        "--max-measured-voltage", "5.5",
+        "--poll-interval", "0.1",
+        "--confirm-write", WRITE_CONFIRMATION,
+        "--confirm-monitored-output-on", MONITORED_OUTPUT_CONFIRMATION,
+    )
+    return parse(*base, *arguments)
+
+
+def run_monitored(driver: MonitoredDriver, args: Namespace | None = None) -> list[str]:
+    clock = FakeClock()
+    output: list[str] = []
+    run_check(
+        args or monitored_args(),
+        driver_factory=lambda _port, _timeout: driver,
+        sleep=clock.sleep,
+        monotonic=clock.monotonic,
+        timestamp=lambda: "2026-01-02T03:04:05.000+00:00",
+        emit=output.append,
+    )
+    return output
+
+
+def test_monitored_output_success_polls_and_reports_timestamped_samples() -> None:
+    driver = MonitoredDriver()
+    output = run_monitored(driver)
+    assert driver.operations[:8] == [
+        ("connect",), ("identify",),
+        ("read_output_state", 1), ("read_output_state", 2),
+        ("read_set_voltage", 1), ("read_set_current", 1),
+        ("read_voltage_range", 1), ("read_voltage", 1),
+    ]
+    assert driver.operations.count(("output_on", 1)) == 1
+    assert driver.operations.count(("output_off", 1)) == 1
+    assert not any(op[0] in {"set_voltage", "set_current"} for op in driver.operations)
+    assert not any(op[0] in {"output_on", "output_off"} and op[1] == 2
+                   for op in driver.operations)
+    assert any(line.startswith("Timestamp (UTC)") for line in output)
+    assert sum(line.startswith("2026-01-02T03:04:05.000+00:00") for line in output) == 3
+    assert "Final output verification: OP1=OFF; OP2=OFF" in output
+    assert driver.operations[-1] == ("disconnect",)
+
+
+@pytest.mark.parametrize("channel", [1, 2])
+def test_monitored_output_rejects_either_output_on_during_preflight(channel: int) -> None:
+    driver = MonitoredDriver()
+    driver.output_states[channel] = True
+    with pytest.raises(MonitoredOutputSafetyError, match="both outputs OFF"):
+        run_monitored(driver)
+    assert not any(op[0] == "output_on" for op in driver.operations)
+    assert driver.operations[-1] == ("disconnect",)
+
+
+def test_monitored_output_rejects_non_exact_identity_before_output() -> None:
+    driver = MonitoredDriver()
+    driver.identity = "OTHER MAKER,QPX600DP,123,1.00"
+    with pytest.raises(MonitoredOutputSafetyError, match="exact supported"):
+        run_monitored(driver)
+    assert not any(op[0] == "output_on" for op in driver.operations)
+    assert driver.operations[-1] == ("disconnect",)
+
+
+@pytest.mark.parametrize(
+    "attribute,value,match",
+    [("programmed_voltage", 4.9, "Programmed voltage"),
+     ("programmed_current", 0.03, "Current limit")],
+)
+def test_monitored_output_rejects_setpoint_mismatch(
+    attribute: str, value: float, match: str,
+) -> None:
+    driver = MonitoredDriver()
+    getattr(driver, attribute)[1] = value
+    with pytest.raises(MonitoredOutputSafetyError, match=match):
+        run_monitored(driver)
+    assert not any(op[0] == "output_on" for op in driver.operations)
+
+
+def test_monitored_output_stops_at_overcurrent_and_attempts_off() -> None:
+    driver = MonitoredDriver()
+    driver.measurement_current[1] = 0.01
+    with pytest.raises(MonitoredOutputSafetyError, match="reached or exceeded"):
+        run_monitored(driver)
+    assert driver.operations.count(("output_on", 1)) == 1
+    assert driver.operations.count(("output_off", 1)) == 1
+    assert driver.output_states[1] is False
+    assert driver.operations[-1] == ("disconnect",)
+
+
+@pytest.mark.parametrize("voltage", [4.49, 5.51])
+def test_monitored_output_stops_outside_voltage_window(voltage: float) -> None:
+    driver = MonitoredDriver()
+    driver.measurement_voltage[1] = voltage
+    with pytest.raises(MonitoredOutputSafetyError, match="outside"):
+        run_monitored(driver)
+    assert driver.output_states[1] is False
+
+
+def test_monitored_output_stops_if_output_unexpectedly_turns_off() -> None:
+    driver = MonitoredDriver()
+    driver.script("read_output_state", 1, False, False, False)
+    with pytest.raises(MonitoredOutputSafetyError, match="unexpectedly"):
+        run_monitored(driver)
+    assert driver.operations.count(("output_off", 1)) == 1
+
+
+@pytest.mark.parametrize(
+    "error",
+    [InstrumentProtocolError("malformed measurement"), InstrumentTimeoutError("timeout")],
+)
+def test_monitored_output_measurement_failure_attempts_off_and_closes(
+    error: BaseException,
+) -> None:
+    driver = MonitoredDriver()
+    driver.script("read_voltage", 1, 0.0, error)
+    with pytest.raises(type(error), match=str(error)):
+        run_monitored(driver)
+    assert driver.operations.count(("output_off", 1)) == 1
+    assert driver.operations[-1] == ("disconnect",)
+
+
+def test_monitored_output_failure_during_output_on_never_retries_and_attempts_off() -> None:
+    driver = MonitoredDriver()
+    driver.output_on_error = InstrumentTimeoutError("ambiguous Output On write")
+    with pytest.raises(InstrumentTimeoutError, match="ambiguous"):
+        run_monitored(driver)
+    assert driver.operations.count(("output_on", 1)) == 1
+    assert driver.operations.count(("output_off", 1)) == 1
+    assert driver.output_states[1] is False
+    assert driver.operations[-1] == ("disconnect",)
+
+
+def test_monitored_output_reports_when_off_cannot_be_confirmed() -> None:
+    driver = MonitoredDriver()
+    driver.output_off_error = InstrumentTimeoutError("OFF write failed")
+    driver.script("read_output_state", 1, False, True, True)
+    output: list[str] = []
+    clock = FakeClock()
+    with pytest.raises(MonitoredOutputSafetyError, match="could not be confirmed"):
+        run_check(
+            monitored_args(),
+            driver_factory=lambda _port, _timeout: driver,
+            sleep=clock.sleep,
+            monotonic=clock.monotonic,
+            timestamp=lambda: "timestamp",
+            emit=output.append,
+        )
+    assert driver.operations.count(("output_on", 1)) == 1
+    assert driver.operations.count(("output_off", 1)) == 1
+    assert any("physical OFF" in line for line in output)
+    assert driver.operations[-1] == ("disconnect",)
+
+
+@pytest.mark.parametrize("arguments,match", [
+    (("--monitor-output-for", "0"), "duration"),
+    (("--monitor-output-for", str(MAX_MONITORED_DURATION_S + 1)), "duration"),
+    (("--monitor-output-for", "nan"), "finite"),
+    (("--poll-interval", "0"), "Poll interval"),
+    (("--max-measured-current", "0"), "current"),
+    (("--min-measured-voltage", "6", "--max-measured-voltage", "5"), "Minimum"),
+    (("--set-voltage", "5"), "does not accept"),
+    (("--confirm-monitored-output-on", "wrong"), "MONITOR-QPX600DP-OUTPUT"),
+])
+def test_monitored_cli_validation_happens_before_driver_creation(
+    arguments: tuple[str, ...], match: str,
+) -> None:
+    args = monitored_args(*arguments)
+    created = False
+
+    def factory(_port: str, _timeout: float) -> RecordingDriver:
+        nonlocal created
+        created = True
+        return RecordingDriver()
+
+    with pytest.raises(HardwareCheckAuthorizationError, match=match):
+        run_check(args, driver_factory=factory)
+    assert created is False
+
+
+def test_monitored_cli_requires_every_explicit_value_and_both_tokens() -> None:
+    args = parse(
+        "--channel", "1",
+        "--monitor-output-for", "1",
+        "--confirm-write", WRITE_CONFIRMATION,
+        "--confirm-monitored-output-on", MONITORED_OUTPUT_CONFIRMATION,
+    )
+    with pytest.raises(HardwareCheckAuthorizationError, match="requires"):
+        validate_authorization(args)
+
+    args = monitored_args("--confirm-write", "wrong")
+    with pytest.raises(HardwareCheckAuthorizationError, match="confirm-write"):
+        validate_authorization(args)
+
+
+class OfflineInstrumentSerial:
+    """Stateful fake serial endpoint; it never opens or discovers a system port."""
+
+    def __init__(self) -> None:
+        self.is_open = True
+        self.writes: list[bytes] = []
+        self.pending_response = b""
+        self.output_states = {1: False, 2: False}
+
+    def write(self, data: bytes) -> int:
+        self.writes.append(data)
+        command = data.decode("ascii").rstrip("\n")
+        if command == "OP1 1":
+            self.output_states[1] = True
+        elif command == "OP1 0":
+            self.output_states[1] = False
+        elif command == "OP2 1":
+            self.output_states[2] = True
+        elif command == "OP2 0":
+            self.output_states[2] = False
+        elif command.endswith("?"):
+            self.pending_response = (self._response(command) + "\r\n").encode("ascii")
+        return len(data)
+
+    def _response(self, command: str) -> str:
+        responses = {
+            "*IDN?": "THURLBY THANDAR,QPX600DP,123,1.00",
+            "V1?": "V1 5.000",
+            "I1?": "I1 0.01",
+            "V2?": "V2 2.000",
+            "I2?": "I2 0.10",
+            "VRANGE1?": "2",
+            "VRANGE2?": "2",
+            "*STB?": "0",
+        }
+        if command in responses:
+            return responses[command]
+        if command in {"OP1?", "OP2?"}:
+            return "1" if self.output_states[int(command[2])] else "0"
+        if command in {"V1O?", "V2O?"}:
+            channel = int(command[1])
+            return "5.000V" if channel == 1 and self.output_states[channel] else "0.000V"
+        if command in {"I1O?", "I2O?"}:
+            channel = int(command[1])
+            return "0.005A" if channel == 1 and self.output_states[channel] else "0.000A"
+        raise AssertionError(f"Unexpected fake command: {command}")
+
+    def flush(self) -> None:
+        pass
+
+    def read_until(self, expected: bytes = b"\n", size: int | None = None) -> bytes:
+        response = self.pending_response
+        self.pending_response = b""
+        return response
+
+    def close(self) -> None:
+        self.is_open = False
+
+
+def test_monitored_output_fake_serial_exact_command_sequence_and_closure() -> None:
+    fake = OfflineInstrumentSerial()
+    factory_calls: list[dict[str, object]] = []
+
+    def serial_factory(**settings: object) -> OfflineInstrumentSerial:
+        factory_calls.append(settings)
+        return fake
+
+    def driver_factory(port: str, timeout: float) -> QPX600DPDriver:
+        return QPX600DPDriver(SerialTransport(
+            port,
+            timeout_s=timeout,
+            write_timeout_s=timeout,
+            serial_factory=serial_factory,
+        ))
+
+    clock = FakeClock()
+    args = monitored_args("--monitor-output-for", "0.1")
+    run_check(
+        args,
+        driver_factory=driver_factory,
+        sleep=clock.sleep,
+        monotonic=clock.monotonic,
+        timestamp=lambda: "timestamp",
+        emit=lambda _message: None,
+    )
+    assert len(factory_calls) == 1
+    assert factory_calls[0]["port"] == "COM8"
+    assert fake.writes == [f"{command}\n".encode("ascii") for command in [
+        "*IDN?", "OP1?", "OP2?", "V1?", "I1?", "VRANGE1?", "V1O?", "I1O?",
+        "OP1 1",
+        "OP1?", "V1O?", "I1O?",
+        "OP1?", "V1O?", "I1O?",
+        "OP1 0", "OP1?",
+        "OP1?", "OP2?",
+        "VRANGE1?", "V1?", "I1?", "OP1?", "V1O?", "I1O?",
+        "VRANGE2?", "V2?", "I2?", "OP2?", "V2O?", "I2O?",
+        "*STB?",
+    ]]
+    assert fake.output_states == {1: False, 2: False}
+    assert fake.is_open is False

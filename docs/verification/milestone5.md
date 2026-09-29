@@ -112,6 +112,62 @@ Each serial session was closed normally.
 
 ## Conservative boundaries and remaining validation
 
+### Guarded monitored-output safety follow-up
+
+The explicit-port helper now provides a separate monitored-output mode for a
+future supervised loaded test. This implementation was developed and tested
+offline only. It has not been used against COM3 or any physical instrument, so
+real monitored-output validation remains pending.
+
+The mode requires every safety value and both independent confirmation tokens:
+
+```text
+python -m qpx_electrolyser.instrument.hardware_check \
+  --port <EXPLICIT_PORT> \
+  --channel <1_OR_2> \
+  --monitor-output-for <SECONDS> \
+  --expected-voltage <VOLTS> \
+  --expected-current-limit <AMPS> \
+  --max-measured-current <AMPS> \
+  --min-measured-voltage <VOLTS> \
+  --max-measured-voltage <VOLTS> \
+  --poll-interval <SECONDS> \
+  --confirm-write WRITE-QPX600DP \
+  --confirm-monitored-output-on MONITOR-QPX600DP-OUTPUT
+```
+
+Duration is limited to 60 seconds and the polling interval to 0.05 through
+1.0 seconds. All monitored-mode arguments are checked before the driver is
+created or a serial port can be opened. The mode conflicts with set-voltage,
+set-current, Output-Off, legacy timed-Output-On and legacy safety-limit options;
+it never changes programmed voltage, current limit, voltage range, protection
+settings or the other channel.
+
+Before Output On it requires the exact supported manufacturer/model identity,
+queries both output states, and queries the selected channel's programmed
+voltage, current limit, voltage range and unloaded measurements. Both outputs
+must be OFF. Programmed values must match the explicitly expected values within
+half of the documented programming resolution for the active range/current
+grid. After `OP<N> 1`, each bounded polling cycle queries `OP<N>?`, `V<N>O?`
+and `I<N>O?` and prints a UTC timestamp, elapsed time, measured voltage,
+measured current and output state.
+
+The run stops immediately on the supplied current threshold, outside the
+supplied voltage window, unexpected Output Off, parsing/communication failure,
+or the deadline. A cleanup scope is active before `OP<N> 1` is attempted. It
+attempts `OP<N> 0` exactly once even if the Output-On transaction raises after
+partial transmission, then queries `OP<N>?` when communication remains
+available and reports explicitly when physical OFF cannot be confirmed. After
+a confirmed shutdown it queries both output states. A fully successful run also
+prints both channels' final readback and the non-destructive status byte.
+
+Offline fake-driver and stateful fake-serial coverage includes successful
+polling, exact command order, either output already ON, identity/setpoint
+mismatch, overcurrent, under/over-voltage, unexpected Output Off, malformed and
+timed-out responses, failures during and after Output On, guaranteed cleanup
+attempt, no automatic retry, other-channel isolation, serial closure, and CLI
+validation before driver creation.
+
 - `connect()` and `disconnect()` only open/close the host handle. They do not
   issue reset, range, configuration, status-clear, lock or output commands.
 - Set voltage queries the already-selected range and refuses values outside it;
@@ -126,12 +182,13 @@ Each serial session was closed normally.
   zero-effect operation and must be supervised on real hardware.
 - Set commands have no documented acknowledgement. The driver does not invent
   one and does not query-and-clear error registers behind the caller's back.
-- Output On is never automatic. The helper requires two independent confirmation
-  tokens, explicit voltage/current setpoints, and separate user safety limits;
-  it attempts Output Off in a `finally` block but cannot guarantee OFF after a
-  cable, process or hardware failure.
+- Output On is never automatic. The legacy helper retains its two-token bounded
+  dwell interface unchanged. The new monitored mode has a distinct strong
+  confirmation token, does not write setpoints, polls throughout the run, and
+  makes one best-effort Output-Off attempt; software cannot guarantee physical
+  OFF after a cable, process or hardware failure.
 
-This is partial hardware validation only. Output On remains untested. Loaded
-voltage delivery, loaded current delivery and operation with an electrolyser
-remain pending and must not be inferred from the unloaded setpoint read-backs.
-Milestone 6 was not started.
+This remains partial hardware validation only. Real Output On remains untested.
+Loaded voltage delivery, loaded current delivery and operation with an
+electrolyser remain pending and must not be inferred from the unloaded setpoint
+read-backs or offline monitored-mode tests.
