@@ -3,7 +3,8 @@
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
 assumption. Version 0.7.1 preserves those historical records, the Milestone 5
-QPX600DP serial backend and partial Windows validation, the Milestone 6 shared
+QPX600DP serial backend and completed two-channel standard-load Windows
+validation, the Milestone 6 shared
 asynchronous command queue, and adds Milestone 7 dual-channel manual controls
 with a guarded explicit-port hardware connection.
 
@@ -11,9 +12,9 @@ Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
 shared backend-owner worker constructs `SerialTransport` and `QPX600DPDriver`
 only after explicit Real Hardware Connect. There is no experiment protocol.
-Physical validation remains limited
-to identification, read-only queries and unloaded voltage-setpoint read-back
-with both outputs OFF.
+Physical validation includes identification, read-only queries, guarded setpoint
+read-back, and monitored standard-load Output-On/Off tests on both channels.
+Electrolyser validation remains outside Milestone 5 and is pending.
 
 ## Windows installation
 
@@ -162,6 +163,22 @@ The helper attempts OFF in a `finally` block after the requested interval, but
 software cannot guarantee OFF after cable loss, OS failure or instrument failure.
 Use an independent physical shutdown method during any future test.
 
+For supervised loaded validation, the separate monitored-output mode requires
+explicit expected setpoints, maximum measured current, minimum/maximum measured
+voltage, polling interval, voltage-settling time, the write token, and the strong
+`MONITOR-QPX600DP-OUTPUT` token. It verifies both outputs OFF before enabling one
+channel, polls output state and loaded measurements throughout, applies current/
+over-voltage/communication checks immediately, and performs guarded Output-Off
+cleanup with final two-channel OFF verification.
+
+Milestone 5 standard-load acceptance passed on both channels with the same
+verified 100 ohm +/-5%, 1/4 W resistor at 4.000 V / 0.080 A. CH1 measured a
+stable 3.989-3.990 V / 0.037-0.038 A; CH2 measured 3.995-3.998 V /
+0.040-0.041 A. Cleanup and final OFF verification passed after each run. Earlier
+ModuLab Test Cell attempts were safely aborted; its 10 mA maximum is unsuitable
+for this validation because of the QPX600DP current-setting and metering
+resolution/accuracy. See [Milestone 5 verification](docs/verification/milestone5.md).
+
 ## Hardware capability versus safety policy
 
 The QPX600DP hardware has two voltage ranges per output (60 V and 80 V), a
@@ -225,14 +242,14 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Backend contract and documented architecture | Preserved; QPX facts corrected |
 | Independent simulation backend | Preserved; QPX ranges/envelope corrected |
 | Simulation connection GUI | Preserved; still the default mode |
-| Explicit-port `SerialTransport` and QPX600DP backend | Implemented; fake serial plus partial Windows validation |
+| Explicit-port `SerialTransport` and QPX600DP backend | Implemented; fake serial and two-channel standard-load Windows validation passed |
 | Shared priority instrument command worker | Implemented for simulator and guarded explicit-port backend; FIFO, priority, cancellation and shutdown tested |
 | COM-port enumeration | Not implemented and not performed |
 | Physical backend in GUI | Guarded explicit-port path implemented with fake-transport validation; real acceptance pending |
 | Dual-channel manual controls | Implemented for simulator and identified QPX600DP; stronger confirmation for real Output On |
 | Experiment protocols, CSV data and plots | Not implemented |
 | Complete configurable safety system | Not implemented |
-| Windows and real-hardware validation | Partial: identification, read-only check and unloaded setpoint read-back passed; Output On, loaded delivery and electrolyser validation pending |
+| Windows and real-hardware validation | Milestone 5 standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
 
 The QPX600DP is a programmable DC power supply, not a potentiostat. Any later
 voltage sweep would apply discrete two-terminal voltage steps and would not

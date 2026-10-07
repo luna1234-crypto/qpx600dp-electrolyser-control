@@ -119,18 +119,25 @@ tests, source compilation and dependency checks passed, and `git diff --check`
 reported no errors. See [verification details](verification/milestone5.md).
 
 The explicit-port hardware helper is read-only by default. Every mutation
-requires a write-confirmation token; Output On additionally requires a separate
-Output-On token, explicit setpoints and explicit user safety limits. Partial
-supervised Windows validation identified a QPX600DP, passed the default
-read-only check, and verified unloaded programmed-voltage read-back at 10 V on
-channel 1 and 5 V on channel 2. Current limits and 80 V ranges remained
-unchanged, both outputs remained OFF, and the status byte was 0.
+requires a write-confirmation token. Guarded monitored Output On additionally
+requires a separate strong token, explicit expected setpoints, current and
+voltage limits, bounded polling and voltage-settling time. It polls output state,
+loaded voltage and loaded current throughout the authorised duration and always
+attempts selected-channel Output Off after Output On is attempted.
 
-The GUI remains Simulation Mode only. Its automatic smoke test and manual
-Connect/Disconnect/Reconnect exercise passed on Windows. Output On, loaded
-voltage/current delivery, electrolyser operation, broader firmware variation
-and timeout selection remain pending supervised commissioning. Milestone 6 has
-not started at that checkpoint.
+Supervised Windows validation identified a QPX600DP, passed default read-only
+checks and guarded unloaded setpoint read-back, and completed standard-load tests
+on both channels using the same verified 100 ohm +/-5%, 1/4 W resistor. At
+4.000 V / 0.080 A, CH1 measured a stable 3.989-3.990 V / 0.037-0.038 A for
+5.015 seconds; CH2 measured 3.995-3.998 V / 0.040-0.041 A for approximately
+5.03 seconds. Output-Off cleanup passed after each run and final OP1/OP2 state
+was OFF. The operator visually confirmed the CH2 physical ON indicator and CV
+display. Values were consistent with the nominal load.
+
+Earlier ModuLab Test Cell attempts were safely aborted. Its 10 mA maximum was
+determined incompatible with the QPX600DP current-setting and metering
+resolution/accuracy for this validation. Electrolyser validation is outside
+Milestone 5 and remains pending. See [verification details](verification/milestone5.md).
 
 ## Milestone 6 - Shared asynchronous instrument command queue
 

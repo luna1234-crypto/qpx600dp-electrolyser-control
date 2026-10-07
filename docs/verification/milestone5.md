@@ -1,6 +1,8 @@
-# Milestone 5 verification - QPX600DP serial driver and partial Windows validation
+# Milestone 5 verification - QPX600DP driver and standard-load Windows validation
 
-Date: 2026-09-24
+Initial verification: 2026-09-24
+
+Standard-load completion: 2026-10-07
 
 ## Scope and authority
 
@@ -127,15 +129,53 @@ and then confirmed OP1 and OP2 both OFF. Total monitored Output-On time was
 0.016 seconds. There was no retry. This safely aborted startup sample is not a
 successful loaded-voltage or loaded-current validation.
 
+### Test Cell attempts and no-load isolation
+
+Further supervised attempts with the ModuLab Test Cell were safely aborted by
+the monitored-output guards. One attempt stopped when measured current reached
+0.020 A against a 0.010 A limit; another stopped when CH1 unexpectedly reported
+OFF during startup. In every case the selected-channel Output-Off cleanup was
+sent and both OP1 and OP2 were subsequently confirmed OFF.
+
+A separate open-circuit isolation test at 2.000 V / 0.010 A completed for about
+5 seconds. CH1 settled to approximately 1.992 V with zero steady measured
+current, cleanup passed, and both outputs were confirmed OFF. This demonstrated
+that the instrument and guarded monitoring path could sustain a no-load output.
+
+The ModuLab Test Cell was determined unsuitable for this commissioning step.
+Its 10 mA maximum is incompatible with the QPX600DP current-setting and current-
+metering resolution/accuracy at that boundary. These aborted attempts are not
+electrolyser validation and no successful Test Cell result is claimed.
+
+### Two-channel standard-load validation - passed
+
+A verified 100 ohm +/-5%, 1/4 W resistor was used as the standard load. It was
+connected across one channel at a time and moved only after the first channel
+was confirmed OFF. Both channels used 4.000 V programmed voltage, 0.080 A current
+limit, a 1-second voltage-settling allowance, and guarded monitored Output-On.
+
+CH1 completed 5.015 seconds with stable measured voltage of 3.989-3.990 V and
+stable measured current of 0.037-0.038 A. Output-Off cleanup passed and final
+verification confirmed OP1 and OP2 OFF.
+
+After CH1 was OFF, the same resistor was moved to CH2. CH2 completed approximately
+5.03 seconds with stable measured voltage of 3.995-3.998 V and stable measured
+current of 0.040-0.041 A. The operator visually confirmed the physical CH2 ON
+indicator and CV display during the run. Output-Off cleanup passed and final
+verification again confirmed OP1 and OP2 OFF.
+
+Both channels produced voltage and current values consistent with the nominal
+100 ohm load when the resistor tolerance and instrument measurement resolution/
+accuracy are considered. The instrument serial number is intentionally omitted.
+
 ## Conservative boundaries and remaining validation
 
 ### Guarded monitored-output safety follow-up
 
-The explicit-port helper provides a separate monitored-output mode for a future
-supervised loaded test. The startup-settling revision described below was
-developed and tested offline only and has not been used against COM3 or any
-physical instrument. Successful real monitored-output validation remains
-pending.
+The explicit-port helper provides a separate monitored-output mode for supervised
+loaded tests. The startup-settling revision described below was first developed
+and fake-tested offline, then used for the successful no-load isolation and
+two-channel standard-load validations recorded above.
 
 The mode requires every safety value and both independent confirmation tokens:
 
@@ -200,7 +240,8 @@ not extend the total authorised Output-On duration.
 - Set voltage queries the already-selected range and refuses values outside it;
   it never changes the range automatically.
 - The driver requires the documented fixed-point response shape and exact unit
-  suffixes. Actual firmware formatting and precision remain unverified.
+  suffixes. Those forms passed on the validated instrument; broader firmware
+  formatting variation remains unverified.
 - Issue 14 p. 36 describes the third `*IDN?` field as `0`, while p. 25 shows a
   serial number. The parser conservatively retains any nonempty third field and
   still requires exactly four fields and model `QPX600DP`.
@@ -215,7 +256,9 @@ not extend the total authorised Output-On duration.
   makes one best-effort Output-Off attempt; software cannot guarantee physical
   OFF after a cable, process or hardware failure.
 
-This remains partial hardware validation only. Real Output On remains untested.
-Loaded voltage delivery, loaded current delivery and operation with an
-electrolyser remain pending and must not be inferred from the unloaded setpoint
-read-backs or offline monitored-mode tests.
+Milestone 5 standard-load hardware validation is complete: identification,
+read-only state, guarded setpoint read-back, monitored Output On, loaded voltage
+and current measurement, and Output-Off cleanup passed on both channels.
+Electrolyser validation is outside Milestone 5 and remains pending. The standard-
+load results must not be interpreted as validation of an electrolyser, Test Cell,
+or electrochemical protocol.
