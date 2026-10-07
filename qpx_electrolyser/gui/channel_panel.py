@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from qpx_electrolyser.app.channel_controller import ChannelSnapshot
+from qpx_electrolyser.data.csv_logging import LoggingSnapshot
 from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES
 
 
@@ -24,6 +25,8 @@ class ChannelPanel(QGroupBox):
     current_requested = Signal(str)
     output_on_requested = Signal(bool)
     output_off_requested = Signal()
+    start_logging_requested = Signal()
+    stop_logging_requested = Signal()
 
     def __init__(self, channel: int) -> None:
         super().__init__(f"Channel {channel}")
@@ -31,6 +34,7 @@ class ChannelPanel(QGroupBox):
         self.channel = channel
         self._real_hardware = False
         self._snapshot = ChannelSnapshot(channel=channel)
+        self._logging_snapshot = LoggingSnapshot(channel=channel)
 
         self.programmed_voltage_value = QLabel("Unavailable")
         self.current_limit_value = QLabel("Unavailable")
@@ -81,12 +85,26 @@ class ChannelPanel(QGroupBox):
         self.message_label.setWordWrap(True)
         self.message_label.setObjectName(f"channel{channel}Message")
 
+        self.start_logging_button = QPushButton("Start Logging")
+        self.start_logging_button.setObjectName(f"channel{channel}StartLogging")
+        self.stop_logging_button = QPushButton("Stop Logging")
+        self.stop_logging_button.setObjectName(f"channel{channel}StopLogging")
+        logging_buttons = QHBoxLayout()
+        logging_buttons.addWidget(self.start_logging_button)
+        logging_buttons.addWidget(self.stop_logging_button)
+        self.logging_status_label = QLabel("Logging stopped")
+        self.logging_status_label.setWordWrap(True)
+        self.logging_status_label.setObjectName(f"channel{channel}LoggingStatus")
+
         layout = QVBoxLayout(self)
         layout.addLayout(readings)
         layout.addSpacing(8)
         layout.addLayout(setters)
         layout.addLayout(outputs)
         layout.addWidget(self.message_label)
+        layout.addSpacing(8)
+        layout.addLayout(logging_buttons)
+        layout.addWidget(self.logging_status_label)
         layout.addStretch(1)
 
         self.refresh_button.clicked.connect(self.refresh_requested)
@@ -98,7 +116,10 @@ class ChannelPanel(QGroupBox):
         )
         self.output_on_button.clicked.connect(self._confirm_output_on)
         self.output_off_button.clicked.connect(self.output_off_requested)
+        self.start_logging_button.clicked.connect(self.start_logging_requested)
+        self.stop_logging_button.clicked.connect(self.stop_logging_requested)
         self.apply_snapshot(ChannelSnapshot(channel=channel))
+        self.apply_logging_snapshot(LoggingSnapshot(channel=channel))
 
     @Slot(object)
     def apply_snapshot(self, snapshot: ChannelSnapshot) -> None:
@@ -139,6 +160,30 @@ class ChannelPanel(QGroupBox):
             )
         self.message_label.setText(snapshot.message)
         self.message_label.setStyleSheet("color: #a61b1b;" if snapshot.error else "")
+        self._update_logging_buttons()
+
+    @Slot(object)
+    def apply_logging_snapshot(self, snapshot: LoggingSnapshot) -> None:
+        if snapshot.channel != self.channel:
+            return
+        self._logging_snapshot = snapshot
+        detail = snapshot.message
+        if snapshot.active:
+            detail += (
+                f" | samples={snapshot.sample_count}, missed={snapshot.missed_samples}"
+            )
+        self.logging_status_label.setText(detail)
+        self.logging_status_label.setToolTip(
+            "" if snapshot.file_path is None else str(snapshot.file_path)
+        )
+        self.logging_status_label.setStyleSheet("color: #a61b1b;" if snapshot.error else "")
+        self._update_logging_buttons()
+
+    def _update_logging_buttons(self) -> None:
+        self.start_logging_button.setEnabled(
+            self._snapshot.connected and not self._logging_snapshot.active
+        )
+        self.stop_logging_button.setEnabled(self._logging_snapshot.active)
 
     @Slot(bool)
     def set_real_hardware_mode(self, enabled: bool) -> None:

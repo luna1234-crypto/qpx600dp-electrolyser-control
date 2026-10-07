@@ -14,6 +14,10 @@ class ApplicationPaths:
     def log_directory(self) -> Path:
         return self.project_root / "logs"
 
+    @property
+    def data_directory(self) -> Path:
+        return self.project_root / "Data"
+
 
 def default_paths() -> ApplicationPaths:
     """Resolve the source root, including when its Windows path contains spaces."""

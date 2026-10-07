@@ -5,7 +5,8 @@ code implements the entrypoints, dual-channel manual-control GUI, diagnostic log
 `PowerSupplyInterface`, immutable capabilities, the configurable two-channel
 `SimulatedPowerSupply`, the milestone 4 asynchronous simulation lifecycle,
 the Milestone 5 `SerialTransport` / `QPX600DPDriver`, the Milestone 6 shared
-priority command worker and Milestone 7 per-channel controllers. The guarded
+priority command worker, Milestone 7 per-channel controllers and Milestone 8
+independent CSV loggers. The guarded
 follow-up connects the physical backend through that same worker only after an
 explicit mode, port and Connect action.
 See [simulator behaviour](simulator.md).
@@ -17,8 +18,12 @@ The remaining design follows the [QPX600DP command reference](qpx600dp_commands.
 flowchart TD
     GUI["Qt GUI thread"] --> C1["ManualChannelController 1"]
     GUI --> C2["ManualChannelController 2"]
+    GUI --> L1["ChannelLoggingController 1"]
+    GUI --> L2["ChannelLoggingController 2"]
     C1 --> IC
     C2 --> IC
+    L1 --> IC
+    L2 --> IC
     GUI --> E1["Future ChannelEngine 1"]
     GUI --> E2["Future ChannelEngine 2"]
     GUI --> IC["InstrumentController"]
@@ -46,8 +51,8 @@ The selected backend is instantiated, connected, used and disconnected only by
 the communication worker.
 There is one worker and one instrument session per
 physical unit, shared by both channel engines. The simulator uses the same queue
-and public interface. One writer per physical connection remains mandatory even
-when transport changes.
+and public interface. CSV files remain per channel and per explicit logging run,
+independent of the selected transport.
 
 | Component | Responsibilities | Excluded responsibilities |
 | --- | --- | --- |
@@ -59,7 +64,7 @@ when transport changes.
 | ChannelEngine, one per channel | Own state transitions, protocol time, local logger and measured results | No shared-port access |
 | TestProtocol implementations | Generate planned steps and averaging rules | No GUI, serial handles or wall-clock sleeps |
 | SafetyValidator | Validate full protocol against software and documented hardware capability before Start | No silent clamping or device writes |
-| DataLogger, one per channel | Exclusive creation, CSV rows, metadata, flush/sync/close and file errors | No plot buffer or software diagnostic logging |
+| ChannelLoggingController / CsvLogFile, one per channel | Monotonic scheduling through the shared queue; exclusive creation, CSV rows, flush/close and file errors | No direct backend, plot buffer or software diagnostic logging |
 
 Milestone 7 instantiates two `ManualChannelController` objects in the Qt thread.
 They share the same `ConnectionController` and therefore the same worker/backend.
@@ -75,6 +80,22 @@ recovery. Connection loss clears both displays to a disabled, unknown state.
 limit, measured voltage/current, voltage range and output state. Output On needs
 an explicit confirmation dialog and Output Off uses the queue's safety priority.
 Neither widget nor manual controller creates a backend, transport or thread.
+
+Milestone 8 adds two `ChannelLoggingController` objects in the Qt thread. A
+single-shot precise timer schedules each channel independently, but every
+complete read-back is one `BACKGROUND` queue operation. Only one logger request
+per channel can be pending, so queries cannot overlap or interleave. Completed
+read-backs may update the corresponding manual display, but the logger never
+receives or calls the backend directly.
+
+Sample deadlines are anchored to the start monotonic clock. Deadlines passed
+while a request is pending are counted as missed and are not replayed in a
+burst; scheduling resumes at the next future slot. UTC timestamps are recorded
+separately. Files use Windows-safe UTC names, exclusive `x` creation, one header,
+per-row flush and deterministic close. Disconnect and shared-session failure
+stop both loggers. Directory, permission, disk/write, malformed-result or local
+sample failure stops only that channel unless the connection itself fails.
+Reconnect requires an explicit new Start and therefore a new file.
 
 The connection controller defaults to Simulation Mode. Real Hardware selection
 requires a warning acknowledgement and a manually typed `COM<N>` name; neither
@@ -123,9 +144,10 @@ is immutable, while every simulator instance owns separate channel state and RNG
 
 All connection and command work runs off the GUI thread through the same worker.
 Milestone 6 adds request IDs, FIFO sequence metadata, command futures, explicit
-priorities and cancellation keys; Milestone 7 uses them for two-channel manual
-controls.
-Session/run generations and cross-channel telemetry fairness remain engine-level
+priorities and cancellation keys; Milestone 7 uses them for manual controls and
+Milestone 8 uses `BACKGROUND` priority with independent cancellation keys for
+logging. Session generations are recorded in each CSV row.
+Run generations and cross-channel telemetry fairness remain engine-level
 work for later milestones. No direct-serial GUI callbacks are acceptable.
 
 ## Transaction, cancellation and fairness rules
@@ -232,13 +254,12 @@ does not interpolate or assume `600 / V` and may reject usable physical points.
 Keep user limits lower as required for each experiment. Recheck measured power
 and trip events while running.
 
-Each channel writes rows continuously through its own engine/logger. Reserve
-unique files using exclusive creation and sanitised Windows-safe names, including
-reserved names. Write companion metadata before enabling the output. Flush each
-row or a small bounded batch; add periodic fsync with a documented durability
-interval. Flushing is not a guarantee against sudden power loss. Surface file
-errors, command channel OFF independently of disk cleanup, and mark ERROR in the
-CSV/metadata if a write remains possible. Never invent a successful error row.
+Each channel writes rows continuously through its own logger. Files use exclusive
+creation and Windows-safe timestamp names. Each row is flushed immediately;
+flushing is not a guarantee against sudden power loss. File errors stop only the
+affected logger and never command an output or change any instrument setting.
+The logger records an error row only when the file remains writable and never
+invents a successful error row.
 
 Retain full data on disk. Plotting receives bounded snapshots through signals,
 with at most 5,000-20,000 retained display points per channel. Pause-plot affects
@@ -255,12 +276,13 @@ documentation to QPX600DP without rewriting those commits. Milestone 5 adds an
 offline-tested physical driver and explicit-port transport but deliberately does
 not connect them to the GUI. Milestone 6 integrates a shared priority command
 queue into the existing single-owner boundary without adding a second backend
-owner. Milestone 7 adds manual control and a guarded explicit-port follow-up
-without adding port discovery, protocols, logging, plotting or global emergency
-control. Real-hardware acceptance of the GUI path remains pending. Protocols
+owner. Milestone 7 adds manual control and a guarded explicit-port follow-up;
+Milestone 8 adds queue-fed CSV logging without port discovery, protocols,
+plotting or global emergency control. Milestone 7 real-hardware GUI acceptance
+is complete; Milestone 8 logging validation is Simulation Mode only. Protocols
 remain later work.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
-Later data tests must cover unwritable files, interruption and bounded memory.
+Logging tests cover unwritable files, interruption and bounded in-flight work.
 Windows hardware and 24-hour accelerated simulator acceptance belong to their
 specified later milestones; they are not claimed by the current test suite.

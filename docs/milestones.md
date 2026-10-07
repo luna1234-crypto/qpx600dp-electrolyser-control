@@ -235,3 +235,25 @@ visually confirmed OFF and the load was removed after disconnection.
 This completes Milestone 7 real-hardware GUI acceptance. Electrolyser validation
 remains pending and outside Milestone 7; this follow-up is not Milestone 8. See
 [Milestone 7 verification](verification/milestone7.md).
+
+## Milestone 8 - Independent continuous CSV logging
+
+Added independent Start Logging and Stop Logging controls for CH1 and CH2, a
+shared user-selected output directory and a bounded sample interval. Either
+channel can log alone or both can log simultaneously. Every sample is one atomic
+`BACKGROUND` operation on the Milestone 6 queue; logging and GUI code never hold
+or call the backend.
+
+CSV files are created exclusively with Windows-safe UTC names, written with one
+fixed header, flushed after every row and closed deterministically. Rows record
+wall and monotonic time, channel, both programmed values, both measurements,
+range, output state, connection state/session generation and sample status/error.
+Fixed monotonic deadlines avoid drift; delayed slots are counted and skipped,
+not replayed as a burst, and overlapping channel polls are prevented.
+
+Disconnect, reconnect, shutdown, missing directory, permission/disk/write error,
+malformed results and backend/queue failures are covered. A file failure stops
+only its channel. Reconnect requires a new explicit Start and new file. Protocols
+and live plotting remain deferred. The complete suite and Simulation Mode smoke
+test passed without residual worker threads or QThread warnings. See
+[verification details](verification/milestone8.md).

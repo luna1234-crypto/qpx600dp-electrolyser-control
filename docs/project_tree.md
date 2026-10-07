@@ -22,6 +22,7 @@ QPX 600 DP/
             paths.py
         data/
             __init__.py
+            csv_logging.py
         engine/
             protocols/
                 __init__.py
@@ -72,6 +73,7 @@ QPX 600 DP/
             milestone6.md
             milestone7.md
             milestone7_real_hardware.md
+            milestone8.md
             model_correction_qpx600dp.md
         architecture.md
         qpx600dp_commands.md
@@ -92,6 +94,7 @@ QPX 600 DP/
         test_channel_gui.py
         test_connection_gui.py
         test_connection_worker.py
+        test_csv_logging.py
         test_hardware_check.py
         test_logging_config.py
         test_model_identity.py

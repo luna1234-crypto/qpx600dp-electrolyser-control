@@ -41,6 +41,7 @@ class ConnectionSnapshot:
     instrument_id: str | None
     initial_readbacks: tuple[ChannelReadback, ...]
     message: str
+    session_id: int = 0
 
     @property
     def mode_label(self) -> str:
@@ -103,6 +104,7 @@ class ConnectionController(QObject):
             message="Simulation Mode ready. No hardware I/O is performed.",
         )
         self._shutting_down = False
+        self._session_id = 0
         self._failure_during_disconnect: str | None = None
         self._worker_signals = _WorkerSignals()
         self._worker_signals.connected.connect(
@@ -278,12 +280,14 @@ class ConnectionController(QObject):
             self._handle_failed("connect", "Connection initialization returned an invalid result.")
             return
         target = "Simulator" if self._snapshot.simulation_mode else self._snapshot.port_name
+        self._session_id += 1
         self._publish(replace(
             self._snapshot,
             state=ConnectionState.CONNECTED,
             instrument_id=result.identification,
             initial_readbacks=result.readbacks,
             message=f"{target} identified and both channels read successfully.",
+            session_id=self._session_id,
         ))
 
     @Slot()

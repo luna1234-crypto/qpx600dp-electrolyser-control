@@ -1,1 +1,1 @@
-"""Reserved for continuous experiment logging from milestone 8."""
+"""Independent continuous CSV logging."""

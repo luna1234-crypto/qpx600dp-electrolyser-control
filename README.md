@@ -2,11 +2,12 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.7.1 preserves those historical records, the Milestone 5
+assumption. Version 0.8.0 preserves those historical records, the Milestone 5
 QPX600DP serial backend and completed two-channel standard-load Windows
 validation, the Milestone 6 shared
-asynchronous command queue, and adds Milestone 7 dual-channel manual controls
-with a guarded explicit-port hardware connection.
+asynchronous command queue, Milestone 7 dual-channel manual controls with a
+guarded explicit-port hardware connection, and Milestone 8 independent CSV
+logging.
 
 Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
@@ -72,6 +73,17 @@ Off is queued at safety priority. Controls are disabled while their channel has
 a pending command, after a backend fault, and whenever disconnected. Refresh can
 recover a channel display after a command fault.
 
+Each channel also has independent Start Logging and Stop Logging controls.
+Choose an existing output directory and a 0.1 to 3600 second interval, then log
+either channel or both. Every complete measurement request runs at background
+priority through the shared command queue; logging and GUI code never call a
+backend directly and never change an instrument setting or output state.
+
+CSV files use Windows-safe UTC names and exclusive creation, so existing files
+are never overwritten. Each row is flushed immediately. Stop, disconnect,
+application shutdown or an error closes the affected file deterministically;
+reconnect never silently resumes an old log.
+
 The console demonstration also uses Simulation Mode only:
 
 ```powershell
@@ -135,6 +147,21 @@ and disconnected with both outputs OFF. With the verified 100 ohm, 1/4 W load at
 channel; live readback, physical ON/CV indication, Output Off and Disconnect
 worked normally while the other channel stayed OFF. Final OP1/OP2 state was
 visually confirmed OFF and the load was removed after disconnection.
+
+## Milestone 8 independent CSV logging
+
+CH1 and CH2 log independently or simultaneously. Rows contain ISO-8601 UTC and
+monotonic elapsed timestamps, channel, programmed voltage/current, measured
+voltage/current, selected range, output state, connection state, session
+generation, sample status and error text.
+
+Scheduling is anchored to fixed monotonic deadlines, with no more than one
+pending logging read per channel. If queue or backend latency passes deadlines,
+missed slots are counted rather than replayed in a burst, and the next future
+deadline is retained. A shared disconnect stops both loggers. Missing-directory,
+permission, disk/write, malformed-read and channel-local backend failures close
+only the affected logger unless the shared connection itself fails. See
+[Milestone 8 verification](docs/verification/milestone8.md).
 
 ## Milestone 5 offline physical backend
 
@@ -257,7 +284,8 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | COM-port enumeration | Not implemented and not performed |
 | Physical backend in GUI | Guarded explicit-port path implemented; manually entered COM3 read-only connection and disconnect acceptance passed |
 | Dual-channel manual controls | Simulation and real-hardware standard-load acceptance passed independently on CH1 and CH2; stronger real Output-On confirmation verified |
-| Experiment protocols, CSV data and plots | Not implemented |
+| Independent continuous CSV data logging | Implemented for both channels through the shared queue; Simulation Mode validated |
+| Experiment protocols and live plots | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
 
@@ -274,6 +302,7 @@ control potential against a reference electrode.
 - [Historical milestone records](docs/milestones.md)
 - [Milestone 7 verification and real-hardware GUI acceptance](docs/verification/milestone7.md)
 - [Guarded real-hardware follow-up verification](docs/verification/milestone7_real_hardware.md)
+- [Milestone 8 CSV logging verification](docs/verification/milestone8.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 
@@ -282,5 +311,5 @@ The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption; the model-correction and Milestones 5-7 commits record the
+CPX400DP assumption; the model-correction and Milestones 5-8 commits record the
 current QPX600DP basis.

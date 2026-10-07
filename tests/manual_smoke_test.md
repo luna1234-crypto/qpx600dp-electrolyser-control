@@ -1,4 +1,4 @@
-# Windows visual smoke test (milestone 7)
+# Windows visual smoke test (milestone 8)
 
 This procedure checks the simulation connection GUI. Do not connect a power supply.
 
@@ -22,15 +22,24 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
 9. Click Output On and choose No. Confirm the output remains OFF. Click again,
    choose Yes, confirm only that simulated output displays `OUTPUT ON`, then use
    Output Off and confirm `OUTPUT OFF`.
-10. Disconnect and confirm both channel panels become disabled with output state
+10. Choose a writable CSV output directory and set a short interval such as
+    0.25 seconds. Start CH1 logging; confirm only CH1 shows increasing samples.
+    Start CH2 and confirm both counters increase while the window remains
+    responsive. Stop CH1 and confirm CH2 continues. Open both CSV files and
+    confirm one header plus incrementally written rows for the correct channel.
+11. Disconnect while CH2 logs. Confirm CH2 logging stops, its file closes, and
+    reconnect does not resume it. Start again and confirm a new file is created.
+12. Disconnect and confirm both channel panels become disabled with output state
     `UNKNOWN`. Resize the window and open Help > About. Text should remain readable
     and the application should respond immediately.
-11. Close with File > Exit, and launch again using the window's close button to exit.
-12. Verify `logs/application_YYYYMMDD.log` contains startup, connection,
+13. Close with File > Exit while a simulated logger is active; confirm the CSV
+    remains readable and no worker/thread warning appears. Launch again and use
+    the window's close button to exit.
+14. Verify `logs/application_YYYYMMDD.log` contains startup, connection,
    disconnection, worker cleanup and shutdown records
    from both runs. The first run's records must remain.
 
 Record the Windows edition, Python/PySide6 versions, date and observed result.
 The historical Milestone 4 visual check used the earlier CPX model identity.
-This Milestone 7 procedure is Simulation Mode only: do not select Real Hardware,
+This Milestone 8 procedure is Simulation Mode only: do not select Real Hardware,
 enter a port, invoke the hardware checker or connect the GUI to a physical supply.

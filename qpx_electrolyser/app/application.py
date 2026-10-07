@@ -1,9 +1,10 @@
-"""Compose the Milestone 7 guarded simulation/real manual-control GUI."""
+"""Compose the Milestone 8 guarded manual-control and CSV-logging GUI."""
 
 import argparse
 from collections.abc import Sequence
 from pathlib import Path
 import sys
+import tempfile
 import time
 from types import TracebackType
 
@@ -19,7 +20,7 @@ from qpx_electrolyser.gui.main_window import MainWindow
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a normal window, or briefly exercise its event loop for validation."""
-    parser = argparse.ArgumentParser(description="QPX600DP milestone 7 guarded manual controls")
+    parser = argparse.ArgumentParser(description="QPX600DP milestone 8 manual controls and CSV logging")
     parser.add_argument("--log-dir", type=Path, help="Override the project's logs directory")
     parser.add_argument(
         "--smoke-test", action="store_true", help="Show the window, process events, then close"
@@ -27,6 +28,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--screenshot", type=Path, help="Save a window PNG during --smoke-test only"
     )
+    parser.add_argument("--data-dir", type=Path, help="Initial user-selectable CSV output directory")
     args = parser.parse_args(argv)
     if args.screenshot is not None and not args.smoke_test:
         parser.error("--screenshot requires --smoke-test")
@@ -49,6 +51,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     previous_exception_hook = sys.excepthook
     window: MainWindow | None = None
     connection_controller: ConnectionController | None = None
+    smoke_data_directory: tempfile.TemporaryDirectory[str] | None = None
 
     def handle_unhandled_exception(
         exception_type: type[BaseException],
@@ -73,9 +76,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             __version__,
         )
         connection_controller = ConnectionController()
+        if args.smoke_test and args.data_dir is None:
+            smoke_data_directory = tempfile.TemporaryDirectory(prefix="qpx600dp-smoke-")
+        data_directory = (
+            args.data_dir
+            or (Path(smoke_data_directory.name) if smoke_data_directory is not None else None)
+        )
         window = MainWindow(
             log_file=session.file_path,
             connection_controller=connection_controller,
+            data_directory=data_directory,
         )
         window.show()
 
@@ -105,13 +115,29 @@ def main(argv: Sequence[str] | None = None) -> int:
                     return
                 if len(connection_controller.snapshot.initial_readbacks) != 2:
                     fail_smoke_test("Simulation Mode smoke test did not read both channels.")
+                for logger_controller in window.logging_controllers.values():
+                    if not logger_controller.start(window.data_directory, 0.1):
+                        fail_smoke_test(logger_controller.snapshot.message)
+                QTimer.singleShot(25, verify_logging_smoke_test)
+
+            def verify_logging_smoke_test() -> None:
+                snapshots = [item.snapshot for item in window.logging_controllers.values()]
+                if any(item.error for item in snapshots):
+                    fail_smoke_test("Simulation Mode smoke-test CSV logging failed.")
+                if any(item.sample_count < 1 for item in snapshots):
+                    if time.monotonic() >= smoke_deadline:
+                        fail_smoke_test("Simulation Mode smoke test did not log both channels.")
+                    QTimer.singleShot(25, verify_logging_smoke_test)
+                    return
+                for logger_controller in window.logging_controllers.values():
+                    logger_controller.stop("Smoke-test logging complete")
                 if args.screenshot is not None:
                     args.screenshot.parent.mkdir(parents=True, exist_ok=True)
                     if not window.grab().save(str(args.screenshot), "PNG"):
                         raise OSError("Could not write the requested window screenshot.")
                 logger.info(
                     "Smoke test: window visible=%s; Qt event loop processed events; "
-                    "simulator connected and both channels read",
+                    "simulator connected, both channels read and independent CSV logs written",
                     window.isVisible(),
                 )
                 connection_controller.request_disconnect()
@@ -136,4 +162,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             window.close()
         if connection_controller is not None:
             connection_controller.shutdown(timeout_s=2.0)
+        if smoke_data_directory is not None:
+            smoke_data_directory.cleanup()
         session.close()

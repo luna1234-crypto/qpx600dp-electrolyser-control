@@ -145,6 +145,17 @@ class ManualChannelController(QObject):
             self._publish(replace(self._snapshot, pending=False, message="Command cancelled"))
         return count
 
+    @Slot(object)
+    def accept_logging_readback(self, readback: object) -> None:
+        """Mirror a logger sample without initiating or bypassing queue work."""
+        if (
+            self._pending_request_id is None
+            and self._connection.snapshot.state is ConnectionState.CONNECTED
+            and isinstance(readback, ChannelReadback)
+            and readback.channel == self._channel
+        ):
+            self._publish(_display_snapshot(readback))
+
     def _submit(
         self,
         action: str,
