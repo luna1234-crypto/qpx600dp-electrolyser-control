@@ -13,8 +13,9 @@ accepts only a manually entered COM name and never enumerates ports. The one
 shared backend-owner worker constructs `SerialTransport` and `QPX600DPDriver`
 only after explicit Real Hardware Connect. There is no experiment protocol.
 Physical validation includes identification, read-only queries, guarded setpoint
-read-back, and monitored standard-load Output-On/Off tests on both channels.
-Electrolyser validation remains outside Milestone 5 and is pending.
+read-back, monitored standard-load Output-On/Off tests on both channels, and
+operator-supervised real-hardware GUI acceptance for both channel panels.
+Electrolyser validation remains pending and outside Milestones 5 and 7.
 
 ## Windows installation
 
@@ -124,7 +125,16 @@ Real Output On uses a stronger warning that names the channel and shows the
 programmed voltage and current limit. Output Off needs no Output-On confirmation
 and retains safety queue priority. A real-session command error closes the shared
 transport and requires a manual reconnect; the application never retries or
-reconnects automatically. Real-hardware GUI acceptance remains pending.
+reconnects automatically.
+
+Supervised real-hardware GUI acceptance passed on both channels. A manually
+entered COM3 connection identified the QPX600DP, populated both panels correctly
+and disconnected with both outputs OFF. With the verified 100 ohm, 1/4 W load at
+4.000 V / 0.080 A, CH1 displayed approximately 4 V / 0.03 A and CH2 approximately
+4 V / 0.04 A. The dialogs correctly identified Real Hardware and the selected
+channel; live readback, physical ON/CV indication, Output Off and Disconnect
+worked normally while the other channel stayed OFF. Final OP1/OP2 state was
+visually confirmed OFF and the load was removed after disconnection.
 
 ## Milestone 5 offline physical backend
 
@@ -245,11 +255,11 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Explicit-port `SerialTransport` and QPX600DP backend | Implemented; fake serial and two-channel standard-load Windows validation passed |
 | Shared priority instrument command worker | Implemented for simulator and guarded explicit-port backend; FIFO, priority, cancellation and shutdown tested |
 | COM-port enumeration | Not implemented and not performed |
-| Physical backend in GUI | Guarded explicit-port path implemented with fake-transport validation; real acceptance pending |
-| Dual-channel manual controls | Implemented for simulator and identified QPX600DP; stronger confirmation for real Output On |
+| Physical backend in GUI | Guarded explicit-port path implemented; manually entered COM3 read-only connection and disconnect acceptance passed |
+| Dual-channel manual controls | Simulation and real-hardware standard-load acceptance passed independently on CH1 and CH2; stronger real Output-On confirmation verified |
 | Experiment protocols, CSV data and plots | Not implemented |
 | Complete configurable safety system | Not implemented |
-| Windows and real-hardware validation | Milestone 5 standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
+| Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
 
 The QPX600DP is a programmable DC power supply, not a potentiostat. Any later
 voltage sweep would apply discrete two-terminal voltage steps and would not
@@ -262,6 +272,7 @@ control potential against a reference electrode.
 - [Simulator behaviour](docs/simulator.md)
 - [Project tree](docs/project_tree.md)
 - [Historical milestone records](docs/milestones.md)
+- [Milestone 7 verification and real-hardware GUI acceptance](docs/verification/milestone7.md)
 - [Guarded real-hardware follow-up verification](docs/verification/milestone7_real_hardware.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)

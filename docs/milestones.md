@@ -217,6 +217,21 @@ cancellation, duplicate suppression, failure cleanup/recovery, disconnect and
 shutdown. The complete suite passed with **206 tests**. See
 [follow-up verification](verification/milestone7_real_hardware.md).
 
-No real port was enumerated, opened or probed during development or validation.
-COM3, Test Bridge and the physical QPX600DP were not accessed. Real-hardware GUI
-acceptance remains pending; this follow-up is not Milestone 8.
+No real port was enumerated, opened or probed during development or automated
+validation. COM3, Test Bridge and the physical QPX600DP were not accessed during
+that implementation phase.
+
+Supervised real-hardware GUI acceptance was completed on 2026-10-07. A manually
+entered COM3 connection identified the QPX600DP, populated both channel panels
+correctly, and disconnected normally with both outputs OFF. Independent loaded
+GUI checks then used the same verified 100 ohm, 1/4 W resistor, moved between
+channels only after both outputs were OFF. At 4.000 V / 0.080 A, CH1 displayed
+approximately 4 V / 0.03 A and CH2 approximately 4 V / 0.04 A. The confirmation
+dialogs correctly named Real Hardware and the selected channel; Output On, live
+readback, physical ON/CV indication, Output Off and Disconnect operated normally
+for each channel while the other channel remained OFF. Final OP1 and OP2 were
+visually confirmed OFF and the load was removed after disconnection.
+
+This completes Milestone 7 real-hardware GUI acceptance. Electrolyser validation
+remains pending and outside Milestone 7; this follow-up is not Milestone 8. See
+[Milestone 7 verification](verification/milestone7.md).
