@@ -72,6 +72,16 @@ paused-time exclusion, early Stop, malformed sample, queue rejection, unexpected
 Output Off, CSV failure, no Output-On retry, Output-Off cleanup, channel isolation,
 coordinated disconnect, direct connection loss warning and clean worker shutdown.
 
+### PAUSED output-indicator regression
+
+Manual Simulation Mode testing found that the simulator output was confirmed OFF
+when CH1 entered `PAUSED`, while the manual channel indicator retained its last ON
+sample. The Output-Off operation now returns a complete atomic channel read-back.
+`PAUSED` is published only after that read-back confirms OFF, and the same
+authoritative result updates the protocol snapshot, protocol indicator and manual
+channel indicator. Regression coverage also injects an unconfirmed first OFF
+attempt and proves that `PAUSED` is never entered in that path.
+
 The Windows Simulation Mode smoke procedure is in `tests/manual_smoke_test.md`.
 The automated native smoke starts both channel protocols through their GUI Start
 buttons, waits for independent completion and closed protocol files, exercises
@@ -94,7 +104,7 @@ commanded during implementation or validation.
 
 Final Windows results:
 
-- complete suite: **273 passed in 14.17s**;
+- complete suite: **275 passed in 15.00s**;
 - `compileall`: exit code 0;
 - `pip check`: `No broken requirements found.`;
 - native Simulation Mode smoke: both GUI-started protocols completed, both

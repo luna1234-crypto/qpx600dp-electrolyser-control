@@ -3,7 +3,6 @@
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
-    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -61,14 +60,26 @@ class ConstantCurrentPanel(QGroupBox):
         self.remaining_value = QLabel("0.000 s")
         self.voltage_value = QLabel("Unavailable")
         self.current_value = QLabel("Unavailable")
+        self.output_state_value = QLabel("UNKNOWN")
+        self.output_state_value.setObjectName(f"channel{channel}ProtocolOutputState")
         self.missed_value = QLabel("0")
-        status = QFormLayout()
-        status.addRow("State:", self.state_value)
-        status.addRow("Elapsed active:", self.elapsed_value)
-        status.addRow("Remaining active:", self.remaining_value)
-        status.addRow("Latest voltage:", self.voltage_value)
-        status.addRow("Latest current:", self.current_value)
-        status.addRow("Missed samples:", self.missed_value)
+        status = QGridLayout()
+        status.addWidget(QLabel("State:"), 0, 0)
+        status.addWidget(self.state_value, 0, 1)
+        status.addWidget(QLabel("Output state:"), 0, 2)
+        status.addWidget(self.output_state_value, 0, 3)
+        status.addWidget(QLabel("Elapsed active:"), 1, 0)
+        status.addWidget(self.elapsed_value, 1, 1)
+        status.addWidget(QLabel("Remaining active:"), 1, 2)
+        status.addWidget(self.remaining_value, 1, 3)
+        status.addWidget(QLabel("Latest voltage:"), 2, 0)
+        status.addWidget(self.voltage_value, 2, 1)
+        status.addWidget(QLabel("Latest current:"), 2, 2)
+        status.addWidget(self.current_value, 2, 3)
+        status.addWidget(QLabel("Missed samples:"), 3, 0)
+        status.addWidget(self.missed_value, 3, 1)
+        status.setColumnStretch(1, 1)
+        status.setColumnStretch(3, 1)
 
         self.message_label = QLabel("Constant Current protocol idle")
         self.message_label.setWordWrap(True)
@@ -117,6 +128,21 @@ class ConstantCurrentPanel(QGroupBox):
             "Unavailable" if snapshot.measured_current_a is None
             else f"{snapshot.measured_current_a:g} A"
         )
+        if snapshot.output_enabled is True:
+            self.output_state_value.setText("OUTPUT ON")
+            self.output_state_value.setStyleSheet(
+                "font-weight: 800; color: white; background: #b42318; padding: 2px;"
+            )
+        elif snapshot.output_enabled is False:
+            self.output_state_value.setText("OUTPUT OFF")
+            self.output_state_value.setStyleSheet(
+                "font-weight: 800; color: white; background: #16733a; padding: 2px;"
+            )
+        else:
+            self.output_state_value.setText("UNKNOWN")
+            self.output_state_value.setStyleSheet(
+                "font-weight: 800; color: white; background: #666666; padding: 2px;"
+            )
         self.missed_value.setText(str(snapshot.missed_samples))
         self.message_label.setText(snapshot.message)
         if snapshot.operator_warning:

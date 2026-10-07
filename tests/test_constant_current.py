@@ -341,7 +341,16 @@ def test_malformed_sample_and_queue_rejection_each_trigger_cleanup(
     connection, backend = connected(qapp)
     protocol = ConstantCurrentController(1, connection)
     original_read_channel = module.read_channel
-    monkeypatch.setattr(module, "read_channel", lambda _supply, _channel: "malformed")
+    malformed_reads = 0
+
+    def malformed_sample_once(supply, channel):  # type: ignore[no-untyped-def]
+        nonlocal malformed_reads
+        malformed_reads += 1
+        if malformed_reads == 1:
+            return "malformed"
+        return original_read_channel(supply, channel)
+
+    monkeypatch.setattr(module, "read_channel", malformed_sample_once)
     try:
         assert start_protocol(protocol, tmp_path, duration="1")
         wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.FAILED)
@@ -457,6 +466,73 @@ def test_gui_disables_only_owned_channel_and_coordinates_disconnect(
         assert any(item[0] == "output_off" and item[1] == 1 for item in backend.calls)
     finally:
         window.close()
+        assert connection.shutdown(1)
+
+
+def test_pause_publishes_confirmed_off_readback_to_every_indicator(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    backend = RecordingSimulator()
+    connection = ConnectionController(lambda: backend)
+    window = MainWindow(tmp_path / "application.log", connection, data_directory=tmp_path)
+    window.show()
+    try:
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        panel = window.protocol_panels[1]
+        panel.duration_input.setText("2")
+        panel.interval_input.setText("0.1")
+        panel.start_button.click()
+        wait_until(qapp, lambda: window.channel_controllers[1].snapshot.output_enabled is True)
+
+        panel.pause_button.click()
+        wait_until(
+            qapp,
+            lambda: window.protocol_controllers[1].snapshot.state is ProtocolState.PAUSED,
+        )
+
+        assert backend._channels[0].output_enabled is False
+        assert window.channel_controllers[1].snapshot.output_enabled is False
+        assert window.channel_panels[1].output_state_value.text() == "OUTPUT OFF"
+        assert window.protocol_controllers[1].snapshot.output_enabled is False
+        assert window.protocol_panels[1].output_state_value.text() == "OUTPUT OFF"
+    finally:
+        protocol = window.protocol_controllers[1]
+        if protocol.snapshot.owns_channel:
+            protocol.stop("Regression test cleanup")
+            wait_until(qapp, lambda: not protocol.snapshot.owns_channel)
+        window.close()
+        qapp.processEvents()
+        assert connection.shutdown(1)
+
+
+def test_pause_never_enters_paused_until_output_off_is_confirmed(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    class FirstOffAttemptNotAppliedSimulator(RecordingSimulator):
+        off_attempts = 0
+
+        def output_off(self, channel: int) -> None:
+            self._record("output_off", channel)
+            self.off_attempts += 1
+            if self.off_attempts > 1:
+                SimulatedPowerSupply.output_off(self, channel)
+
+    backend = FirstOffAttemptNotAppliedSimulator()
+    connection, _ = connected(qapp, backend)
+    protocol = ConstantCurrentController(1, connection)
+    states: list[ProtocolState] = []
+    protocol.snapshot_changed.connect(lambda snapshot: states.append(snapshot.state))
+    try:
+        assert start_protocol(protocol, tmp_path, duration="2")
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        protocol.pause()
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.FAILED)
+
+        assert ProtocolState.PAUSED not in states
+        assert backend.off_attempts == 2
+        assert backend._channels[0].output_enabled is False
+    finally:
         assert connection.shutdown(1)
 
 

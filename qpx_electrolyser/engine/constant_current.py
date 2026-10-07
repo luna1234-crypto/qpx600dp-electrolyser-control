@@ -80,6 +80,7 @@ class ProtocolSnapshot:
     remaining_active_s: float = 0.0
     measured_voltage_v: float | None = None
     measured_current_a: float | None = None
+    output_enabled: bool | None = None
     missed_samples: int = 0
     sample_count: int = 0
     file_path: Path | None = None
@@ -362,12 +363,12 @@ class ConstantCurrentController(QObject):
         ):
             raise SettingsMismatchError("Current target read-back mismatch.")
 
-    def _output_off_operation(self, supply: PowerSupplyInterface) -> bool:
+    def _output_off_operation(self, supply: PowerSupplyInterface) -> ChannelReadback:
         supply.output_off(self._channel)
-        output_enabled = supply.read_output_state(self._channel)
-        if output_enabled:
+        readback = read_channel(supply, self._channel)
+        if readback.output_enabled:
             raise OutputStateError("Output OFF could not be confirmed.")
-        return False
+        return readback
 
     def _submit_action(
         self,
@@ -439,6 +440,7 @@ class ConstantCurrentController(QObject):
             self._publish(replace(
                 self._snapshot,
                 state=ProtocolState.RUNNING,
+                output_enabled=True,
                 message="Constant Current protocol running",
                 error=False,
                 operator_warning=False,
@@ -463,15 +465,33 @@ class ConstantCurrentController(QObject):
                 self._snapshot,
                 measured_voltage_v=result.measured_voltage_v,
                 measured_current_a=result.measured_current_a,
+                output_enabled=result.output_enabled,
                 sample_count=self._snapshot.sample_count + 1,
                 message=f"Logged protocol sample {self._snapshot.sample_count + 1}",
             ))
             self._schedule_next_sample()
             return
         if action == "pause":
+            if (
+                not isinstance(result, ChannelReadback)
+                or result.channel != self._channel
+                or result.output_enabled
+            ):
+                self._begin_cleanup(
+                    ProtocolState.FAILED,
+                    "Malformed or unconfirmed Output-Off read-back during pause.",
+                )
+                return
             self._active_before_run_s = self._elapsed_active()
             self._run_started_at = 0.0
             self._clock_timer.stop()
+            self._publish(replace(
+                self._snapshot,
+                measured_voltage_v=result.measured_voltage_v,
+                measured_current_a=result.measured_current_a,
+                output_enabled=result.output_enabled,
+            ))
+            self.sample_received.emit(result)
             if self._remaining_active() <= 0:
                 self._finish_terminal(ProtocolState.COMPLETED, "Protocol duration completed")
                 return
@@ -485,6 +505,24 @@ class ConstantCurrentController(QObject):
             self._append_event_best_effort("paused", ProtocolState.PAUSED)
             return
         if action == "stop":
+            if (
+                not isinstance(result, ChannelReadback)
+                or result.channel != self._channel
+                or result.output_enabled
+            ):
+                self._finish_terminal(
+                    ProtocolState.FAILED,
+                    "Malformed or unconfirmed Output-Off cleanup read-back.",
+                    warning=True,
+                )
+                return
+            self._publish(replace(
+                self._snapshot,
+                measured_voltage_v=result.measured_voltage_v,
+                measured_current_a=result.measured_current_a,
+                output_enabled=result.output_enabled,
+            ))
+            self.sample_received.emit(result)
             self._finish_terminal(self._terminal_after_stop, self._terminal_message)
 
     @Slot(int, str, object)
