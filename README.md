@@ -2,17 +2,18 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.8.0 preserves those historical records, the Milestone 5
+assumption. Version 0.9.0 preserves those historical records, the Milestone 5
 QPX600DP serial backend and completed two-channel standard-load Windows
 validation, the Milestone 6 shared
 asynchronous command queue, Milestone 7 dual-channel manual controls with a
-guarded explicit-port hardware connection, and Milestone 8 independent CSV
-logging.
+guarded explicit-port hardware connection, Milestone 8 independent CSV logging,
+and Milestone 9 independent Simulation Mode Constant Current protocols.
 
 Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
 shared backend-owner worker constructs `SerialTransport` and `QPX600DPDriver`
-only after explicit Real Hardware Connect. There is no experiment protocol.
+only after explicit Real Hardware Connect. Constant Current protocols are
+deliberately unavailable outside Simulation Mode.
 Physical validation includes identification, read-only queries, guarded setpoint
 read-back, monitored standard-load Output-On/Off tests on both channels, and
 operator-supervised real-hardware GUI acceptance for both channel panels.
@@ -173,6 +174,31 @@ closed normally with increasing timestamps and elapsed times, approximately
 and Output OFF throughout. No instrument setting was changed, and final physical
 OP1/OP2 were confirmed OFF.
 
+## Milestone 9 independent Constant Current protocols
+
+Each channel has an independent Constant Current state machine: `IDLE`,
+`STARTING`, `RUNNING`, `PAUSING`, `PAUSED`, `RESUMING`, `STOPPING`, `COMPLETED`
+and `FAILED`. Inputs are target current, voltage compliance, active duration and
+measurement interval. All are validated against the active voltage range,
+hardware programming grids, conservative power envelope and the explicit
+Simulation Mode project policy of 10 V, 5 A, 50 W, 24 hours maximum duration and
+0.1-3600 second intervals.
+
+Start atomically confirms the selected output is OFF, sets voltage then current,
+verifies both read-backs, issues one Output On and confirms ON. Sampling uses
+fixed active-time monotonic deadlines and background queue priority. Pause sends
+and confirms Output Off and freezes active time; Resume rechecks the session,
+OFF state and programmed settings before one new Output On. Stop, completion,
+failure, coordinated disconnect and application shutdown make a bounded
+selected-channel Output-Off attempt and close the protocol CSV deterministically.
+The other channel remains independent unless the shared connection fails.
+
+Protocol files use the Milestone 8 writer. Two appended columns,
+`protocol_name` and `protocol_state`, are blank for standalone logging and retain
+backward readability for earlier CSV consumers. Protocol controls are Simulation
+Mode only; Milestone 10 plotting and later sweep/polarization protocols are not
+implemented. See [Milestone 9 verification](docs/verification/milestone9.md).
+
 ## Milestone 5 offline physical backend
 
 `SerialTransport` opens only an explicitly supplied port. It never enumerates
@@ -294,8 +320,9 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | COM-port enumeration | Not implemented and not performed |
 | Physical backend in GUI | Guarded explicit-port path implemented; manually entered COM3 read-only connection and disconnect acceptance passed |
 | Dual-channel manual controls | Simulation and real-hardware standard-load acceptance passed independently on CH1 and CH2; stronger real Output-On confirmation verified |
-| Independent continuous CSV data logging | Implemented for both channels through the shared queue; Simulation Mode validated |
-| Experiment protocols and live plots | Not implemented |
+| Independent continuous CSV data logging | Implemented for both channels through the shared queue; Simulation and read-only hardware acceptance passed |
+| Independent Constant Current protocols | Implemented and validated in Simulation Mode for CH1/CH2, simultaneous operation, Pause/Resume/Stop and CSV output |
+| Live plots and later sweep/polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
 
@@ -313,6 +340,7 @@ control potential against a reference electrode.
 - [Milestone 7 verification and real-hardware GUI acceptance](docs/verification/milestone7.md)
 - [Guarded real-hardware follow-up verification](docs/verification/milestone7_real_hardware.md)
 - [Milestone 8 CSV logging verification](docs/verification/milestone8.md)
+- [Milestone 9 Constant Current verification](docs/verification/milestone9.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 
@@ -321,5 +349,5 @@ The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption; the model-correction and Milestones 5-8 commits record the
+CPX400DP assumption; the model-correction and Milestones 5-9 commits record the
 current QPX600DP basis.

@@ -19,6 +19,10 @@ programmed_current_limit_a,measured_voltage_v,measured_current_a,
 voltage_range,output_state,connection_state,session_id,sample_status,error
 ```
 
+Milestone 9 appends optional `protocol_name` and `protocol_state` columns. They
+remain blank for standalone Milestone 8 logging; the original columns and their
+meaning are unchanged.
+
 UTC filenames contain only Windows-safe characters and are opened with exclusive
 creation. The header is written once, every row is flushed immediately, and the
 file closes on channel stop, disconnect, error or application shutdown. A

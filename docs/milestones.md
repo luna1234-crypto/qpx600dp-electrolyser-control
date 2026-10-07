@@ -269,3 +269,31 @@ physical OP1/OP2 were confirmed OFF. No settings were changed, and no overwrite,
 GUI freeze, logging error or residual process was observed. The instrument serial
 number, exact filenames, row counts and unrecorded measurement precision are not
 included.
+
+## Milestone 9 - Independent Constant Current protocols
+
+Added independent CH1 and CH2 Constant Current panels and per-channel state
+machines: IDLE, STARTING, RUNNING, PAUSING, PAUSED, RESUMING, STOPPING,
+COMPLETED and FAILED. Target current, voltage compliance, active duration and
+measurement interval are validated before queue submission against QPX
+programming grids, the conservative power envelope and an explicit Simulation
+Mode project policy of 10 V / 5 A / 50 W, 24 hours maximum and 0.1-3600 second
+intervals.
+
+Start confirms OFF, sets voltage then current, verifies read-back, sends one
+Output On and confirms ON. Fixed active-time monotonic sampling never overlaps
+and counts skipped deadlines. Pause confirms Output Off and freezes active time;
+Resume revalidates the same session, OFF state and programmed settings before a
+single new Output On. Stop, completion, failures, coordinated disconnect and
+application close make a bounded selected-channel Output-Off attempt and close
+the protocol CSV. One channel's local protocol/file failure does not stop the
+other.
+
+Protocol samples use the Milestone 8 exclusive, incremental, flushed CSV writer.
+The appended `protocol_name` and `protocol_state` columns are blank for standalone
+logging, preserving its behavior and making the schema extension backward
+readable. Tests cover both channels, simultaneous operation, exact command order,
+input rejection, initially-ON refusal, mismatch, Pause/Resume/Stop, active-time
+accounting, failure cleanup, queue serialization and clean shutdown. Milestone 10
+plotting, CV, sweeps, polarization and real-hardware protocol operation remain
+out of scope. See [verification details](verification/milestone9.md).

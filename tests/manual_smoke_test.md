@@ -1,4 +1,4 @@
-# Windows visual smoke test (milestone 8)
+# Windows visual smoke test (milestone 9)
 
 This procedure checks the simulation connection GUI. Do not connect a power supply.
 
@@ -22,24 +22,39 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
 9. Click Output On and choose No. Confirm the output remains OFF. Click again,
    choose Yes, confirm only that simulated output displays `OUTPUT ON`, then use
    Output Off and confirm `OUTPUT OFF`.
-10. Choose a writable CSV output directory and set a short interval such as
+10. In CH1 Constant Current, enter 0.1 A, 2 V, 1.0 s and 0.1 s. Start and
+    confirm STARTING, RUNNING, STOPPING and COMPLETED appear, measurements update,
+    elapsed increases, remaining decreases, simulated output returns OFF and a
+    readable protocol CSV closes.
+11. Repeat normal completion on CH2 and confirm CH1 does not change.
+12. Start both channels together for 2 s at 0.1 s intervals. Confirm both RUNNING,
+    the GUI remains responsive, samples serialize, and two independent files close.
+13. Start CH1 for 2 s, Pause after a sample, confirm PAUSED and OUTPUT OFF, wait
+    at least 0.5 s and confirm active elapsed time stays fixed. Resume, confirm
+    RUNNING/OUTPUT ON, then Stop early and confirm STOPPING, OUTPUT OFF and a
+    closed CSV. Confirm CH2 remains unaffected.
+14. Choose a writable CSV output directory and set a short interval such as
     0.25 seconds. Start CH1 logging; confirm only CH1 shows increasing samples.
     Start CH2 and confirm both counters increase while the window remains
     responsive. Stop CH1 and confirm CH2 continues. Open both CSV files and
     confirm one header plus incrementally written rows for the correct channel.
-11. Disconnect while CH2 logs. Confirm CH2 logging stops, its file closes, and
+15. Disconnect while CH2 logs. Confirm CH2 logging stops, its file closes, and
     reconnect does not resume it. Start again and confirm a new file is created.
-12. Disconnect and confirm both channel panels become disabled with output state
+16. Disconnect and confirm both channel panels and protocol Start controls become
+    disabled with output state
     `UNKNOWN`. Resize the window and open Help > About. Text should remain readable
     and the application should respond immediately.
-13. Close with File > Exit while a simulated logger is active; confirm the CSV
+17. Close with File > Exit while a simulated protocol is active; confirm Output
+    Off cleanup occurs, its CSV remains readable and no worker/thread warning
+    appears. Launch again and use the window's close button to exit.
+18. Close with File > Exit while a simulated logger is active; confirm the CSV
     remains readable and no worker/thread warning appears. Launch again and use
     the window's close button to exit.
-14. Verify `logs/application_YYYYMMDD.log` contains startup, connection,
+19. Verify `logs/application_YYYYMMDD.log` contains startup, connection,
    disconnection, worker cleanup and shutdown records
    from both runs. The first run's records must remain.
 
 Record the Windows edition, Python/PySide6 versions, date and observed result.
 The historical Milestone 4 visual check used the earlier CPX model identity.
-This Milestone 8 procedure is Simulation Mode only: do not select Real Hardware,
+This Milestone 9 procedure is Simulation Mode only: do not select Real Hardware,
 enter a port, invoke the hardware checker or connect the GUI to a physical supply.

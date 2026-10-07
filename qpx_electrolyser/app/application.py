@@ -1,4 +1,4 @@
-"""Compose the Milestone 8 guarded manual-control and CSV-logging GUI."""
+"""Compose the Milestone 9 guarded Constant Current protocol GUI."""
 
 import argparse
 from collections.abc import Sequence
@@ -15,12 +15,13 @@ from qpx_electrolyser import __version__
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
 from qpx_electrolyser.app.logging_config import configure_logging
 from qpx_electrolyser.app.paths import default_paths
+from qpx_electrolyser.engine.constant_current import ProtocolState
 from qpx_electrolyser.gui.main_window import MainWindow
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a normal window, or briefly exercise its event loop for validation."""
-    parser = argparse.ArgumentParser(description="QPX600DP milestone 8 manual controls and CSV logging")
+    parser = argparse.ArgumentParser(description="QPX600DP milestone 9 Constant Current protocols")
     parser.add_argument("--log-dir", type=Path, help="Override the project's logs directory")
     parser.add_argument(
         "--smoke-test", action="store_true", help="Show the window, process events, then close"
@@ -90,7 +91,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         window.show()
 
         if args.smoke_test:
-            smoke_deadline = time.monotonic() + 5
+            smoke_deadline = time.monotonic() + 10
 
             def fail_smoke_test(message: str) -> None:
                 raise RuntimeError(message)
@@ -115,6 +116,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                     return
                 if len(connection_controller.snapshot.initial_readbacks) != 2:
                     fail_smoke_test("Simulation Mode smoke test did not read both channels.")
+                for panel in window.protocol_panels.values():
+                    panel.current_input.setText("0.1")
+                    panel.voltage_input.setText("2")
+                    panel.duration_input.setText("0.3")
+                    panel.interval_input.setText("0.1")
+                    panel.start_button.click()
+                QTimer.singleShot(25, verify_protocol_smoke_test)
+
+            def verify_protocol_smoke_test() -> None:
+                snapshots = [item.snapshot for item in window.protocol_controllers.values()]
+                if any(item.state is ProtocolState.FAILED for item in snapshots):
+                    fail_smoke_test("Simulation Mode Constant Current smoke test failed.")
+                if any(item.state is not ProtocolState.COMPLETED for item in snapshots):
+                    if time.monotonic() >= smoke_deadline:
+                        fail_smoke_test("Constant Current protocols did not complete in time.")
+                    QTimer.singleShot(25, verify_protocol_smoke_test)
+                    return
                 for logger_controller in window.logging_controllers.values():
                     if not logger_controller.start(window.data_directory, 0.1):
                         fail_smoke_test(logger_controller.snapshot.message)
@@ -137,7 +155,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         raise OSError("Could not write the requested window screenshot.")
                 logger.info(
                     "Smoke test: window visible=%s; Qt event loop processed events; "
-                    "simulator connected, both channels read and independent CSV logs written",
+                    "simulator connected, both Constant Current protocols completed and "
+                    "independent standalone CSV logs written",
                     window.isVisible(),
                 )
                 connection_controller.request_disconnect()

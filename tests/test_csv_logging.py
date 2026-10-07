@@ -79,6 +79,8 @@ def test_csv_schema_values_flush_exclusive_creation_and_close(tmp_path: Path) ->
         "output_state": "OFF",
         "connection_state": "connected",
         "session_id": "3",
+        "protocol_name": "",
+        "protocol_state": "",
         "sample_status": "ok",
         "error": "",
     }

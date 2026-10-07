@@ -35,6 +35,8 @@ CSV_COLUMNS = (
     "session_id",
     "sample_status",
     "error",
+    "protocol_name",
+    "protocol_state",
 )
 
 
@@ -52,6 +54,8 @@ class CsvWriter(Protocol):
         session_id: int,
         status: str,
         error: str = "",
+        protocol_name: str = "",
+        protocol_state: str = "",
     ) -> None: ...
 
     def close(self) -> None: ...
@@ -90,6 +94,8 @@ class CsvLogFile:
         session_id: int,
         status: str,
         error: str = "",
+        protocol_name: str = "",
+        protocol_state: str = "",
     ) -> None:
         stream = self._stream
         if stream is None:
@@ -106,6 +112,8 @@ class CsvLogFile:
             "output_state": "" if readback is None else ("ON" if readback.output_enabled else "OFF"),
             "connection_state": connection_state,
             "session_id": str(session_id),
+            "protocol_name": protocol_name,
+            "protocol_state": protocol_state,
             "sample_status": status,
             "error": error,
         }

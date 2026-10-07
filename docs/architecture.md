@@ -5,8 +5,8 @@ code implements the entrypoints, dual-channel manual-control GUI, diagnostic log
 `PowerSupplyInterface`, immutable capabilities, the configurable two-channel
 `SimulatedPowerSupply`, the milestone 4 asynchronous simulation lifecycle,
 the Milestone 5 `SerialTransport` / `QPX600DPDriver`, the Milestone 6 shared
-priority command worker, Milestone 7 per-channel controllers and Milestone 8
-independent CSV loggers. The guarded
+priority command worker, Milestone 7 per-channel controllers, Milestone 8
+independent CSV loggers and Milestone 9 Constant Current state machines. The guarded
 follow-up connects the physical backend through that same worker only after an
 explicit mode, port and Connect action.
 See [simulator behaviour](simulator.md).
@@ -24,8 +24,8 @@ flowchart TD
     C2 --> IC
     L1 --> IC
     L2 --> IC
-    GUI --> E1["Future ChannelEngine 1"]
-    GUI --> E2["Future ChannelEngine 2"]
+    GUI --> E1["ConstantCurrentController 1"]
+    GUI --> E2["ConstantCurrentController 2"]
     GUI --> IC["InstrumentController"]
     E1 --> IC
     E2 --> IC
@@ -61,7 +61,7 @@ independent of the selected transport.
 | InstrumentCommandWorker | Execute bounded actions, maintain query/reply pairing, return results/errors | No protocol dwell, plotting or disk logging |
 | QPX600DPDriver | Validate channels/current range, query the existing voltage range, encode the Milestone 5 command subset, parse exact values/units/status, expose capabilities | No GUI, scheduling, implicit range change, reset, lock or output action on connect |
 | SerialTransport | Open an explicit port, apply 9600/8N1/XON-XOFF, serialize one LF/CRLF transaction, invalidate uncertain sessions | No port enumeration or knowledge of CC, CV, CSV or cell area |
-| ChannelEngine, one per channel | Own state transitions, protocol time, local logger and measured results | No shared-port access |
+| ConstantCurrentController, one per channel | Own explicit state, active monotonic time, queue requests, local protocol CSV and measured results | No backend reference, shared-port access or GUI widgets |
 | TestProtocol implementations | Generate planned steps and averaging rules | No GUI, serial handles or wall-clock sleeps |
 | SafetyValidator | Validate full protocol against software and documented hardware capability before Start | No silent clamping or device writes |
 | ChannelLoggingController / CsvLogFile, one per channel | Monotonic scheduling through the shared queue; exclusive creation, CSV rows, flush/close and file errors | No direct backend, plot buffer or software diagnostic logging |
@@ -119,7 +119,8 @@ real command failure closes the shared session and requires manual recovery.
 ## Threads and scheduling
 
 Milestone 6 uses one Python communication thread with `queue.PriorityQueue`.
-Future protocol milestones add one interruptible engine thread per channel. The Qt GUI stays on the main thread;
+Milestone 9 protocol state machines and single-shot timers remain in the Qt main
+thread and submit only bounded backend operations; they do not add engine threads. The Qt GUI stays on the main thread;
 typed Qt signals deliver immutable snapshots back to its slots. Signal delivery
 must be queued across threads. Do not call a widget from any worker or wait for
 I/O in a GUI callback.
@@ -144,9 +145,10 @@ is immutable, while every simulator instance owns separate channel state and RNG
 
 All connection and command work runs off the GUI thread through the same worker.
 Milestone 6 adds request IDs, FIFO sequence metadata, command futures, explicit
-priorities and cancellation keys; Milestone 7 uses them for manual controls and
+priorities and cancellation keys; Milestone 7 uses them for manual controls,
 Milestone 8 uses `BACKGROUND` priority with independent cancellation keys for
-logging. Session generations are recorded in each CSV row.
+logging, and Milestone 9 uses normal atomic state transitions, safety-priority
+Output Off and background sampling. Session generations are recorded in each CSV row.
 Run generations and cross-channel telemetry fairness remain engine-level
 work for later milestones. No direct-serial GUI callbacks are acceptable.
 
@@ -189,18 +191,19 @@ Recovery must explicitly re-establish framing and ownership with outputs off.
 
 ## State, pause, stop and shutdown
 
-Planned per-channel enum: DISCONNECTED, IDLE, READY, RUNNING, PAUSED, STOPPING,
-COMPLETED, ERROR. A separate outcome records COMPLETED, STOPPED, EMERGENCY or
-ERROR; emergency remains visibly latched. Only an engine changes its own state.
+The implemented Constant Current enum is `IDLE`, `STARTING`, `RUNNING`,
+`PAUSING`, `PAUSED`, `RESUMING`, `STOPPING`, `COMPLETED` and `FAILED`. Only its
+channel controller changes this state. Later protocols may add separate outcomes;
+Emergency behavior remains deferred.
 
 | Request/event | Required transition or result |
 | --- | --- |
-| Connect and complete shared initialisation | DISCONNECTED to IDLE |
-| Validate full protocol, reserve files and obtain Start confirmation | IDLE to READY |
-| Apply verified initial setpoints and enable selected output | READY to RUNNING |
-| Pause | Invalidate pending channel actions; confirm that output OFF succeeded; RUNNING to PAUSED |
-| Resume | Restore validated previous setpoints and output state; PAUSED to RUNNING after confirmation |
-| Stop | Invalidate channel actions; RUNNING/PAUSED to STOPPING; send channel OFF; finalise its data; return IDLE with STOPPED outcome |
+| Connect and complete shared initialisation | Protocol remains IDLE and becomes available in Simulation Mode |
+| Validate full protocol and reserve file | IDLE/terminal to STARTING |
+| Confirm OFF, apply verified settings and enable selected output | STARTING to RUNNING |
+| Pause | Cancel pending sample; RUNNING to PAUSING; confirm output OFF; then PAUSED |
+| Resume | PAUSED to RESUMING; recheck session/OFF/settings; confirm one Output On; then RUNNING |
+| Stop | RUNNING/PAUSED/transition to STOPPING; send channel OFF; finalise CSV; then COMPLETED |
 | Finish | Confirm channel OFF and finalise data, then COMPLETED |
 | Failed I/O, failed OFF or failed required data write | ERROR, with physical output unknown unless verified |
 | Start while running / resume while not paused | Controlled rejection; no new worker or duplicate experiment |
@@ -231,8 +234,8 @@ protocol fault should stop only its own output if the transport is still healthy
 
 ## Protocols, safety, data and plotting
 
-Introduce protocols in the requested order: CC, time plots, CV, staircase voltage
-sweep, current sweep, polarisation, custom sequence. Use explicit V, A, s, cm2
+Constant Current is implemented first. Later milestones add time plots, CV,
+staircase voltage sweep, current sweep, polarisation and custom sequence. Use explicit V, A, s, cm2
 and A/cm2 fields internally. Convert `I = j * area` at the boundary, reject
 non-finite values, and validate every step before arming. Scheduling and final
 polarisation-window averaging must be testable with a fake monotonic clock.
@@ -242,6 +245,10 @@ Keep immutable hardware capabilities separate from user-configured safety limits
 experiment default. `UserSafetyLimits` is a separate optional simulation object,
 and future persistent configuration must require explicit operator values rather
 than copying the hardware maxima.
+
+Milestone 9 applies a separate, explicit Simulation Mode Constant Current policy:
+10 V, 5 A, 50 W, at most 24 hours and intervals from 0.1 through 3600 seconds.
+It does not redefine hardware ratings or authorize real-hardware protocol use.
 
 Apply basic capability/output safeguards before the first real manual control;
 milestone 16 completes the safety system, rather than postponing every safeguard
@@ -277,10 +284,11 @@ offline-tested physical driver and explicit-port transport but deliberately does
 not connect them to the GUI. Milestone 6 integrates a shared priority command
 queue into the existing single-owner boundary without adding a second backend
 owner. Milestone 7 adds manual control and a guarded explicit-port follow-up;
-Milestone 8 adds queue-fed CSV logging without port discovery, protocols,
-plotting or global emergency control. Milestone 7 real-hardware GUI acceptance
-is complete; Milestone 8 logging validation is Simulation Mode only. Protocols
-remain later work.
+Milestone 8 adds queue-fed CSV logging and Milestone 9 adds Simulation Mode
+Constant Current protocols without port discovery, plotting or global emergency
+control. Milestone 7 real-hardware GUI acceptance and Milestone 8 read-only
+hardware logging acceptance are complete. Real-hardware protocols and later
+protocol types remain out of scope.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Logging tests cover unwritable files, interruption and bounded in-flight work.

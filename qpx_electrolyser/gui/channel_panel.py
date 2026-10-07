@@ -3,7 +3,6 @@
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
-    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -35,6 +34,7 @@ class ChannelPanel(QGroupBox):
         self._real_hardware = False
         self._snapshot = ChannelSnapshot(channel=channel)
         self._logging_snapshot = LoggingSnapshot(channel=channel)
+        self._protocol_owned = False
 
         self.programmed_voltage_value = QLabel("Unavailable")
         self.current_limit_value = QLabel("Unavailable")
@@ -43,14 +43,23 @@ class ChannelPanel(QGroupBox):
         self.voltage_range_value = QLabel("Unavailable")
         self.output_state_value = QLabel("UNKNOWN")
         self.output_state_value.setObjectName(f"channel{channel}OutputState")
+        self.output_state_value.setMinimumHeight(26)
 
-        readings = QFormLayout()
-        readings.addRow("Programmed voltage:", self.programmed_voltage_value)
-        readings.addRow("Current limit:", self.current_limit_value)
-        readings.addRow("Measured voltage:", self.measured_voltage_value)
-        readings.addRow("Measured current:", self.measured_current_value)
-        readings.addRow("Voltage range:", self.voltage_range_value)
-        readings.addRow("Output state:", self.output_state_value)
+        readings = QGridLayout()
+        readings.addWidget(QLabel("Programmed voltage:"), 0, 0)
+        readings.addWidget(self.programmed_voltage_value, 0, 1)
+        readings.addWidget(QLabel("Current limit:"), 0, 2)
+        readings.addWidget(self.current_limit_value, 0, 3)
+        readings.addWidget(QLabel("Measured voltage:"), 1, 0)
+        readings.addWidget(self.measured_voltage_value, 1, 1)
+        readings.addWidget(QLabel("Measured current:"), 1, 2)
+        readings.addWidget(self.measured_current_value, 1, 3)
+        readings.addWidget(QLabel("Voltage range:"), 2, 0)
+        readings.addWidget(self.voltage_range_value, 2, 1)
+        readings.addWidget(QLabel("Output state:"), 2, 2)
+        readings.addWidget(self.output_state_value, 2, 3)
+        readings.setColumnStretch(1, 1)
+        readings.setColumnStretch(3, 1)
 
         self.voltage_input = QLineEdit()
         self.voltage_input.setObjectName(f"channel{channel}VoltageInput")
@@ -126,7 +135,7 @@ class ChannelPanel(QGroupBox):
         if snapshot.channel != self.channel:
             return
         self._snapshot = snapshot
-        available = snapshot.connected and not snapshot.pending
+        available = snapshot.connected and not snapshot.pending and not self._protocol_owned
         for widget in (
             self.voltage_input,
             self.current_input,
@@ -181,9 +190,15 @@ class ChannelPanel(QGroupBox):
 
     def _update_logging_buttons(self) -> None:
         self.start_logging_button.setEnabled(
-            self._snapshot.connected and not self._logging_snapshot.active
+            self._snapshot.connected and not self._logging_snapshot.active and not self._protocol_owned
         )
         self.stop_logging_button.setEnabled(self._logging_snapshot.active)
+
+    @Slot(bool)
+    def set_protocol_owned(self, owned: bool) -> None:
+        self._protocol_owned = owned
+        self.apply_snapshot(self._snapshot)
+        self._update_logging_buttons()
 
     @Slot(bool)
     def set_real_hardware_mode(self, enabled: bool) -> None:

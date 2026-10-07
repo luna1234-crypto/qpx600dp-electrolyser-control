@@ -1,2 +1,2 @@
-"""Reserved for protocol validation and safety limits; no outputs can be driven yet."""
+"""Reserved boundary for later shared protocol safety configuration."""
 
