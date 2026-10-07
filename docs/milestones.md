@@ -257,3 +257,15 @@ only its channel. Reconnect requires a new explicit Start and new file. Protocol
 and live plotting remain deferred. The complete suite and Simulation Mode smoke
 test passed without residual worker threads or QThread warnings. See
 [verification details](verification/milestone8.md).
+
+Supervised real-hardware read-only acceptance subsequently connected to a
+manually entered COM3, identified the QPX600DP and ran both independent loggers
+with no load and both outputs OFF. Both logged simultaneously for approximately
+30 seconds; after CH1 stopped, CH2 continued for approximately 5 seconds. The
+two files closed successfully and showed increasing timestamps/elapsed times,
+approximately 4 V / 0.08 A programmed values, approximately 0 V / 0 A no-load
+measurements and Output OFF throughout. Disconnect completed normally and final
+physical OP1/OP2 were confirmed OFF. No settings were changed, and no overwrite,
+GUI freeze, logging error or residual process was observed. The instrument serial
+number, exact filenames, row counts and unrecorded measurement precision are not
+included.

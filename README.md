@@ -16,7 +16,9 @@ only after explicit Real Hardware Connect. There is no experiment protocol.
 Physical validation includes identification, read-only queries, guarded setpoint
 read-back, monitored standard-load Output-On/Off tests on both channels, and
 operator-supervised real-hardware GUI acceptance for both channel panels.
-Electrolyser validation remains pending and outside Milestones 5 and 7.
+Milestone 8 real-hardware read-only CSV acceptance also passed with no load and
+both outputs OFF. Electrolyser validation remains pending and outside Milestones
+5, 7 and 8.
 
 ## Windows installation
 
@@ -162,6 +164,14 @@ deadline is retained. A shared disconnect stops both loggers. Missing-directory,
 permission, disk/write, malformed-read and channel-local backend failures close
 only the affected logger unless the shared connection itself fails. See
 [Milestone 8 verification](docs/verification/milestone8.md).
+
+Supervised read-only acceptance used a manually entered COM3 with no load and
+both outputs OFF. CH1 and CH2 logged together for approximately 30 seconds; CH2
+continued for approximately 5 seconds after CH1 stopped. Two independent files
+closed normally with increasing timestamps and elapsed times, approximately
+4 V / 0.08 A programmed values, approximately 0 V / 0 A no-load measurements
+and Output OFF throughout. No instrument setting was changed, and final physical
+OP1/OP2 were confirmed OFF.
 
 ## Milestone 5 offline physical backend
 

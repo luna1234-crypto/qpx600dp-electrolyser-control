@@ -82,9 +82,35 @@ simultaneous logging and shutdown were exercised by the Qt GUI integration test
 and end-to-end smoke path, while the captured native Windows rendering was
 inspected separately. No unperformed operator click sequence is claimed.
 
+## Real-hardware read-only CSV acceptance
+
+The operator subsequently completed a supervised read-only logging acceptance.
+Real Hardware mode connected successfully to manually entered COM3, identified
+the QPX600DP and read both channels. The instrument serial number is intentionally
+omitted. No load was connected. CH1 and CH2 remained Output OFF throughout, and
+no voltage, current or output setting was changed.
+
+Both channel loggers ran simultaneously for approximately 30 seconds. CH1 was
+stopped first while CH2 continued for approximately 5 additional seconds, then
+CH2 was stopped. Disconnect completed normally. Two independent CSV files were
+created and closed successfully, without overwriting an existing file. No exact
+filename or row count is claimed.
+
+Inspection showed increasing timestamps and elapsed times. Programmed values
+matched the GUI and instrument at approximately 4 V / 0.08 A; measured no-load
+values were approximately 0 V / 0 A. Output state remained OFF in the CSV data,
+and the CH2 file contained records after CH1 stopped. No GUI freeze, logging
+error or residual process was observed. Final physical OP1 and OP2 were confirmed
+OFF.
+
+After recording this acceptance, the complete automated suite passed with 250
+tests. `compileall`, `pip check`, the Simulation Mode smoke test and
+`git diff --check` also passed. These checks used only the simulator and fake
+backends; they did not reconnect to COM3 or send any physical instrument command.
+
 ## Deferred work
 
 Milestone 8 does not add protocols, automated sequences, pause/resume, live
 plotting, Emergency Off, automatic reconnection or any Milestone 9+ behavior.
-Real-instrument logging acceptance is not claimed by this Simulation Mode
-milestone.
+Real-hardware read-only CSV logging acceptance is complete. Loaded logging,
+automatic protocols and electrolyser validation are not claimed by Milestone 8.
