@@ -61,7 +61,7 @@ independent of the selected transport.
 | InstrumentCommandWorker | Execute bounded actions, maintain query/reply pairing, return results/errors | No protocol dwell, plotting or disk logging |
 | QPX600DPDriver | Validate channels/current range, query the existing voltage range, encode the Milestone 5 command subset, parse exact values/units/status, expose capabilities | No GUI, scheduling, implicit range change, reset, lock or output action on connect |
 | SerialTransport | Open an explicit port, apply 9600/8N1/XON-XOFF, serialize one LF/CRLF transaction, invalidate uncertain sessions | No port enumeration or knowledge of CC, CV, CSV or cell area |
-| ConstantCurrentController, one per channel | Own explicit state, active monotonic time, queue requests, local protocol CSV and measured results | No backend reference, shared-port access or GUI widgets |
+| ConstantCurrentController, one per channel | Own explicit state, active monotonic time, queue requests, measured results and either a local CSV or an active logger sink | No backend reference, shared-port access, second writer for an active logger or GUI widgets |
 | TestProtocol implementations | Generate planned steps and averaging rules | No GUI, serial handles or wall-clock sleeps |
 | SafetyValidator | Validate full protocol against software and documented hardware capability before Start | No silent clamping or device writes |
 | ChannelLoggingController / CsvLogFile, one per channel | Monotonic scheduling through the shared queue; exclusive creation, CSV rows, flush/close and file errors | No direct backend, plot buffer or software diagnostic logging |
@@ -96,6 +96,14 @@ per-row flush and deterministic close. Disconnect and shared-session failure
 stop both loggers. Directory, permission, disk/write, malformed-result or local
 sample failure stops only that channel unless the connection itself fails.
 Reconnect requires an explicit new Start and therefore a new file.
+
+Milestone 9 treats an already-active same-channel `ChannelLoggingController` as
+the single CSV owner. The protocol appends annotated rows through that controller
+on the Qt main thread and does not construct or close another writer. Its own
+measurement requests remain atomic `BACKGROUND` queue work alongside the logger's
+read-only requests. Pause/Resume retains the sink. Stop/completion detaches from
+an operator-started logger without stopping it; loss or file failure of the sink
+drives the protocol through its normal bounded Output-Off failure cleanup.
 
 The connection controller defaults to Simulation Mode. Real Hardware selection
 requires a warning acknowledgement and a manually typed `COM<N>` name; neither

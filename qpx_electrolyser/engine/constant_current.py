@@ -16,7 +16,12 @@ from qpx_electrolyser.app.connection_controller import (
     ConnectionSnapshot,
     ConnectionState,
 )
-from qpx_electrolyser.data.csv_logging import CsvLogFile, CsvWriter
+from qpx_electrolyser.data.csv_logging import (
+    CsvLogFile,
+    CsvWriter,
+    LoggingSnapshot,
+    ProtocolLogSink,
+)
 from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
 from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback, read_channel
@@ -143,6 +148,7 @@ class ConstantCurrentController(QObject):
         self._writer_factory = writer_factory
         self._snapshot = ProtocolSnapshot(channel=channel)
         self._writer: CsvWriter | None = None
+        self._logging_sink: ProtocolLogSink | None = None
         self._session_id = 0
         self._pending_request_id: int | None = None
         self._pending_action = ""
@@ -180,7 +186,7 @@ class ConstantCurrentController(QObject):
         voltage_range_name: str | None,
         directory: Path,
         *,
-        standalone_logging_active: bool = False,
+        logging_sink: ProtocolLogSink | None = None,
     ) -> bool:
         if self._snapshot.owns_channel:
             return False
@@ -188,8 +194,6 @@ class ConstantCurrentController(QObject):
             return self._reject("Connect and initialize the simulator before starting.")
         if not self._connection.snapshot.simulation_mode:
             return self._reject("Constant Current protocols are Simulation Mode only.")
-        if standalone_logging_active:
-            return self._reject("Stop standalone logging on this channel before starting a protocol.")
         if voltage_range_name is None:
             return self._reject("Refresh the channel before starting a protocol.")
         try:
@@ -198,12 +202,20 @@ class ConstantCurrentController(QObject):
             )
         except (ValueError, InstrumentValueError) as error:
             return self._reject(str(error))
-        try:
-            writer = self._writer_factory(Path(directory), self._channel)
-        except (OSError, ValueError) as error:
-            return self._reject(f"Cannot create protocol CSV: {error}")
+        writer: CsvWriter | None = None
+        if logging_sink is not None:
+            if not logging_sink.active or logging_sink.file_path is None:
+                return self._reject("The selected channel logger is not active.")
+            file_path = logging_sink.file_path
+        else:
+            try:
+                writer = self._writer_factory(Path(directory), self._channel)
+            except (OSError, ValueError) as error:
+                return self._reject(f"Cannot create protocol CSV: {error}")
+            file_path = writer.path
 
         self._writer = writer
+        self._logging_sink = logging_sink
         self._session_id = self._connection.snapshot.session_id
         self._active_before_run_s = 0.0
         self._run_started_at = 0.0
@@ -213,7 +225,7 @@ class ConstantCurrentController(QObject):
             state=ProtocolState.STARTING,
             config=config,
             remaining_active_s=config.duration_s,
-            file_path=writer.path,
+            file_path=file_path,
             message="Checking OFF state and applying constant-current settings...",
         ))
         return self._submit_action("start", lambda supply: self._start_operation(supply, config))
@@ -587,6 +599,7 @@ class ConstantCurrentController(QObject):
         self._pending_action = ""
         self._append_event_best_effort("completed" if state is ProtocolState.COMPLETED else "error", state, message)
         writer, self._writer = self._writer, None
+        self._logging_sink = None
         close_error: OSError | None = None
         if writer is not None:
             try:
@@ -660,6 +673,15 @@ class ConstantCurrentController(QObject):
         state: ProtocolState,
         error: str = "",
     ) -> None:
+        logging_sink = self._logging_sink
+        if logging_sink is not None:
+            logging_sink.append_protocol(
+                readback,
+                status=status,
+                protocol_state=state.value,
+                error=error,
+            )
+            return
         writer = self._writer
         if writer is None:
             raise ValueError("Protocol CSV writer is unavailable")
@@ -682,12 +704,26 @@ class ConstantCurrentController(QObject):
         state: ProtocolState,
         error: str = "",
     ) -> None:
-        if self._writer is None:
+        if self._writer is None and self._logging_sink is None:
             return
         try:
             self._append(None, status, state, error)
         except (OSError, ValueError):
             pass
+
+    @Slot(object)
+    def logging_snapshot_changed(self, snapshot: object) -> None:
+        if (
+            self._logging_sink is not None
+            and self._snapshot.owns_channel
+            and isinstance(snapshot, LoggingSnapshot)
+            and snapshot.channel == self._channel
+            and not snapshot.active
+        ):
+            self._begin_cleanup(
+                ProtocolState.FAILED,
+                f"Active protocol CSV logging became unavailable: {snapshot.message}",
+            )
 
     @Slot(object)
     def _connection_changed(self, snapshot: ConnectionSnapshot) -> None:

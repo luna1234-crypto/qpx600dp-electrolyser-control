@@ -195,8 +195,13 @@ The other channel remains independent unless the shared connection fails.
 
 Protocol files use the Milestone 8 writer. Two appended columns,
 `protocol_name` and `protocol_state`, are blank for standalone logging and retain
-backward readability for earlier CSV consumers. Protocol controls are Simulation
-Mode only; Milestone 10 plotting and later sweep/polarization protocols are not
+backward readability for earlier CSV consumers. If same-channel logging is already
+active, Constant Current remains available and appends its samples and state rows
+to that one existing file; it never creates a second writer. Pause/Resume retains
+the same file, and protocol Stop/completion leaves the manually started logger
+running until the operator stops it. A shared logger failure safely fails and
+turns off only that channel's protocol. Protocol controls are Simulation Mode
+only; Milestone 10 plotting and later sweep/polarization protocols are not
 implemented. See [Milestone 9 verification](docs/verification/milestone9.md).
 
 ## Milestone 5 offline physical backend

@@ -7,8 +7,9 @@ Date: 2026-10-07
 CH1 and CH2 each own a `ConstantCurrentController` in the Qt main thread. The
 explicit states are IDLE, STARTING, RUNNING, PAUSING, PAUSED, RESUMING, STOPPING,
 COMPLETED and FAILED. Controllers own protocol time, request IDs, session
-generation, one single-shot sample timer and one protocol CSV. They never receive
-or call the backend; every operation is submitted to the one Milestone 6 worker.
+generation and one single-shot sample timer. They either own one protocol CSV or
+append through an already-active same-channel logger. They never receive or call
+the backend; every operation is submitted to the one Milestone 6 worker.
 
 The implementation is intentionally Simulation Mode only. It adds no COM-port
 enumeration, real-hardware protocol path, plotting, CV, sweep or polarization
@@ -19,8 +20,8 @@ envelope are also enforced before any command or file is submitted.
 
 ## Command sequences and timing
 
-After GUI/session validation and exclusive CSV creation, the atomic Start backend
-sequence is:
+After GUI/session validation and selection of either an active logger or a newly
+and exclusively created protocol CSV, the atomic Start backend sequence is:
 
 ```text
 read_output_state(channel)
@@ -63,6 +64,15 @@ both fields blank, so existing behavior and earlier-column readers remain valid.
 Constant Current sample rows use `constant_current` and `RUNNING`; terminal/event
 rows record the applicable state and status/error.
 
+An active same-channel Milestone 8 logger is a compatible single-writer sink, not
+a conflicting owner. Constant Current Start remains enabled and uses that logger's
+existing path; protocol rows and ordinary logging rows serialize on the Qt main
+thread after their measurements serialize through the shared worker. Pause/Resume
+continues on the same file. Protocol Stop/completion detaches without closing the
+operator-started logger. Stopping or losing that logger during an active protocol,
+including disk/write failure, fails the affected protocol and initiates bounded
+Output-Off cleanup. Starting a second logger or writer remains prohibited.
+
 ## Verification coverage
 
 Simulator/fake tests cover CH1-only, CH2-only, normal completion, simultaneous
@@ -71,6 +81,9 @@ out-of-policy input, initially ON refusal, setting mismatch, Pause/Resume/Stop,
 paused-time exclusion, early Stop, malformed sample, queue rejection, unexpected
 Output Off, CSV failure, no Output-On retry, Output-Off cleanup, channel isolation,
 coordinated disconnect, direct connection loss warning and clean worker shutdown.
+Coverage also verifies active-logger GUI coexistence, one shared writer/path,
+Pause/Resume rows, logger persistence after Stop and completion, and safe protocol
+failure after an injected shared-file error.
 
 ### PAUSED output-indicator regression
 
@@ -104,12 +117,13 @@ commanded during implementation or validation.
 
 Final Windows results:
 
-- complete suite: **275 passed in 15.00s**;
+- complete suite: **277 passed in 15.37s**;
 - `compileall`: exit code 0;
 - `pip check`: `No broken requirements found.`;
-- native Simulation Mode smoke: both GUI-started protocols completed, both
-  simulated outputs returned OFF, protocol and standalone CSV files closed,
-  disconnect and worker shutdown completed normally;
+- native Simulation Mode smoke: both active channel loggers remained available
+  while both GUI-started protocols completed into the same per-channel files,
+  both simulated outputs returned OFF, files closed explicitly, and disconnect
+  and worker shutdown completed normally;
 - manual visual inspection of the native render confirmed both protocol panels,
   inputs, terminal states, timing, measurements and missed-sample displays;
 - Pause/Resume, paused-time exclusion, early Stop, coordinated disconnect and

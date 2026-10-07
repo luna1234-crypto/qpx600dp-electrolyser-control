@@ -116,6 +116,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     return
                 if len(connection_controller.snapshot.initial_readbacks) != 2:
                     fail_smoke_test("Simulation Mode smoke test did not read both channels.")
+                for logger_controller in window.logging_controllers.values():
+                    if not logger_controller.start(window.data_directory, 0.1):
+                        fail_smoke_test(logger_controller.snapshot.message)
                 for panel in window.protocol_panels.values():
                     panel.current_input.setText("0.1")
                     panel.voltage_input.setText("2")
@@ -133,9 +136,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         fail_smoke_test("Constant Current protocols did not complete in time.")
                     QTimer.singleShot(25, verify_protocol_smoke_test)
                     return
-                for logger_controller in window.logging_controllers.values():
-                    if not logger_controller.start(window.data_directory, 0.1):
-                        fail_smoke_test(logger_controller.snapshot.message)
+                for channel in (1, 2):
+                    logger_snapshot = window.logging_controllers[channel].snapshot
+                    protocol_snapshot = window.protocol_controllers[channel].snapshot
+                    if not logger_snapshot.active:
+                        fail_smoke_test("Protocol completion stopped an active channel logger.")
+                    if protocol_snapshot.file_path != logger_snapshot.file_path:
+                        fail_smoke_test("Protocol did not reuse the active channel CSV file.")
                 QTimer.singleShot(25, verify_logging_smoke_test)
 
             def verify_logging_smoke_test() -> None:
@@ -156,7 +163,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 logger.info(
                     "Smoke test: window visible=%s; Qt event loop processed events; "
                     "simulator connected, both Constant Current protocols completed and "
-                    "independent standalone CSV logs written",
+                    "shared their independently active channel CSV logs",
                     window.isVisible(),
                 )
                 connection_controller.request_disconnect()

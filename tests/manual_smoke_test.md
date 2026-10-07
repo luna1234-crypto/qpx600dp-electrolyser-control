@@ -35,9 +35,12 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
     closed CSV. Confirm CH2 remains unaffected.
 14. Choose a writable CSV output directory and set a short interval such as
     0.25 seconds. Start CH1 logging; confirm only CH1 shows increasing samples.
-    Start CH2 and confirm both counters increase while the window remains
-    responsive. Stop CH1 and confirm CH2 continues. Open both CSV files and
-    confirm one header plus incrementally written rows for the correct channel.
+    Confirm CH1 Constant Current Start remains enabled. Run, Pause, Resume and Stop
+    a short CH1 protocol; confirm logging stays active and the protocol uses the
+    same file with `constant_current` protocol name/state rows. Start CH2 logging
+    and confirm both counters increase while the window remains responsive. Stop
+    CH1 logging and confirm CH2 continues. Open both CSV files and confirm one
+    header plus incrementally written rows for the correct channel.
 15. Disconnect while CH2 logs. Confirm CH2 logging stops, its file closes, and
     reconnect does not resume it. Start again and confirm a new file is created.
 16. Disconnect and confirm both channel panels and protocol Start controls become

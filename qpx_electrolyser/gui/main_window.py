@@ -118,6 +118,9 @@ class MainWindow(QMainWindow):
                 lambda _snapshot, selected_channel=channel:
                 self._update_protocol_context(selected_channel)
             )
+            logging_controller.snapshot_changed.connect(
+                protocol_controller.logging_snapshot_changed
+            )
             logging_controller.sample_received.connect(controller.accept_logging_readback)
             protocol_controller.snapshot_changed.connect(protocol_panel.apply_snapshot)
             protocol_controller.snapshot_changed.connect(
@@ -225,6 +228,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         manual = self.channel_controllers[channel].snapshot
         protocol = self.protocol_controllers[channel]
+        logger = self.logging_controllers[channel]
         if not protocol.start(
             current,
             voltage,
@@ -232,7 +236,7 @@ class MainWindow(QMainWindow):
             interval,
             manual.voltage_range_name,
             self._data_directory,
-            standalone_logging_active=self.logging_controllers[channel].snapshot.active,
+            logging_sink=logger if logger.snapshot.active else None,
         ):
             self.statusBar().showMessage(protocol.snapshot.message)
 
@@ -259,7 +263,6 @@ class MainWindow(QMainWindow):
                 and not manual.pending
                 and not manual.faulted
             ),
-            standalone_logging=self.logging_controllers[channel].snapshot.active,
         )
 
     def _request_disconnect(self) -> None:

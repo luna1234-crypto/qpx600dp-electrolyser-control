@@ -61,6 +61,25 @@ class CsvWriter(Protocol):
     def close(self) -> None: ...
 
 
+class ProtocolLogSink(Protocol):
+    """Existing channel logger interface used by a same-channel protocol."""
+
+    @property
+    def active(self) -> bool: ...
+
+    @property
+    def file_path(self) -> Path | None: ...
+
+    def append_protocol(
+        self,
+        readback: ChannelReadback | None,
+        *,
+        status: str,
+        protocol_state: str,
+        error: str = "",
+    ) -> None: ...
+
+
 class CsvLogFile:
     """One exclusively-created, incrementally flushed channel log."""
 
@@ -181,6 +200,14 @@ class ChannelLoggingController(QObject):
     def snapshot(self) -> LoggingSnapshot:
         return self._snapshot
 
+    @property
+    def active(self) -> bool:
+        return self._snapshot.active
+
+    @property
+    def file_path(self) -> Path | None:
+        return self._snapshot.file_path
+
     def start(self, directory: Path, interval_s: float) -> bool:
         if self._snapshot.active:
             return False
@@ -234,6 +261,47 @@ class ChannelLoggingController(QObject):
 
     def shutdown(self) -> None:
         self.stop("Logging closed for application shutdown")
+
+    def append_protocol(
+        self,
+        readback: ChannelReadback | None,
+        *,
+        status: str,
+        protocol_state: str,
+        error: str = "",
+    ) -> None:
+        """Append a protocol row through this logger's one open writer.
+
+        Logger and protocol callbacks execute on the Qt main thread, while every
+        measurement that supplies ``readback`` remains serialized by the shared
+        instrument queue.
+        """
+        writer = self._writer
+        if not self._snapshot.active or writer is None:
+            raise ValueError("Active channel CSV logger is unavailable")
+        connection = self._connection.snapshot
+        try:
+            writer.append(
+                timestamp=self._utc_now(),
+                elapsed_s=max(0.0, self._monotonic() - self._started_at),
+                channel=self._channel,
+                readback=readback,
+                connection_state=connection.state.value,
+                session_id=connection.session_id,
+                status=status,
+                error=error,
+                protocol_name="constant_current",
+                protocol_state=protocol_state,
+            )
+        except (OSError, ValueError) as append_error:
+            self._fail_file(append_error)
+            raise
+        self._publish(replace(
+            self._snapshot,
+            sample_count=self._snapshot.sample_count + 1,
+            message=f"Logged Constant Current {status} row",
+            error=False,
+        ))
 
     @Slot()
     def _submit_due_sample(self) -> None:

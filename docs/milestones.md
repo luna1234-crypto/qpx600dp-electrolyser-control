@@ -290,9 +290,11 @@ the protocol CSV. One channel's local protocol/file failure does not stop the
 other.
 
 Protocol samples use the Milestone 8 exclusive, incremental, flushed CSV writer.
-The appended `protocol_name` and `protocol_state` columns are blank for standalone
-logging, preserving its behavior and making the schema extension backward
-readable. Tests cover both channels, simultaneous operation, exact command order,
+When a same-channel logger is already active, the protocol reuses that single file
+and writer through Pause/Resume; Stop or completion leaves the operator-started
+logger active. A logger failure safely stops the affected protocol. The appended
+`protocol_name` and `protocol_state` columns are blank for standalone rows,
+preserving backward readability. Tests cover both channels, simultaneous operation, exact command order,
 input rejection, initially-ON refusal, mismatch, Pause/Resume/Stop, active-time
 accounting, failure cleanup, queue serialization and clean shutdown. Milestone 10
 plotting, CV, sweeps, polarization and real-hardware protocol operation remain

@@ -25,7 +25,6 @@ class ConstantCurrentPanel(QGroupBox):
         super().__init__(f"Channel {channel} Constant Current protocol")
         self.channel = channel
         self._available = False
-        self._standalone_logging = False
         self._snapshot = ProtocolSnapshot(channel=channel)
 
         self.current_input = self._input("A", f"channel{channel}ProtocolCurrent")
@@ -153,16 +152,14 @@ class ConstantCurrentPanel(QGroupBox):
             self.message_label.setStyleSheet("color: #a61b1b;" if snapshot.error else "")
         self._update_enabled()
 
-    def set_context(self, *, available: bool, standalone_logging: bool) -> None:
+    def set_context(self, *, available: bool) -> None:
         self._available = available
-        self._standalone_logging = standalone_logging
         self._update_enabled()
 
     def _update_enabled(self) -> None:
         state = self._snapshot.state
         start_ready = (
             self._available
-            and not self._standalone_logging
             and state in {ProtocolState.IDLE, ProtocolState.COMPLETED, ProtocolState.FAILED}
         )
         for widget in (

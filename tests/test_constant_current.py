@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 import pytest
 
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
+from qpx_electrolyser.data.csv_logging import ChannelLoggingController, CsvLogFile
 from qpx_electrolyser.engine.constant_current import (
     ConstantCurrentController,
     ProtocolState,
@@ -466,6 +467,124 @@ def test_gui_disables_only_owned_channel_and_coordinates_disconnect(
         assert any(item[0] == "output_off" and item[1] == 1 for item in backend.calls)
     finally:
         window.close()
+        assert connection.shutdown(1)
+
+
+def test_active_manual_logger_keeps_protocol_start_enabled_and_owns_single_csv(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    backend = RecordingSimulator()
+    connection = ConnectionController(lambda: backend)
+    window = MainWindow(tmp_path / "application.log", connection, data_directory=tmp_path)
+    window.show()
+    try:
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        window.logging_interval.setValue(0.1)
+        window.channel_panels[1].start_logging_button.click()
+        logger = window.logging_controllers[1]
+        wait_until(qapp, lambda: logger.snapshot.sample_count >= 1)
+        shared_path = logger.snapshot.file_path
+
+        panel = window.protocol_panels[1]
+        assert panel.start_button.isEnabled()
+        panel.duration_input.setText("1")
+        panel.interval_input.setText("0.1")
+        panel.start_button.click()
+        protocol = window.protocol_controllers[1]
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        wait_until(qapp, lambda: protocol.snapshot.sample_count >= 1)
+        assert protocol.snapshot.file_path == shared_path
+
+        panel.pause_button.click()
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.PAUSED)
+        panel.resume_button.click()
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        wait_until(qapp, lambda: protocol.snapshot.sample_count >= 2)
+        panel.stop_button.click()
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.COMPLETED)
+
+        assert logger.snapshot.active
+        panel.duration_input.setText("0.35")
+        panel.start_button.click()
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.COMPLETED)
+        assert logger.snapshot.active
+        assert protocol.snapshot.file_path == shared_path
+
+        logger.stop("Operator stopped logging after protocol")
+        rows = csv_rows(shared_path)  # type: ignore[arg-type]
+        protocol_rows = [row for row in rows if row["protocol_name"] == "constant_current"]
+        assert protocol_rows
+        assert {row["protocol_state"] for row in protocol_rows} >= {"RUNNING", "PAUSED"}
+        assert any(not row["protocol_name"] for row in rows)
+        assert len(list(tmp_path.glob("qpx600dp_ch1_*.csv"))) == 1
+    finally:
+        protocol = window.protocol_controllers[1]
+        if protocol.snapshot.owns_channel:
+            protocol.stop("Regression test cleanup")
+            wait_until(qapp, lambda: not protocol.snapshot.owns_channel)
+        window.logging_controllers[1].shutdown()
+        window.close()
+        qapp.processEvents()
+        assert connection.shutdown(1)
+
+
+def test_active_logger_file_failure_safely_stops_protocol_without_second_writer(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    class FailProtocolRowsWriter:
+        def __init__(self, directory: Path, channel: int) -> None:
+            self._inner = CsvLogFile(directory, channel)
+            self.path = self._inner.path
+            self.closed = False
+
+        def append(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            if kwargs.get("protocol_name"):
+                raise OSError("injected shared protocol-log failure")
+            self._inner.append(**kwargs)
+
+        def close(self) -> None:
+            self.closed = True
+            self._inner.close()
+
+    created: list[FailProtocolRowsWriter] = []
+
+    def logger_writer_factory(directory: Path, channel: int) -> FailProtocolRowsWriter:
+        writer = FailProtocolRowsWriter(directory, channel)
+        created.append(writer)
+        return writer
+
+    def reject_second_writer(_directory: Path, _channel: int):  # type: ignore[no-untyped-def]
+        raise AssertionError("protocol attempted to create a second CSV writer")
+
+    backend = RecordingSimulator()
+    connection, _ = connected(qapp, backend)
+    logger = ChannelLoggingController(1, connection, writer_factory=logger_writer_factory)
+    protocol = ConstantCurrentController(1, connection, writer_factory=reject_second_writer)
+    logger.snapshot_changed.connect(protocol.logging_snapshot_changed)
+    try:
+        assert logger.start(tmp_path, 0.1)
+        wait_until(qapp, lambda: logger.snapshot.sample_count >= 1)
+        assert protocol.start(
+            "0.1",
+            "2",
+            "1",
+            "0.1",
+            "60 V",
+            tmp_path,
+            logging_sink=logger,
+        )
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.FAILED)
+
+        assert not logger.snapshot.active
+        assert "logging" in protocol.snapshot.message.lower()
+        assert sum(item[0] == "output_on" for item in backend.calls) == 1
+        assert sum(item[0] == "output_off" for item in backend.calls) == 1
+        assert len(created) == 1
+        assert created[0].closed
+    finally:
+        logger.shutdown()
         assert connection.shutdown(1)
 
 
