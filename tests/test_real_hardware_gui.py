@@ -13,8 +13,16 @@ import pytest
 
 from qpx_electrolyser.app.channel_controller import ChannelSnapshot, ManualChannelController
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
+from qpx_electrolyser.data.csv_logging import ChannelLoggingController
+from qpx_electrolyser.engine.constant_current import (
+    ConstantCurrentController,
+    ProtocolState,
+    REAL_HARDWARE_PROTOCOL_CONFIRMATION,
+)
 from qpx_electrolyser.gui.channel_panel import ChannelPanel
+from qpx_electrolyser.gui.main_window import MainWindow
 from qpx_electrolyser.instrument.qpx600dp import QPX600DPDriver
+from qpx_electrolyser.instrument.connection_worker import CommandPriority
 from qpx_electrolyser.instrument.serial_transport import SerialTransport
 
 
@@ -87,6 +95,20 @@ def initial_responses(
     *, identity: bytes = b"THURLBY THANDAR,QPX600DP,FAKE,1.00\r\n",
 ) -> list[bytes]:
     return [identity, *channel_responses(1), *channel_responses(2)]
+
+
+def protocol_start_responses(channel: int, *, mismatch: bool = False) -> list[bytes]:
+    voltage = 3.000 if mismatch else 2.000
+    return [
+        b"0\r\n",  # prepare: selected output OFF
+        b"1\r\n",  # range query performed by set_voltage
+        f"V{channel} {voltage:.3f}\r\n".encode(),
+        f"I{channel} 0.10\r\n".encode(),
+        b"0\r\n",  # final preflight: still OFF
+        f"V{channel} 2.000\r\n".encode(),
+        f"I{channel} 0.10\r\n".encode(),
+        b"1\r\n",  # Output On authoritative confirmation
+    ]
 
 
 class FakeRealBackendFactory:
@@ -320,3 +342,316 @@ def test_simulation_connect_never_calls_real_factory(qapp: QApplication) -> None
         assert controller.snapshot.simulation_mode
     finally:
         assert controller.shutdown(timeout_s=1)
+
+
+def test_real_protocol_requires_guard_token_before_any_protocol_command(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    fake = FakeSerial(initial_responses())
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    protocol = ConstantCurrentController(1, connection)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        baseline = list(fake.writes)
+
+        assert not protocol.start("0.1", "2", "2", "1", "60 V", tmp_path)
+        assert "not confirmed" in protocol.snapshot.message
+        assert fake.writes == baseline
+        assert not list(tmp_path.glob("*.csv"))
+    finally:
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_real_protocol_confirmation_exact_order_single_on_and_confirmed_off_cleanup(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeSerial([
+        *initial_responses(),
+        *protocol_start_responses(1),
+        *channel_responses(1, voltage=2, current=0.1, output=False),
+    ])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    window = MainWindow(tmp_path / "application.log", connection, data_directory=tmp_path)
+    window.show()
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        panel = window.protocol_panels[1]
+        panel.duration_input.setText("2")
+        panel.interval_input.setText("1")
+        baseline = list(fake.writes)
+        prompts: list[str] = []
+
+        def cancel(*args: object) -> QMessageBox.StandardButton:
+            prompts.append(str(args[2]))
+            return QMessageBox.StandardButton.Cancel
+
+        monkeypatch.setattr(QMessageBox, "warning", cancel)
+        panel.start_button.click()
+        qapp.processEvents()
+        assert fake.writes == baseline
+        assert "REAL HARDWARE OUTPUT-ON AUTHORIZATION" in prompts[-1]
+        assert "Channel: CH1" in prompts[-1]
+        assert "CSV destination:" in prompts[-1]
+
+        monkeypatch.setattr(
+            QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Yes
+        )
+        panel.start_button.click()
+        panel.start_button.click()  # stale/double-click guard
+        wait_until(qapp, lambda: window.protocol_controllers[1].snapshot.state is ProtocolState.RUNNING)
+        window.protocol_controllers[1].stop("fake-serial test cleanup")
+        wait_until(qapp, lambda: window.protocol_controllers[1].snapshot.state is ProtocolState.COMPLETED)
+
+        protocol_writes = fake.writes[len(baseline):]
+        assert protocol_writes == [
+            b"OP1?\n", b"VRANGE1?\n", b"V1 2.000\n", b"I1 0.10\n",
+            b"V1?\n", b"I1?\n",
+            b"OP1?\n", b"V1?\n", b"I1?\n", b"OP1 1\n", b"OP1?\n",
+            b"OP1 0\n", b"VRANGE1?\n", b"V1?\n", b"I1?\n",
+            b"V1O?\n", b"I1O?\n", b"OP1?\n",
+        ]
+        assert protocol_writes.count(b"OP1 1\n") == 1
+        assert window.protocol_controllers[1].snapshot.output_enabled is False
+        assert not any(command.startswith((b"V2 ", b"I2 ", b"OP2 ")) for command in protocol_writes)
+    finally:
+        window.close()
+        qapp.processEvents()
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_real_protocol_readback_mismatch_never_turns_on_and_uses_priority_cleanup(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    fake = FakeSerial([
+        *initial_responses(),
+        *protocol_start_responses(1, mismatch=True)[:4],
+        *channel_responses(1, voltage=3, current=0.1, output=False),
+    ])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    protocol = ConstantCurrentController(1, connection)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        assert protocol.start(
+            "0.1", "2", "2", "1", "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_PROTOCOL_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.FAILED)
+        mutations = [item for item in fake.writes if not item.rstrip(b"\n").endswith(b"?")]
+        assert mutations == [b"V1 2.000\n", b"I1 0.10\n", b"OP1 0\n"]
+        assert b"OP1 1\n" not in fake.writes
+        assert protocol.snapshot.output_enabled is False
+        assert not any(command.startswith((b"V2 ", b"I2 ", b"OP2 ")) for command in fake.writes)
+    finally:
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_stop_while_real_start_is_pending_cannot_submit_stale_output_on(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    class SlowFakeSerial(FakeSerial):
+        def read_until(self, expected: bytes = b"\n", size: int | None = None) -> bytes:
+            if len(self.writes) > len(initial_responses()) and self.writes[-1] == b"OP1?\n":
+                time.sleep(0.03)
+            return super().read_until(expected, size)
+
+    fake = SlowFakeSerial([
+        *initial_responses(),
+        *protocol_start_responses(1)[:4],
+        *channel_responses(1, voltage=2, current=0.1, output=False),
+    ])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    protocol = ConstantCurrentController(1, connection)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        assert protocol.start(
+            "0.1", "2", "2", "1", "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_PROTOCOL_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: len(fake.writes) > len(initial_responses()))
+        protocol.stop("cancelled during guarded preflight")
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.COMPLETED)
+        assert b"OP1 1\n" not in fake.writes
+        assert fake.writes.count(b"OP1 0\n") == 1
+        assert protocol.snapshot.output_enabled is False
+    finally:
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_real_protocol_resume_requires_fresh_confirmation_and_reuses_csv(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    resume_responses = [
+        b"0\r\n", b"V1 2.000\r\n", b"I1 0.10\r\n",
+        b"0\r\n", b"V1 2.000\r\n", b"I1 0.10\r\n", b"1\r\n",
+    ]
+    fake = FakeSerial([
+        *initial_responses(),
+        *channel_responses(1),  # active logger's initial read-only sample
+        *protocol_start_responses(1),
+        *channel_responses(1, voltage=2, current=0.1, output=False),  # pause
+        *resume_responses,
+        *channel_responses(1, voltage=2, current=0.1, output=False),  # stop
+    ])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    logger = ChannelLoggingController(1, connection)
+    protocol = ConstantCurrentController(1, connection)
+    logger.snapshot_changed.connect(protocol.logging_snapshot_changed)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        assert logger.start(tmp_path, 10)
+        wait_until(qapp, lambda: logger.snapshot.sample_count == 1)
+        shared_path = logger.snapshot.file_path
+        assert protocol.start(
+            "0.1", "2", "4", "1", "60 V", tmp_path,
+            logging_sink=logger,
+            real_hardware_confirmation=REAL_HARDWARE_PROTOCOL_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        protocol.pause()
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.PAUSED)
+        before_cancelled_resume = list(fake.writes)
+
+        assert not protocol.resume()
+        assert fake.writes == before_cancelled_resume
+        assert protocol.resume(REAL_HARDWARE_PROTOCOL_CONFIRMATION)
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        protocol.stop("fake-serial resume test cleanup")
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.COMPLETED)
+
+        assert logger.snapshot.active
+        assert protocol.snapshot.file_path == shared_path
+        assert len(list(tmp_path.glob("qpx600dp_ch1_*.csv"))) == 1
+        assert fake.writes.count(b"OP1 1\n") == 2
+        assert fake.writes.count(b"OP1 0\n") == 2
+        assert not any(command.startswith((b"V2 ", b"I2 ", b"OP2 ")) for command in fake.writes)
+        logger.stop("operator-owned logger stopped by test")
+    finally:
+        logger.shutdown()
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_ambiguous_real_output_on_never_retries_and_requests_priority_off(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    responses = protocol_start_responses(1)
+    responses[-1] = b"malformed\r\n"
+    fake = FakeSerial([*initial_responses(), *responses])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    protocol = ConstantCurrentController(1, connection)
+    submissions: list[tuple[str, CommandPriority | None]] = []
+    original_submit = connection.submit_command
+
+    def recording_submit(name: str, operation, **kwargs):  # type: ignore[no-untyped-def]
+        submissions.append((name, kwargs.get("priority")))
+        return original_submit(name, operation, **kwargs)
+
+    connection.submit_command = recording_submit  # type: ignore[method-assign]
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        assert protocol.start(
+            "0.1", "2", "2", "1", "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_PROTOCOL_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.FAILED)
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.ERROR)
+
+        assert fake.writes.count(b"OP1 1\n") == 1
+        assert ("ch1-constant-current-stop", CommandPriority.SAFETY) in submissions
+        assert protocol.snapshot.operator_warning
+        assert "could not be confirmed" in protocol.snapshot.message
+        assert fake.close_calls == 1
+    finally:
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_real_protocol_fresh_initially_on_readback_refuses_every_mutation(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    fake = FakeSerial([*initial_responses(), b"1\r\n"])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    protocol = ConstantCurrentController(1, connection)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        baseline = len(fake.writes)
+        assert protocol.start(
+            "0.1", "2", "2", "1", "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_PROTOCOL_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.FAILED)
+        assert fake.writes[baseline:] == [b"OP1?\n"]
+        assert protocol.snapshot.operator_warning
+        assert connection.snapshot.state is ConnectionState.CONNECTED
+    finally:
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_real_protocol_ch2_mapping_is_isolated(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    fake = FakeSerial([
+        *initial_responses(),
+        *protocol_start_responses(2),
+        *channel_responses(2, voltage=2, current=0.1, output=False),
+    ])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    protocol = ConstantCurrentController(2, connection)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        baseline = len(fake.writes)
+        assert protocol.start(
+            "0.1", "2", "2", "1", "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_PROTOCOL_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        protocol.stop("fake CH2 mapping cleanup")
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.COMPLETED)
+        commands = fake.writes[baseline:]
+        assert commands.count(b"OP2 1\n") == 1
+        assert commands.count(b"OP2 0\n") == 1
+        assert b"V2 2.000\n" in commands
+        assert b"I2 0.10\n" in commands
+        assert not any(command.startswith((b"V1 ", b"I1 ", b"OP1 ")) for command in commands)
+    finally:
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_invalid_real_protocol_input_prevents_confirmation_file_and_queue(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeSerial(initial_responses())
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    window = MainWindow(tmp_path / "application.log", connection, data_directory=tmp_path)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        baseline = list(fake.writes)
+        monkeypatch.setattr(
+            QMessageBox,
+            "warning",
+            lambda *args: pytest.fail("invalid input must not reach confirmation"),
+        )
+        window._start_protocol(1, "nan", "2", "2", "1")
+        assert fake.writes == baseline
+        assert not list(tmp_path.glob("*.csv"))
+        assert "finite" in window.statusBar().currentMessage()
+    finally:
+        window.close()
+        qapp.processEvents()
+        assert connection.shutdown(timeout_s=1)

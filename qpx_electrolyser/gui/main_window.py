@@ -25,6 +25,7 @@ from qpx_electrolyser.data.csv_logging import ChannelLoggingController
 from qpx_electrolyser.engine.constant_current import (
     ConstantCurrentController,
     ProtocolSnapshot,
+    REAL_HARDWARE_PROTOCOL_CONFIRMATION,
 )
 from qpx_electrolyser.gui.channel_panel import ChannelPanel
 from qpx_electrolyser.gui.connection_panel import ConnectionPanel
@@ -139,7 +140,9 @@ class MainWindow(QMainWindow):
                 )
             )
             protocol_panel.pause_requested.connect(protocol_controller.pause)
-            protocol_panel.resume_requested.connect(protocol_controller.resume)
+            protocol_panel.resume_requested.connect(
+                lambda selected_channel=channel: self._resume_protocol(selected_channel)
+            )
             protocol_panel.stop_requested.connect(protocol_controller.stop)
             panel.apply_snapshot(controller.snapshot)
             self.channel_controllers[channel] = controller
@@ -195,8 +198,9 @@ class MainWindow(QMainWindow):
             "Milestone 9 independent Constant Current protocol build.\n\n"
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
             "Simulation is the default. Real Hardware uses only a manually entered COM port. "
-            "Independent CSV logging and Simulation Mode Constant Current protocols are "
-            "available. Plotting, sweeps and emergency-all-off remain future work.",
+            "Independent CSV logging and guarded Constant Current protocols are available. "
+            "Real Hardware protocols require explicit confirmation and remain acceptance-"
+            "pending. Plotting, sweeps and emergency-all-off remain future work.",
         )
 
     def _choose_logging_directory(self) -> None:
@@ -229,6 +233,43 @@ class MainWindow(QMainWindow):
         manual = self.channel_controllers[channel].snapshot
         protocol = self.protocol_controllers[channel]
         logger = self.logging_controllers[channel]
+        validation_error = protocol.validate_inputs(
+            current, voltage, duration, interval, manual.voltage_range_name
+        )
+        if validation_error is not None:
+            self.statusBar().showMessage(validation_error)
+            return
+        confirmation = None
+        if not self._connection_controller.snapshot.simulation_mode:
+            log_target = (
+                str(logger.snapshot.file_path)
+                if logger.snapshot.active and logger.snapshot.file_path is not None
+                else f"new channel {channel} CSV in {self._data_directory}"
+            )
+            answer = QMessageBox.warning(
+                self,
+                f"Confirm REAL HARDWARE Constant Current - CH{channel}",
+                "REAL HARDWARE OUTPUT-ON AUTHORIZATION\n\n"
+                f"Channel: CH{channel}\n"
+                f"Target current: {current} A\n"
+                f"Voltage compliance: {voltage} V\n"
+                f"Active duration: {duration} s\n"
+                f"Measurement interval: {interval} s\n"
+                f"Current displayed output state: "
+                f"{'OFF' if manual.output_enabled is False else 'NOT CONFIRMED OFF'}\n"
+                f"CSV destination: {log_target}\n\n"
+                "Confirm the intended load and wiring are connected to this channel, the other "
+                "channel is safe, and energizing this output is authorized. The application will "
+                "perform a fresh OFF/settings preflight before one Output-On attempt.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage(
+                    f"CH{channel} Real Hardware protocol cancelled; no command submitted."
+                )
+                return
+            confirmation = REAL_HARDWARE_PROTOCOL_CONFIRMATION
         if not protocol.start(
             current,
             voltage,
@@ -237,7 +278,35 @@ class MainWindow(QMainWindow):
             manual.voltage_range_name,
             self._data_directory,
             logging_sink=logger if logger.snapshot.active else None,
+            real_hardware_confirmation=confirmation,
         ):
+            self.statusBar().showMessage(protocol.snapshot.message)
+
+    def _resume_protocol(self, channel: int) -> None:
+        protocol = self.protocol_controllers[channel]
+        confirmation = None
+        if not self._connection_controller.snapshot.simulation_mode:
+            config = protocol.snapshot.config
+            if config is None:
+                return
+            answer = QMessageBox.warning(
+                self,
+                f"Confirm REAL HARDWARE resume - CH{channel}",
+                "REAL HARDWARE OUTPUT-ON AUTHORIZATION\n\n"
+                f"Resume CH{channel} at {config.target_current_a:g} A with "
+                f"{config.voltage_compliance_v:g} V compliance?\n\n"
+                "Confirm the load and wiring remain safe. A fresh OFF/settings preflight will "
+                "precede one Output-On attempt.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage(
+                    f"CH{channel} Real Hardware resume cancelled; no command submitted."
+                )
+                return
+            confirmation = REAL_HARDWARE_PROTOCOL_CONFIRMATION
+        if not protocol.resume(confirmation):
             self.statusBar().showMessage(protocol.snapshot.message)
 
     def _apply_protocol_snapshot(self, channel: int, snapshot: ProtocolSnapshot) -> None:
@@ -258,10 +327,10 @@ class MainWindow(QMainWindow):
         self.protocol_panels[channel].set_context(
             available=(
                 connection.state.value == "connected"
-                and connection.simulation_mode
                 and manual.connected
                 and not manual.pending
                 and not manual.faulted
+                and manual.output_enabled is False
             ),
         )
 

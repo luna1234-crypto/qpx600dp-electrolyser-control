@@ -1,6 +1,6 @@
 # Milestone 9 verification - independent Constant Current protocols
 
-Date: 2026-10-07
+Date: 2026-10-08
 
 ## Scope and state machine
 
@@ -11,9 +11,11 @@ generation and one single-shot sample timer. They either own one protocol CSV or
 append through an already-active same-channel logger. They never receive or call
 the backend; every operation is submitted to the one Milestone 6 worker.
 
-The implementation is intentionally Simulation Mode only. It adds no COM-port
-enumeration, real-hardware protocol path, plotting, CV, sweep or polarization
-protocol. The explicit Constant Current policy is 10 V, 5 A and 50 W, with a
+Simulation Mode remains the default. The guarded Real Hardware follow-up adds no
+COM-port enumeration or automatic connection and was tested only through injected
+fake serial transports. Physical protocol acceptance remains pending. Plotting,
+CV, sweep and polarization protocols remain excluded. Separate Simulation and
+Real Hardware policy objects currently enforce 10 V, 5 A and 50 W, with a
 maximum active duration of 24 hours and intervals from 0.1 through 3600 seconds.
 Hardware programming grids, selected voltage range and the conservative power
 envelope are also enforced before any command or file is submitted.
@@ -21,7 +23,8 @@ envelope are also enforced before any command or file is submitted.
 ## Command sequences and timing
 
 After GUI/session validation and selection of either an active logger or a newly
-and exclusively created protocol CSV, the atomic Start backend sequence is:
+and exclusively created protocol CSV, Start uses two serialized operations with a
+cancellation boundary. The prepare operation is:
 
 ```text
 read_output_state(channel)
@@ -29,12 +32,26 @@ set_voltage(channel, compliance)
 set_current(channel, target)
 read_set_voltage(channel)
 read_set_current(channel)
+```
+
+The controller then verifies the same session generation before submitting a
+final preflight and exactly-one Output-On operation:
+
+```text
+read_output_state(channel)
+read_set_voltage(channel)
+read_set_current(channel)
 output_on(channel)
 read_output_state(channel)
 ```
 
 An initially ON output is rejected before any mutation. Read-back mismatch fails
-Start. Output On occurs exactly once and is never retried silently. Each RUNNING
+Start. Real Hardware Start and each Resume require a detailed default-cancel GUI
+confirmation showing mode, channel, settings, timing, CSV destination and an
+explicit load/wiring authorization. Invalid input or cancellation creates neither
+a file nor a queue request. The separate final preflight prevents a stale prepare
+callback or double click from energizing the channel. Output On occurs exactly
+once and is never retried silently. Each RUNNING
 sample is one atomic `read_channel` operation at background priority:
 
 ```text
@@ -47,7 +64,21 @@ pending; delayed slots are counted and skipped rather than replayed. Pause sends
 `output_off` and confirms state OFF, then freezes active time. Resume confirms
 the same session and OFF state, rereads both programmed settings, sends one
 `output_on` and confirms ON. Stop/completion sends `output_off` and confirms OFF.
-Cleanup uses safety priority and never modifies the sibling channel.
+Cleanup uses safety priority, performs a complete selected-channel readback and
+publishes OFF only after authoritative confirmation. It never modifies the
+sibling channel. If communication is unavailable, a prominent warning states
+that physical OFF could not be confirmed.
+
+For the QPX600DP driver, the exact CH1 Start wire order (CH2 substitutes `2`) is:
+
+```text
+OP1?, VRANGE1?, V1 <compliance>, I1 <target>, V1?, I1?,
+OP1?, V1?, I1?, OP1 1, OP1?
+```
+
+Pause/Stop sends `OP1 0` followed by `VRANGE1?`, `V1?`, `I1?`, `V1O?`,
+`I1O?`, `OP1?`. Resume first reads `OP1?`, `V1?`, `I1?`, then repeats the
+final preflight/Output-On sequence.
 
 Disconnect and application close are coordinated in the GUI: active protocols
 first enter STOPPING and receive a bounded cleanup opportunity before the shared
@@ -83,7 +114,12 @@ Output Off, CSV failure, no Output-On retry, Output-Off cleanup, channel isolati
 coordinated disconnect, direct connection loss warning and clean worker shutdown.
 Coverage also verifies active-logger GUI coexistence, one shared writer/path,
 Pause/Resume rows, logger persistence after Stop and completion, and safe protocol
-failure after an injected shared-file error.
+failure after an injected shared-file error. Injected fake-serial coverage adds
+the strong Start/Resume confirmation gate, cancellation with zero protocol I/O,
+exact command bytes/order, exactly-one Output On, fresh preflight, stale-start
+cancellation, double-click suppression, readback mismatch without Output On,
+safety cleanup with authoritative OFF, CH1/CH2 isolation and operator-owned CSV
+continuity. No test constructs the default physical serial backend.
 
 ### PAUSED output-indicator regression
 
@@ -113,11 +149,12 @@ git diff --check
 ```
 
 No COM port, Test Bridge or physical QPX600DP was enumerated, opened, probed or
-commanded during implementation or validation.
+commanded during this follow-up implementation or validation. Real protocol
+acceptance is explicitly pending.
 
 Final Windows results:
 
-- complete suite: **277 passed in 15.37s**;
+- complete suite after the guarded Real Hardware follow-up: **286 passed in 15.75s**;
 - `compileall`: exit code 0;
 - `pip check`: `No broken requirements found.`;
 - native Simulation Mode smoke: both active channel loggers remained available

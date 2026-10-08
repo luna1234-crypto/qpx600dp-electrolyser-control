@@ -276,12 +276,13 @@ Added independent CH1 and CH2 Constant Current panels and per-channel state
 machines: IDLE, STARTING, RUNNING, PAUSING, PAUSED, RESUMING, STOPPING,
 COMPLETED and FAILED. Target current, voltage compliance, active duration and
 measurement interval are validated before queue submission against QPX
-programming grids, the conservative power envelope and an explicit Simulation
-Mode project policy of 10 V / 5 A / 50 W, 24 hours maximum and 0.1-3600 second
-intervals.
+programming grids, the conservative power envelope and separate Simulation/Real
+Hardware project policy objects currently set to 10 V / 5 A / 50 W, 24 hours
+maximum and 0.1-3600 second intervals.
 
-Start confirms OFF, sets voltage then current, verifies read-back, sends one
-Output On and confirms ON. Fixed active-time monotonic sampling never overlaps
+Start confirms OFF, sets voltage then current and verifies read-back. A separate
+queued final preflight rechecks session/OFF/settings immediately before one
+Output On and ON confirmation. Fixed active-time monotonic sampling never overlaps
 and counts skipped deadlines. Pause confirms Output Off and freezes active time;
 Resume revalidates the same session, OFF state and programmed settings before a
 single new Output On. Stop, completion, failures, coordinated disconnect and
@@ -296,6 +297,9 @@ logger active. A logger failure safely stops the affected protocol. The appended
 `protocol_name` and `protocol_state` columns are blank for standalone rows,
 preserving backward readability. Tests cover both channels, simultaneous operation, exact command order,
 input rejection, initially-ON refusal, mismatch, Pause/Resume/Stop, active-time
-accounting, failure cleanup, queue serialization and clean shutdown. Milestone 10
-plotting, CV, sweeps, polarization and real-hardware protocol operation remain
-out of scope. See [verification details](verification/milestone9.md).
+accounting, failure cleanup, queue serialization and clean shutdown. The guarded
+Real Hardware follow-up adds default-cancel Start/Resume authorization, stale and
+duplicate request rejection, authoritative OFF cleanup, channel isolation and
+single-writer CSV ownership. It is validated with injected fake serial only;
+physical protocol acceptance remains pending. Milestone 10 plotting, CV, sweeps
+and polarization remain out of scope. See [verification details](verification/milestone9.md).

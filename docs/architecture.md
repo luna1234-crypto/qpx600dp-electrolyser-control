@@ -206,7 +206,7 @@ Emergency behavior remains deferred.
 
 | Request/event | Required transition or result |
 | --- | --- |
-| Connect and complete shared initialisation | Protocol remains IDLE and becomes available in Simulation Mode |
+| Connect and complete shared initialisation | Protocol remains IDLE; real mode also requires exact QPX600DP identity and successful initial readback |
 | Validate full protocol and reserve file | IDLE/terminal to STARTING |
 | Confirm OFF, apply verified settings and enable selected output | STARTING to RUNNING |
 | Pause | Cancel pending sample; RUNNING to PAUSING; confirm output OFF; then PAUSED |
@@ -254,9 +254,13 @@ experiment default. `UserSafetyLimits` is a separate optional simulation object,
 and future persistent configuration must require explicit operator values rather
 than copying the hardware maxima.
 
-Milestone 9 applies a separate, explicit Simulation Mode Constant Current policy:
-10 V, 5 A, 50 W, at most 24 hours and intervals from 0.1 through 3600 seconds.
-It does not redefine hardware ratings or authorize real-hardware protocol use.
+Milestone 9 uses separate Simulation and Real Hardware Constant Current policy
+objects, currently both 10 V, 5 A, 50 W, at most 24 hours and intervals from 0.1
+through 3600 seconds. Real Start/Resume additionally require a detailed explicit
+authorization and a two-stage queued preflight. The second stage rechecks the
+session, OFF state and settings immediately before one Output-On attempt. A stale
+or duplicate request cannot cross that boundary. Physical protocol acceptance is
+not implied by fake-serial validation.
 
 Apply basic capability/output safeguards before the first real manual control;
 milestone 16 completes the safety system, rather than postponing every safeguard
@@ -292,11 +296,11 @@ offline-tested physical driver and explicit-port transport but deliberately does
 not connect them to the GUI. Milestone 6 integrates a shared priority command
 queue into the existing single-owner boundary without adding a second backend
 owner. Milestone 7 adds manual control and a guarded explicit-port follow-up;
-Milestone 8 adds queue-fed CSV logging and Milestone 9 adds Simulation Mode
-Constant Current protocols without port discovery, plotting or global emergency
-control. Milestone 7 real-hardware GUI acceptance and Milestone 8 read-only
-hardware logging acceptance are complete. Real-hardware protocols and later
-protocol types remain out of scope.
+Milestone 8 adds queue-fed CSV logging and Milestone 9 adds Constant Current
+protocols without port discovery, plotting or global emergency control. Its
+guarded Real Hardware follow-up is fake-serial tested and acceptance-pending.
+Milestone 7 real-hardware GUI acceptance and Milestone 8 read-only hardware
+logging acceptance are complete. Later protocol types remain out of scope.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Logging tests cover unwritable files, interruption and bounded in-flight work.

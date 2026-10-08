@@ -148,11 +148,14 @@ def test_start_command_order_and_shared_worker_thread(
     try:
         assert start_protocol(protocol, tmp_path, duration="1")
         wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
-        names = [item[0] for item in backend.calls[:7]]  # type: ignore[attr-defined]
+        names = [item[0] for item in backend.calls[:10]]  # type: ignore[attr-defined]
         assert names == [
             "read_output_state",
             "set_voltage",
             "set_current",
+            "read_set_voltage",
+            "read_set_current",
+            "read_output_state",
             "read_set_voltage",
             "read_set_current",
             "output_on",

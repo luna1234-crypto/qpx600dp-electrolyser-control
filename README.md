@@ -7,13 +7,16 @@ QPX600DP serial backend and completed two-channel standard-load Windows
 validation, the Milestone 6 shared
 asynchronous command queue, Milestone 7 dual-channel manual controls with a
 guarded explicit-port hardware connection, Milestone 8 independent CSV logging,
-and Milestone 9 independent Simulation Mode Constant Current protocols.
+and Milestone 9 independent Constant Current protocols with an offline-tested,
+guarded Real Hardware follow-up.
 
 Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
 shared backend-owner worker constructs `SerialTransport` and `QPX600DPDriver`
-only after explicit Real Hardware Connect. Constant Current protocols are
-deliberately unavailable outside Simulation Mode.
+only after explicit Real Hardware Connect. Real Hardware Constant Current Start
+and Resume each require a detailed, default-cancel confirmation and fresh queued
+OFF/settings preflight. This path is fake-serial validated; physical protocol
+acceptance remains pending.
 Physical validation includes identification, read-only queries, guarded setpoint
 read-back, monitored standard-load Output-On/Off tests on both channels, and
 operator-supervised real-hardware GUI acceptance for both channel panels.
@@ -184,8 +187,10 @@ hardware programming grids, conservative power envelope and the explicit
 Simulation Mode project policy of 10 V, 5 A, 50 W, 24 hours maximum duration and
 0.1-3600 second intervals.
 
-Start atomically confirms the selected output is OFF, sets voltage then current,
-verifies both read-backs, issues one Output On and confirms ON. Sampling uses
+Start confirms the selected output is OFF, sets voltage then current and verifies
+both read-backs. A separate queued final preflight rechecks the session, OFF state
+and both settings immediately before exactly one Output On attempt and ON
+confirmation. Sampling uses
 fixed active-time monotonic deadlines and background queue priority. Pause sends
 and confirms Output Off and freezes active time; Resume rechecks the session,
 OFF state and programmed settings before one new Output On. Stop, completion,
@@ -200,9 +205,12 @@ active, Constant Current remains available and appends its samples and state row
 to that one existing file; it never creates a second writer. Pause/Resume retains
 the same file, and protocol Stop/completion leaves the manually started logger
 running until the operator stops it. A shared logger failure safely fails and
-turns off only that channel's protocol. Protocol controls are Simulation Mode
-only; Milestone 10 plotting and later sweep/polarization protocols are not
-implemented. See [Milestone 9 verification](docs/verification/milestone9.md).
+turns off only that channel's protocol. Real Hardware uses a separate explicit
+authorization for Start and Resume, default-cancel load/wiring details, the same
+documented project envelope, safety-priority OFF cleanup and authoritative OFF
+readback. It has been tested only with injected fake serial transports; supervised
+physical acceptance is pending. Milestone 10 plotting and later sweep/polarization
+protocols are not implemented. See [Milestone 9 verification](docs/verification/milestone9.md).
 
 ## Milestone 5 offline physical backend
 
@@ -326,7 +334,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Physical backend in GUI | Guarded explicit-port path implemented; manually entered COM3 read-only connection and disconnect acceptance passed |
 | Dual-channel manual controls | Simulation and real-hardware standard-load acceptance passed independently on CH1 and CH2; stronger real Output-On confirmation verified |
 | Independent continuous CSV data logging | Implemented for both channels through the shared queue; Simulation and read-only hardware acceptance passed |
-| Independent Constant Current protocols | Implemented and validated in Simulation Mode for CH1/CH2, simultaneous operation, Pause/Resume/Stop and CSV output |
+| Independent Constant Current protocols | Simulation validated; guarded Real Hardware path fake-serial validated, physical acceptance pending |
 | Live plots and later sweep/polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |

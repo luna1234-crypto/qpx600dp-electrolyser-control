@@ -1,4 +1,4 @@
-"""Independent Simulation Mode constant-current protocol state machines."""
+"""Independent guarded constant-current protocol state machines."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ OWNING_STATES = {
 
 @dataclass(frozen=True, slots=True)
 class ConstantCurrentSafetyLimits:
-    """Explicit Milestone 9 Simulation Mode policy, below hardware ratings."""
+    """Explicit Milestone 9 mode policy, below hardware ratings."""
 
     max_voltage_v: float = 10.0
     max_current_a: float = 5.0
@@ -65,6 +65,8 @@ class ConstantCurrentSafetyLimits:
 
 
 DEFAULT_CONSTANT_CURRENT_LIMITS = ConstantCurrentSafetyLimits()
+REAL_HARDWARE_CONSTANT_CURRENT_LIMITS = ConstantCurrentSafetyLimits()
+REAL_HARDWARE_PROTOCOL_CONFIRMATION = "RUN-QPX600DP-CONSTANT-CURRENT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,8 +107,16 @@ class _StartResult:
     output_enabled: bool
 
 
-class OutputInitiallyOnError(RuntimeError):
-    pass
+@dataclass(frozen=True, slots=True)
+class _PreparedResult:
+    programmed_voltage_v: float
+    programmed_current_a: float
+
+
+@dataclass(frozen=True, slots=True)
+class _GuardFailure:
+    message: str
+    cleanup_required: bool
 
 
 class SettingsMismatchError(RuntimeError):
@@ -134,6 +144,9 @@ class ConstantCurrentController(QObject):
         parent: QObject | None = None,
         *,
         safety_limits: ConstantCurrentSafetyLimits = DEFAULT_CONSTANT_CURRENT_LIMITS,
+        real_hardware_safety_limits: ConstantCurrentSafetyLimits = (
+            REAL_HARDWARE_CONSTANT_CURRENT_LIMITS
+        ),
         monotonic=time.monotonic,
         utc_now=lambda: datetime.now(timezone.utc),
         writer_factory=CsvLogFile,
@@ -143,6 +156,7 @@ class ConstantCurrentController(QObject):
         self._channel = channel
         self._connection = connection
         self._limits = safety_limits
+        self._real_hardware_limits = real_hardware_safety_limits
         self._monotonic = monotonic
         self._utc_now = utc_now
         self._writer_factory = writer_factory
@@ -177,6 +191,38 @@ class ConstantCurrentController(QObject):
     def snapshot(self) -> ProtocolSnapshot:
         return self._snapshot
 
+    def validate_inputs(
+        self,
+        target_current: str,
+        voltage_compliance: str,
+        duration: str,
+        interval: str,
+        voltage_range_name: str | None,
+    ) -> str | None:
+        """Return a user-facing validation error without queue or file side effects."""
+        if self._connection.snapshot.state is not ConnectionState.CONNECTED:
+            return "Connect and initialize the selected instrument before starting."
+        if voltage_range_name is None:
+            return "Refresh the channel before starting a protocol."
+        if not self._connection.snapshot.simulation_mode:
+            parts = [
+                part.strip()
+                for part in (self._connection.snapshot.instrument_id or "").split(",")
+            ]
+            if len(parts) != 4 or parts[1].upper() != "QPX600DP":
+                return "Real Hardware protocol requires an identified QPX600DP session."
+        try:
+            self._validate_config(
+                target_current,
+                voltage_compliance,
+                duration,
+                interval,
+                voltage_range_name,
+            )
+        except (ValueError, InstrumentValueError) as error:
+            return str(error)
+        return None
+
     def start(
         self,
         target_current: str,
@@ -187,15 +233,25 @@ class ConstantCurrentController(QObject):
         directory: Path,
         *,
         logging_sink: ProtocolLogSink | None = None,
+        real_hardware_confirmation: str | None = None,
     ) -> bool:
         if self._snapshot.owns_channel:
             return False
-        if self._connection.snapshot.state is not ConnectionState.CONNECTED:
-            return self._reject("Connect and initialize the simulator before starting.")
-        if not self._connection.snapshot.simulation_mode:
-            return self._reject("Constant Current protocols are Simulation Mode only.")
-        if voltage_range_name is None:
-            return self._reject("Refresh the channel before starting a protocol.")
+        validation_error = self.validate_inputs(
+            target_current,
+            voltage_compliance,
+            duration,
+            interval,
+            voltage_range_name,
+        )
+        if validation_error is not None:
+            return self._reject(validation_error)
+        if (
+            not self._connection.snapshot.simulation_mode
+            and real_hardware_confirmation != REAL_HARDWARE_PROTOCOL_CONFIRMATION
+        ):
+            return self._reject("Real Hardware Constant Current start was not confirmed.")
+        assert voltage_range_name is not None
         try:
             config = self._validate_config(
                 target_current, voltage_compliance, duration, interval, voltage_range_name
@@ -228,7 +284,9 @@ class ConstantCurrentController(QObject):
             file_path=file_path,
             message="Checking OFF state and applying constant-current settings...",
         ))
-        return self._submit_action("start", lambda supply: self._start_operation(supply, config))
+        return self._submit_action(
+            "start-prepare", lambda supply: self._start_prepare_operation(supply, config)
+        )
 
     @Slot()
     def pause(self) -> None:
@@ -239,31 +297,43 @@ class ConstantCurrentController(QObject):
         self._publish(replace(
             self._snapshot,
             state=ProtocolState.PAUSING,
-            message="Turning the selected simulated output OFF...",
+            message="Turning the selected output OFF and confirming readback...",
         ))
         self._submit_action("pause", self._output_off_operation, priority=CommandPriority.SAFETY)
 
     @Slot()
-    def resume(self) -> None:
+    def resume(self, real_hardware_confirmation: str | None = None) -> bool:
         if self._snapshot.state is not ProtocolState.PAUSED or self._snapshot.config is None:
-            return
+            return False
         if self._remaining_active() <= 0:
             self._finish_terminal(ProtocolState.COMPLETED, "Protocol duration completed")
-            return
+            return False
         if not self._session_is_current():
             self._finish_terminal(
                 ProtocolState.FAILED,
                 "Cannot resume: the connected session changed.",
                 warning=True,
             )
-            return
+            return False
+        if (
+            not self._connection.snapshot.simulation_mode
+            and real_hardware_confirmation != REAL_HARDWARE_PROTOCOL_CONFIRMATION
+        ):
+            self._publish(replace(
+                self._snapshot,
+                message="Real Hardware Constant Current resume was not confirmed.",
+                error=True,
+            ))
+            return False
         config = self._snapshot.config
         self._publish(replace(
             self._snapshot,
             state=ProtocolState.RESUMING,
-            message="Revalidating settings before simulated Output On...",
+            message="Revalidating settings before guarded Output On...",
         ))
-        self._submit_action("resume", lambda supply: self._resume_operation(supply, config))
+        return self._submit_action(
+            "resume-prepare", lambda supply: self._resume_prepare_operation(supply, config)
+        )
 
     @Slot()
     def stop(self, message: str = "Protocol stopped by operator") -> None:
@@ -294,7 +364,11 @@ class ConstantCurrentController(QObject):
         interval_s = self._number(interval, "Measurement interval")
         current = QPX600DP_CAPABILITIES.validate_current(current)
         voltage = QPX600DP_CAPABILITIES.validate_voltage(voltage, voltage_range_name)
-        limits = self._limits
+        limits = (
+            self._limits
+            if self._connection.snapshot.simulation_mode
+            else self._real_hardware_limits
+        )
         if current > limits.max_current_a:
             raise ValueError(f"Target current exceeds the {limits.max_current_a:g} A project limit.")
         if voltage > limits.max_voltage_v:
@@ -330,34 +404,65 @@ class ConstantCurrentController(QObject):
             raise ValueError(f"{label} must be finite.")
         return value
 
-    def _start_operation(
+    def _start_prepare_operation(
         self, supply: PowerSupplyInterface, config: ConstantCurrentConfig
-    ) -> _StartResult:
-        if supply.read_output_state(self._channel):
-            raise OutputInitiallyOnError("Selected output is already ON; protocol start refused.")
-        supply.set_voltage(self._channel, config.voltage_compliance_v)
-        supply.set_current(self._channel, config.target_current_a)
-        voltage = supply.read_set_voltage(self._channel)
-        current = supply.read_set_current(self._channel)
-        self._verify_settings(voltage, current, config)
-        supply.output_on(self._channel)
-        output_enabled = supply.read_output_state(self._channel)
-        if not output_enabled:
-            raise OutputStateError("Output On could not be confirmed.")
-        return _StartResult(voltage, current, output_enabled)
+    ) -> _PreparedResult | _GuardFailure:
+        try:
+            if supply.read_output_state(self._channel):
+                return _GuardFailure(
+                    "Selected output is already ON; protocol start refused.",
+                    cleanup_required=False,
+                )
+            supply.set_voltage(self._channel, config.voltage_compliance_v)
+            supply.set_current(self._channel, config.target_current_a)
+            voltage = supply.read_set_voltage(self._channel)
+            current = supply.read_set_current(self._channel)
+            self._verify_settings(voltage, current, config)
+        except Exception as error:
+            return _GuardFailure(
+                str(error) or type(error).__name__, cleanup_required=True
+            )
+        return _PreparedResult(voltage, current)
 
-    def _resume_operation(
+    def _resume_prepare_operation(
         self, supply: PowerSupplyInterface, config: ConstantCurrentConfig
-    ) -> _StartResult:
-        if supply.read_output_state(self._channel):
-            raise OutputStateError("Selected output was not OFF before resume.")
-        voltage = supply.read_set_voltage(self._channel)
-        current = supply.read_set_current(self._channel)
-        self._verify_settings(voltage, current, config)
-        supply.output_on(self._channel)
-        output_enabled = supply.read_output_state(self._channel)
+    ) -> _PreparedResult | _GuardFailure:
+        try:
+            if supply.read_output_state(self._channel):
+                return _GuardFailure(
+                    "Selected output was not OFF before resume.", cleanup_required=True
+                )
+            voltage = supply.read_set_voltage(self._channel)
+            current = supply.read_set_current(self._channel)
+            self._verify_settings(voltage, current, config)
+        except Exception as error:
+            return _GuardFailure(
+                str(error) or type(error).__name__, cleanup_required=True
+            )
+        return _PreparedResult(voltage, current)
+
+    def _output_on_operation(
+        self, supply: PowerSupplyInterface, config: ConstantCurrentConfig
+    ) -> _StartResult | _GuardFailure:
+        """Revalidate immediately before the one permitted Output-On attempt."""
+        try:
+            if supply.read_output_state(self._channel):
+                return _GuardFailure(
+                    "Selected output was not OFF immediately before Output On.",
+                    cleanup_required=True,
+                )
+            voltage = supply.read_set_voltage(self._channel)
+            current = supply.read_set_current(self._channel)
+            self._verify_settings(voltage, current, config)
+            supply.output_on(self._channel)
+            output_enabled = supply.read_output_state(self._channel)
+        except Exception as error:
+            return _GuardFailure(
+                f"Output-On transaction failed: {str(error) or type(error).__name__}",
+                cleanup_required=True,
+            )
         if not output_enabled:
-            raise OutputStateError("Output On could not be confirmed during resume.")
+            return _GuardFailure("Output On could not be confirmed.", cleanup_required=True)
         return _StartResult(voltage, current, output_enabled)
 
     def _verify_settings(
@@ -381,6 +486,17 @@ class ConstantCurrentController(QObject):
         if readback.output_enabled:
             raise OutputStateError("Output OFF could not be confirmed.")
         return readback
+
+    def _sample_operation(
+        self, supply: PowerSupplyInterface
+    ) -> ChannelReadback | _GuardFailure:
+        try:
+            return read_channel(supply, self._channel)
+        except Exception as error:
+            return _GuardFailure(
+                f"Sample transaction failed: {str(error) or type(error).__name__}",
+                cleanup_required=True,
+            )
 
     def _submit_action(
         self,
@@ -423,7 +539,7 @@ class ConstantCurrentController(QObject):
             self._next_sample_slot = current_slot
         ticket = self._connection.submit_command(
             f"ch{self._channel}-constant-current-sample",
-            lambda supply: read_channel(supply, self._channel),
+            self._sample_operation,
             priority=CommandPriority.BACKGROUND,
             cancellation_key=self._sample_key,
         )
@@ -441,7 +557,39 @@ class ConstantCurrentController(QObject):
         action = self._pending_action
         self._pending_request_id = None
         self._pending_action = ""
-        if action in {"start", "resume"}:
+        if action in {"start-prepare", "resume-prepare"}:
+            if isinstance(result, _GuardFailure):
+                if result.cleanup_required:
+                    self._begin_cleanup(ProtocolState.FAILED, result.message)
+                else:
+                    self._finish_terminal(
+                        ProtocolState.FAILED, result.message, warning=True
+                    )
+                return
+            if not isinstance(result, _PreparedResult) or self._snapshot.config is None:
+                self._begin_cleanup(ProtocolState.FAILED, "Malformed protocol preflight result.")
+                return
+            if not self._session_is_current():
+                self._begin_cleanup(
+                    ProtocolState.FAILED,
+                    "Connected session changed before Output On.",
+                )
+                return
+            phase = "start-output-on" if action == "start-prepare" else "resume-output-on"
+            config = self._snapshot.config
+            self._publish(replace(
+                self._snapshot,
+                message="Final OFF/settings preflight before guarded Output On...",
+            ))
+            self._submit_action(
+                phase,
+                lambda supply: self._output_on_operation(supply, config),
+            )
+            return
+        if action in {"start-output-on", "resume-output-on"}:
+            if isinstance(result, _GuardFailure):
+                self._begin_cleanup(ProtocolState.FAILED, result.message)
+                return
             if not isinstance(result, _StartResult) or not result.output_enabled:
                 self._begin_cleanup(ProtocolState.FAILED, "Malformed Output-On result.")
                 return
@@ -461,6 +609,9 @@ class ConstantCurrentController(QObject):
             self._sample_timer.start(0)
             return
         if action == "sample":
+            if isinstance(result, _GuardFailure):
+                self._begin_cleanup(ProtocolState.FAILED, result.message)
+                return
             if not isinstance(result, ChannelReadback) or result.channel != self._channel:
                 self._begin_cleanup(ProtocolState.FAILED, "Malformed protocol sample.")
                 return
@@ -545,13 +696,10 @@ class ConstantCurrentController(QObject):
         self._pending_request_id = None
         self._pending_action = ""
         message = str(error) or type(error).__name__
-        if action == "start" and isinstance(error, OutputInitiallyOnError):
-            self._finish_terminal(ProtocolState.FAILED, message)
-            return
         if action == "stop":
             self._finish_terminal(
                 ProtocolState.FAILED,
-                f"Output-Off cleanup failed: {message}",
+                f"Output-Off cleanup failed: {message}; physical OFF could not be confirmed.",
                 warning=True,
             )
             return
