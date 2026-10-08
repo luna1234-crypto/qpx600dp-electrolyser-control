@@ -15,14 +15,15 @@ accepts only a manually entered COM name and never enumerates ports. The one
 shared backend-owner worker constructs `SerialTransport` and `QPX600DPDriver`
 only after explicit Real Hardware Connect. Real Hardware Constant Current Start
 and Resume each require a detailed, default-cancel confirmation and fresh queued
-OFF/settings preflight. This path is fake-serial validated; physical protocol
-acceptance remains pending.
+OFF/settings preflight. Fake-serial validation and supervised two-channel
+resistor-load functional acceptance have passed. Electrolyser and unattended use
+remain unapproved pending transient assessment and later safety milestones.
 Physical validation includes identification, read-only queries, guarded setpoint
 read-back, monitored standard-load Output-On/Off tests on both channels, and
 operator-supervised real-hardware GUI acceptance for both channel panels.
 Milestone 8 real-hardware read-only CSV acceptance also passed with no load and
-both outputs OFF. Electrolyser validation remains pending and outside Milestones
-5, 7 and 8.
+both outputs OFF. Electrolyser validation remains pending across the completed
+Milestone 5, 7, 8 and resistor-load Milestone 9 acceptance work.
 
 ## Windows installation
 
@@ -208,9 +209,13 @@ running until the operator stops it. A shared logger failure safely fails and
 turns off only that channel's protocol. Real Hardware uses a separate explicit
 authorization for Start and Resume, default-cancel load/wiring details, the same
 documented project envelope, safety-priority OFF cleanup and authoritative OFF
-readback. It has been tested only with injected fake serial transports; supervised
-physical acceptance is pending. Milestone 10 plotting and later sweep/polarization
-protocols are not implemented. See [Milestone 9 verification](docs/verification/milestone9.md).
+readback. Supervised resistor-load acceptance passed on both channels, including
+Pause/Resume, completion, CSV continuity and final OFF confirmation. The supplied
+CSVs contain a brief 0.189-0.201 A first loaded sample after startup/resume before
+stable readings; electrolyser and unattended use remain unapproved pending its
+assessment and later safety milestones. Milestone 10 plotting and later
+sweep/polarization protocols are not implemented. See
+[Milestone 9 verification](docs/verification/milestone9.md).
 
 ## Milestone 5 offline physical backend
 
@@ -334,7 +339,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Physical backend in GUI | Guarded explicit-port path implemented; manually entered COM3 read-only connection and disconnect acceptance passed |
 | Dual-channel manual controls | Simulation and real-hardware standard-load acceptance passed independently on CH1 and CH2; stronger real Output-On confirmation verified |
 | Independent continuous CSV data logging | Implemented for both channels through the shared queue; Simulation and read-only hardware acceptance passed |
-| Independent Constant Current protocols | Simulation validated; guarded Real Hardware path fake-serial validated, physical acceptance pending |
+| Independent Constant Current protocols | Simulation/fake-serial validated; supervised CH1/CH2 resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Live plots and later sweep/polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |

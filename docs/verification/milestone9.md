@@ -12,9 +12,10 @@ append through an already-active same-channel logger. They never receive or call
 the backend; every operation is submitted to the one Milestone 6 worker.
 
 Simulation Mode remains the default. The guarded Real Hardware follow-up adds no
-COM-port enumeration or automatic connection and was tested only through injected
-fake serial transports. Physical protocol acceptance remains pending. Plotting,
-CV, sweep and polarization protocols remain excluded. Separate Simulation and
+COM-port enumeration or automatic connection and was initially tested only through
+injected fake serial transports. The later supervised resistor-load acceptance is
+recorded below. Plotting, CV, sweep and polarization protocols remain excluded.
+Separate Simulation and
 Real Hardware policy objects currently enforce 10 V, 5 A and 50 W, with a
 maximum active duration of 24 hours and intervals from 0.1 through 3600 seconds.
 Hardware programming grids, selected voltage range and the conservative power
@@ -149,12 +150,38 @@ git diff --check
 ```
 
 No COM port, Test Bridge or physical QPX600DP was enumerated, opened, probed or
-commanded during this follow-up implementation or validation. Real protocol
-acceptance is explicitly pending.
+commanded during the guarded follow-up implementation or its automated validation.
+
+## Supervised resistor-load acceptance
+
+Supervised Real Hardware functional acceptance was subsequently completed on CH1
+and CH2 with a resistor load, one channel at a time. Both protocols used a
+2.000 V compliance setting and 0.100 A target. The supplied CSV data records:
+
+- CH1 stable loaded measurements of **0.939-0.949 V** and **0.091-0.094 A**;
+- CH2 stable loaded measurements of **1.025-1.032 V** and **0.102-0.104 A**.
+
+Both channels exercised normal running and completion. Pause sent and confirmed
+Output Off, the CSV recorded PAUSED while the output remained OFF, and Resume
+continued the same protocol/file before normal completion. Post-completion rows
+reported Output OFF, and final CH1 and CH2 OFF state was confirmed. Channel
+isolation was preserved throughout the supervised tests.
+
+The CSVs also show a brief first loaded sample after startup or resume above the
+programmed current target: **0.189-0.201 A** across the recorded CH1/CH2 cases.
+Later samples settled to the stable ranges above. These first-sample values are
+recorded as an observed transient, not discarded as outliers and not interpreted
+here as approval for a different load or operating mode.
+
+The resistor-load functional acceptance therefore passed, including guarded
+Start, Pause, Resume, completion, CSV continuity and final Output-Off behavior.
+Electrolyser use and unattended operation remain **unapproved** pending assessment
+of the startup/resume transient and completion of the later safety milestones.
+No instrument serial number is retained in this record.
 
 Final Windows results:
 
-- complete suite after the guarded Real Hardware follow-up: **286 passed in 15.75s**;
+- complete suite after acceptance documentation: **286 passed in 15.83s**;
 - `compileall`: exit code 0;
 - `pip check`: `No broken requirements found.`;
 - native Simulation Mode smoke: both active channel loggers remained available

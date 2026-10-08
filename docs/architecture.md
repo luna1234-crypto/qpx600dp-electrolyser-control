@@ -298,7 +298,9 @@ queue into the existing single-owner boundary without adding a second backend
 owner. Milestone 7 adds manual control and a guarded explicit-port follow-up;
 Milestone 8 adds queue-fed CSV logging and Milestone 9 adds Constant Current
 protocols without port discovery, plotting or global emergency control. Its
-guarded Real Hardware follow-up is fake-serial tested and acceptance-pending.
+guarded Real Hardware follow-up is fake-serial tested, and supervised resistor-load
+functional acceptance later passed on both channels. Electrolyser and unattended
+use remain unapproved pending transient assessment and later safety milestones.
 Milestone 7 real-hardware GUI acceptance and Milestone 8 read-only hardware
 logging acceptance are complete. Later protocol types remain out of scope.
 Later concurrency tests must cover cancellation just before ON, stale replies,

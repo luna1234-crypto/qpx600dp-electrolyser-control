@@ -300,6 +300,15 @@ input rejection, initially-ON refusal, mismatch, Pause/Resume/Stop, active-time
 accounting, failure cleanup, queue serialization and clean shutdown. The guarded
 Real Hardware follow-up adds default-cancel Start/Resume authorization, stale and
 duplicate request rejection, authoritative OFF cleanup, channel isolation and
-single-writer CSV ownership. It is validated with injected fake serial only;
-physical protocol acceptance remains pending. Milestone 10 plotting, CV, sweeps
-and polarization remain out of scope. See [verification details](verification/milestone9.md).
+single-writer CSV ownership. The implementation was first validated with injected
+fake serial only, followed by the supervised resistor-load acceptance below.
+Milestone 10 plotting, CV, sweeps and polarization remain out of scope. See
+[verification details](verification/milestone9.md).
+
+The later supervised CH1/CH2 resistor-load acceptance passed. At 2.000 V
+compliance and a 0.100 A target, stable CSV measurements were 0.939-0.949 V /
+0.091-0.094 A on CH1 and 1.025-1.032 V / 0.102-0.104 A on CH2. Pause, Resume,
+normal completion, continued CSV ownership and final Output Off all passed. A
+brief 0.189-0.201 A first loaded sample was observed after startup/resume.
+Electrolyser validation and unattended operation remain unapproved pending
+assessment of that transient and later safety milestones.
