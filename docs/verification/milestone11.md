@@ -231,3 +231,55 @@ Stable-confirmation offline validation:
 - automated Simulation Mode smoke: passed with clean disconnect and worker
   shutdown;
 - `git diff --check`: passed.
+
+## Real Hardware Resume stabilization and scheduling follow-up
+
+Supervised evidence showed that ordinary 1.0-second Start runs completed, while
+a Resume could return `OP1? = 1` and then report OFF in the former zero-delay
+sample about 30 ms later, before voltage rose. The trace contained no Output-Off
+write, stale callback, logger request or competing queue operation. The scheduler
+also retained its pre-Pause slot index, so that zero-delay sample consumed the
+old grid and skipped the next intended active-time slot.
+
+Constant Current and Constant Voltage now require a measurement interval of at
+least 1.0 second in Real Hardware mode. Simulation Mode retains its 0.1-second
+minimum. Validation occurs before CSV creation, queue submission or instrument
+mutation and reports the active mode's permitted interval range.
+
+Real Hardware Start and Resume share this one atomic Output-On transaction after
+their existing OFF/settings preflight:
+
+1. transmit `OP<N> 1` exactly once;
+2. query `*OPC?` exactly once and require `1`;
+3. require two consecutive `OP<N>? = 1` responses approximately 50 ms apart,
+   within one fixed 1.0-second stabilization window;
+4. fail immediately on any explicit OFF response, without retrying Output On;
+5. perform one complete authoritative channel readback and require its final
+   `OP<N>?` to remain ON.
+
+The authoritative readback is recorded through the existing CSV/plot flow, but
+does not consume an ordinary sample slot or require measured voltage to have
+already reached the target. Only after it succeeds does the protocol enter
+`RUNNING`. Resume rebases a fresh monotonic sampling epoch at the preserved
+active elapsed time; paused wall time remains excluded, and the first ordinary
+sample is due one full configured interval later. Missed-slot accounting is
+relative to that new epoch, so no pre-Pause slot is reused or skipped.
+
+Every failure after the single Output-On attempt enters the existing
+exactly-once stable Output-Off cleanup. A serial timeout invalidates framing and
+closes the session before another command can safely be transmitted; that case
+retains the physical-OFF-unconfirmed warning and records that cleanup was
+attempted, without risking a write on an unaligned session. No automatic retry,
+reconnect, duplicate writer, extra polling path or cross-channel command was
+added. This follow-up was implemented and tested offline only; COM3 and the
+physical instrument were not accessed.
+
+Resume-stabilization offline validation:
+
+- focused protocol and fake-serial suite: **82 passed**;
+- complete suite: **345 passed**;
+- `compileall`: passed;
+- `pip check`: no broken requirements;
+- automated Simulation Mode smoke: passed with final OFF cleanup, clean
+  disconnect and worker shutdown;
+- `git diff --check`: passed.

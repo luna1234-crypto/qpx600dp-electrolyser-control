@@ -369,3 +369,12 @@ cleanup, authoritative OFF readback, stale-request rejection and single-writer
 CSV ownership. Injected fake-serial tests passed for both channels, simultaneous
 queue use and failure paths. Physical Constant Voltage acceptance remains pending;
 Milestone 12 is not started.
+
+A subsequent offline stabilization follow-up sets a 1.0-second minimum interval
+for both Real Hardware Constant Current and Constant Voltage while preserving the
+Simulation Mode 0.1-second minimum. Start and Resume now issue Output On once,
+require `*OPC? = 1`, two ON responses about 50 ms apart within one second, and a
+final authoritative ON readback. Resume rebases its monotonic sample grid at the
+preserved active elapsed time; it performs no zero-delay ordinary sample and the
+first scheduled sample occurs one full interval later. Failure retains the
+existing exactly-once stable OFF cleanup and never retries Output On.

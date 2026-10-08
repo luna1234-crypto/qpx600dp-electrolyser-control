@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject
@@ -56,7 +56,10 @@ class ConstantVoltageController(ConstantCurrentController):
     ) -> None:
         kwargs = {
             "safety_limits": safety_limits,
-            "real_hardware_safety_limits": safety_limits,
+            "real_hardware_safety_limits": replace(
+                safety_limits,
+                min_interval_s=max(1.0, safety_limits.min_interval_s),
+            ),
             "writer_factory": writer_factory,
             "protocol_name": "constant_voltage",
             "display_name": "Constant Voltage",

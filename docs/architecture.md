@@ -142,8 +142,11 @@ plot signal as Constant Current, so no second writer or measurement poll exists.
 Real Hardware CV Start/Resume additionally require the distinct
 `RUN-QPX600DP-CONSTANT-VOLTAGE` token supplied only after a default-cancel GUI
 confirmation. The controller independently enforces the identified session,
-fresh OFF/range/settings preflight and authoritative cleanup. This path is
-fake-serial validated; physical acceptance remains pending.
+fresh OFF/range/settings preflight and authoritative cleanup. Constant Current
+and Constant Voltage Real Hardware starts share an atomic stable-ON transaction:
+one `OP<N> 1`, one `*OPC?`, two ON reads about 50 ms apart within one second,
+then one full authoritative ON readback. Simulation behavior is unchanged. This
+path is fake-serial validated; physical acceptance remains pending.
 
 The connection controller defaults to Simulation Mode. Real Hardware selection
 requires a warning acknowledgement and a manually typed `COM<N>` name; neither
@@ -253,7 +256,7 @@ Emergency behavior remains deferred.
 | Validate full protocol and reserve file | IDLE/terminal to STARTING |
 | Confirm OFF, apply verified settings and enable selected output | STARTING to RUNNING |
 | Pause | Cancel pending sample; RUNNING to PAUSING; confirm output OFF; then PAUSED |
-| Resume | PAUSED to RESUMING; recheck session/OFF/settings; confirm one Output On; then RUNNING |
+| Resume | PAUSED to RESUMING; recheck session/OFF/settings; stably confirm one Output On; rebase the monotonic sample epoch; then RUNNING |
 | Stop | RUNNING/PAUSED/transition to STOPPING; send channel OFF; finalise CSV; then COMPLETED |
 | Finish | Confirm channel OFF and finalise data, then COMPLETED |
 | Failed I/O, failed OFF or failed required data write | ERROR, with physical output unknown unless verified |
@@ -298,12 +301,15 @@ and future persistent configuration must require explicit operator values rather
 than copying the hardware maxima.
 
 Milestone 9 uses separate Simulation and Real Hardware Constant Current policy
-objects, currently both 10 V, 5 A, 50 W, at most 24 hours and intervals from 0.1
-through 3600 seconds. Real Start/Resume additionally require a detailed explicit
-authorization and a two-stage queued preflight. The second stage rechecks the
-session, OFF state and settings immediately before one Output-On attempt. A stale
-or duplicate request cannot cross that boundary. Physical protocol acceptance is
-not implied by fake-serial validation.
+objects, both 10 V, 5 A, 50 W and at most 24 hours. Simulation permits intervals
+from 0.1 through 3600 seconds; Constant Current and Constant Voltage Real Hardware
+protocols require 1.0 through 3600 seconds. Real Start/Resume additionally require
+a detailed explicit authorization and a two-stage queued preflight. The second
+stage rechecks the session, OFF state and settings immediately before one
+Output-On attempt and stable ON confirmation. Resume starts a fresh sampling grid
+at preserved active time, with its first ordinary sample one full interval later.
+A stale or duplicate request cannot cross that boundary. Physical protocol
+acceptance is not implied by fake-serial validation.
 
 Apply basic capability/output safeguards before the first real manual control;
 milestone 16 completes the safety system, rather than postponing every safeguard

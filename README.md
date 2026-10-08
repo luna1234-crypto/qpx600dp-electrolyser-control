@@ -275,10 +275,15 @@ interval, displayed OFF state and CSV destination. After confirmation, the
 controller requires the current identified QPX600DP session, rechecks selected
 output OFF and voltage range, writes voltage/current limit, verifies both
 readbacks, repeats the OFF/settings preflight, and permits exactly one Output-On
-attempt. Pause, Stop, completion, failure, coordinated disconnect and shutdown
-use safety-priority Output Off with authoritative readback. Failure to confirm
-OFF raises a prominent warning; there is no automatic ON retry or reconnect.
-Physical Constant Voltage acceptance remains pending.
+attempt. Real Hardware Constant Current and Constant Voltage intervals must be at
+least 1.0 second; Simulation Mode retains its 0.1-second minimum. The one ON write
+is followed by `*OPC?`, two ON confirmations about 50 ms apart within one second,
+and a full authoritative ON readback. Resume then rebases its monotonic schedule,
+excludes paused wall time and schedules the first ordinary sample one interval
+later. Pause, Stop, completion, failure, coordinated disconnect and shutdown use
+safety-priority Output Off with authoritative readback. Failure to confirm OFF
+raises a prominent warning; there is no automatic ON retry or reconnect. Physical
+Constant Voltage acceptance remains pending.
 
 ## Milestone 5 offline physical backend
 

@@ -65,8 +65,10 @@ class ConstantCurrentSafetyLimits:
 
 
 DEFAULT_CONSTANT_CURRENT_LIMITS = ConstantCurrentSafetyLimits()
-REAL_HARDWARE_CONSTANT_CURRENT_LIMITS = ConstantCurrentSafetyLimits()
+REAL_HARDWARE_CONSTANT_CURRENT_LIMITS = ConstantCurrentSafetyLimits(min_interval_s=1.0)
 REAL_HARDWARE_PROTOCOL_CONFIRMATION = "RUN-QPX600DP-CONSTANT-CURRENT"
+OUTPUT_ON_STABILIZATION_WINDOW_S = 1.0
+OUTPUT_ON_POLL_INTERVAL_S = 0.05
 OUTPUT_OFF_CONFIRMATION_WINDOW_S = 1.0
 OUTPUT_OFF_POLL_INTERVAL_S = 0.05
 
@@ -107,6 +109,7 @@ class _StartResult:
     programmed_voltage_v: float
     programmed_current_a: float
     output_enabled: bool
+    readback: ChannelReadback | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,10 +192,12 @@ class ConstantCurrentController(QObject):
         self._sample_key = f"{command_slug}-sample-{channel}"
         self._run_started_at = 0.0
         self._active_before_run_s = 0.0
+        self._sample_epoch_active_s = 0.0
         self._next_sample_slot = 0
         self._terminal_after_stop = ProtocolState.COMPLETED
         self._terminal_message = ""
         self._output_off_attempted = False
+        self._real_hardware_run = False
 
         self._sample_timer = QTimer(self)
         self._sample_timer.setSingleShot(True)
@@ -313,8 +318,10 @@ class ConstantCurrentController(QObject):
         self._session_id = self._connection.snapshot.session_id
         self._active_before_run_s = 0.0
         self._run_started_at = 0.0
+        self._sample_epoch_active_s = 0.0
         self._next_sample_slot = 0
         self._output_off_attempted = False
+        self._real_hardware_run = not self._connection.snapshot.simulation_mode
         self._publish(ProtocolSnapshot(
             channel=self._channel,
             state=ProtocolState.STARTING,
@@ -498,15 +505,52 @@ class ConstantCurrentController(QObject):
             current = supply.read_set_current(self._channel)
             self._verify_settings(voltage, current, config)
             supply.output_on(self._channel)
-            output_enabled = supply.read_output_state(self._channel)
+            if not self._real_hardware_run:
+                output_enabled = supply.read_output_state(self._channel)
+                if not output_enabled:
+                    return _GuardFailure(
+                        "Output On could not be confirmed.", cleanup_required=True
+                    )
+                return _StartResult(voltage, current, output_enabled)
+
+            deadline = self._monotonic() + OUTPUT_ON_STABILIZATION_WINDOW_S
+            supply.confirm_operation_complete()
+            if self._monotonic() >= deadline:
+                return _GuardFailure(
+                    "Output On did not stabilize within 1.0 s.", cleanup_required=True
+                )
+            if not supply.read_output_state(self._channel):
+                return _GuardFailure(
+                    "Output unexpectedly reported OFF during Output-On stabilization.",
+                    cleanup_required=True,
+                )
+            remaining_s = deadline - self._monotonic()
+            if remaining_s < OUTPUT_ON_POLL_INTERVAL_S:
+                return _GuardFailure(
+                    "Output On did not stabilize within 1.0 s.", cleanup_required=True
+                )
+            self._sleep(OUTPUT_ON_POLL_INTERVAL_S)
+            if self._monotonic() > deadline:
+                return _GuardFailure(
+                    "Output On did not stabilize within 1.0 s.", cleanup_required=True
+                )
+            if not supply.read_output_state(self._channel):
+                return _GuardFailure(
+                    "Output unexpectedly reported OFF during Output-On stabilization.",
+                    cleanup_required=True,
+                )
+            readback = read_channel(supply, self._channel)
+            if not readback.output_enabled:
+                return _GuardFailure(
+                    "Output did not remain ON during authoritative read-back.",
+                    cleanup_required=True,
+                )
         except Exception as error:
             return _GuardFailure(
                 f"Output-On transaction failed: {str(error) or type(error).__name__}",
                 cleanup_required=True,
             )
-        if not output_enabled:
-            return _GuardFailure("Output On could not be confirmed.", cleanup_required=True)
-        return _StartResult(voltage, current, output_enabled)
+        return _StartResult(voltage, current, True, readback)
 
     def _verify_settings(
         self, voltage: float, current: float, config: ConstantCurrentConfig
@@ -623,7 +667,8 @@ class ConstantCurrentController(QObject):
         if elapsed >= self._snapshot.config.duration_s:
             self._begin_cleanup(ProtocolState.COMPLETED, "Protocol duration completed")
             return
-        current_slot = math.floor(elapsed / self._snapshot.config.interval_s)
+        segment_elapsed = max(0.0, elapsed - self._sample_epoch_active_s)
+        current_slot = math.floor(segment_elapsed / self._snapshot.config.interval_s)
         if current_slot > self._next_sample_slot:
             self._publish(replace(
                 self._snapshot,
@@ -691,17 +736,45 @@ class ConstantCurrentController(QObject):
             if not self._session_is_current():
                 self._begin_cleanup(ProtocolState.FAILED, "Connected session changed during start.")
                 return
+            if result.readback is not None:
+                try:
+                    self._append(
+                        result.readback,
+                        "output_on_stabilized",
+                        self._snapshot.state,
+                    )
+                except (OSError, ValueError) as error:
+                    self._begin_cleanup(
+                        ProtocolState.FAILED,
+                        f"Protocol CSV write failed: {error}",
+                    )
+                    return
+                self.sample_received.emit(result.readback)
             self._run_started_at = self._monotonic()
             self._publish(replace(
                 self._snapshot,
                 state=ProtocolState.RUNNING,
+                measured_voltage_v=(
+                    result.readback.measured_voltage_v
+                    if result.readback is not None
+                    else self._snapshot.measured_voltage_v
+                ),
+                measured_current_a=(
+                    result.readback.measured_current_a
+                    if result.readback is not None
+                    else self._snapshot.measured_current_a
+                ),
                 output_enabled=True,
                 message=f"{self._display_name} protocol running",
                 error=False,
                 operator_warning=False,
             ))
             self._clock_timer.start()
-            self._sample_timer.start(0)
+            if self._real_hardware_run or action == "resume-output-on":
+                self._rebase_sample_schedule()
+                self._schedule_next_sample()
+            else:
+                self._sample_timer.start(0)
             return
         if action == "sample":
             if isinstance(result, _GuardFailure):
@@ -884,17 +957,26 @@ class ConstantCurrentController(QObject):
         if elapsed >= self._snapshot.config.duration_s:
             self._begin_cleanup(ProtocolState.COMPLETED, "Protocol duration completed")
             return
-        due_slot = math.floor(elapsed / self._snapshot.config.interval_s) + 1
+        segment_elapsed = max(0.0, elapsed - self._sample_epoch_active_s)
+        due_slot = math.floor(segment_elapsed / self._snapshot.config.interval_s) + 1
         if due_slot > self._next_sample_slot:
             self._publish(replace(
                 self._snapshot,
                 missed_samples=self._snapshot.missed_samples + due_slot - self._next_sample_slot,
             ))
             self._next_sample_slot = due_slot
-        next_active_s = self._next_sample_slot * self._snapshot.config.interval_s
+        next_active_s = (
+            self._sample_epoch_active_s
+            + self._next_sample_slot * self._snapshot.config.interval_s
+        )
         delay_s = max(0.0, next_active_s - elapsed)
         delay_s = min(delay_s, self._remaining_active())
         self._sample_timer.start(max(0, math.ceil(delay_s * 1000)))
+
+    def _rebase_sample_schedule(self) -> None:
+        """Start a fresh interval grid without consuming an immediate sample slot."""
+        self._sample_epoch_active_s = self._elapsed_active()
+        self._next_sample_slot = 1
 
     @Slot()
     def _update_clock(self) -> None:
