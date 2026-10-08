@@ -192,6 +192,7 @@ class ConstantCurrentController(QObject):
         self._next_sample_slot = 0
         self._terminal_after_stop = ProtocolState.COMPLETED
         self._terminal_message = ""
+        self._output_off_attempted = False
 
         self._sample_timer = QTimer(self)
         self._sample_timer.setSingleShot(True)
@@ -313,6 +314,7 @@ class ConstantCurrentController(QObject):
         self._active_before_run_s = 0.0
         self._run_started_at = 0.0
         self._next_sample_slot = 0
+        self._output_off_attempted = False
         self._publish(ProtocolSnapshot(
             channel=self._channel,
             state=ProtocolState.STARTING,
@@ -338,12 +340,7 @@ class ConstantCurrentController(QObject):
             state=ProtocolState.PAUSING,
             message="Turning the selected output OFF and confirming readback...",
         ))
-        self._submit_action(
-            "pause",
-            self._output_off_operation,
-            priority=CommandPriority.SAFETY,
-            diagnostic_reason="Protocol pause requested",
-        )
+        self._submit_output_off_action("pause", "Protocol pause requested")
 
     @Slot()
     def resume(self, real_hardware_confirmation: str | None = None) -> bool:
@@ -529,6 +526,8 @@ class ConstantCurrentController(QObject):
     def _output_off_operation(self, supply: PowerSupplyInterface) -> ChannelReadback:
         supply.output_off(self._channel)
         deadline = self._monotonic() + OUTPUT_OFF_CONFIRMATION_WINDOW_S
+        supply.confirm_operation_complete()
+        consecutive_off = 0
         first_poll = True
         while True:
             if not first_poll:
@@ -540,8 +539,12 @@ class ConstantCurrentController(QObject):
                         "manual front-panel intervention is required."
                     )
             first_poll = False
-            if not supply.read_output_state(self._channel):
-                break
+            if supply.read_output_state(self._channel):
+                consecutive_off = 0
+            else:
+                consecutive_off += 1
+                if consecutive_off == 2:
+                    break
             remaining_s = deadline - self._monotonic()
             if remaining_s <= 0:
                 raise OutputStateError(
@@ -556,6 +559,24 @@ class ConstantCurrentController(QObject):
                 "manual front-panel intervention is required."
             )
         return readback
+
+    def _submit_output_off_action(self, action: str, reason: str) -> bool:
+        """Submit at most one Output-Off write for the current shutdown attempt."""
+        if self._output_off_attempted:
+            self._finish_terminal(
+                ProtocolState.FAILED,
+                f"{reason}; Output Off was already attempted and physical OFF could not "
+                "be reconfirmed. Manual front-panel intervention is required.",
+                warning=True,
+            )
+            return False
+        self._output_off_attempted = True
+        return self._submit_action(
+            action,
+            self._output_off_operation,
+            priority=CommandPriority.SAFETY,
+            diagnostic_reason=reason,
+        )
 
     def _sample_operation(
         self, supply: PowerSupplyInterface
@@ -653,6 +674,8 @@ class ConstantCurrentController(QObject):
                 self._snapshot,
                 message="Final OFF/settings preflight before guarded Output On...",
             ))
+            # A fresh Output-On attempt starts a new shutdown-attempt lifetime.
+            self._output_off_attempted = False
             self._submit_action(
                 phase,
                 lambda supply: self._output_on_operation(supply, config),
@@ -712,9 +735,12 @@ class ConstantCurrentController(QObject):
                 or result.channel != self._channel
                 or result.output_enabled
             ):
-                self._begin_cleanup(
+                self._finish_terminal(
                     ProtocolState.FAILED,
-                    "Malformed or unconfirmed Output-Off read-back during pause.",
+                    "Malformed or unconfirmed Output-Off read-back during pause; "
+                    "physical OFF could not be confirmed. Manual front-panel "
+                    "intervention is required.",
+                    warning=True,
                 )
                 return
             self._active_before_run_s = self._elapsed_active()
@@ -768,7 +794,7 @@ class ConstantCurrentController(QObject):
         self._pending_request_id = None
         self._pending_action = ""
         message = str(error) or type(error).__name__
-        if action == "stop":
+        if action in {"pause", "stop"}:
             self._finish_terminal(
                 ProtocolState.FAILED,
                 f"Output-Off cleanup failed: {message}; physical OFF could not be confirmed.",
@@ -803,12 +829,18 @@ class ConstantCurrentController(QObject):
                 warning=True,
             )
             return
-        self._submit_action(
-            "stop",
-            self._output_off_operation,
-            priority=CommandPriority.SAFETY,
-            diagnostic_reason=message,
-        )
+        if self._output_off_attempted:
+            if not self._snapshot.output_enabled:
+                self._finish_terminal(terminal, message)
+            else:
+                self._finish_terminal(
+                    ProtocolState.FAILED,
+                    f"{message}; Output Off was already attempted and physical OFF could "
+                    "not be reconfirmed. Manual front-panel intervention is required.",
+                    warning=True,
+                )
+            return
+        self._submit_output_off_action("stop", message)
 
     def _finish_terminal(
         self,

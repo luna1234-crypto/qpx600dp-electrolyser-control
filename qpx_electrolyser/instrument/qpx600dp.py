@@ -100,6 +100,14 @@ class QPX600DPDriver(PowerSupplyInterface):
         self.capabilities.validate_channel(channel)
         self._transport.command(f"OP{channel} 0")
 
+    def confirm_operation_complete(self) -> None:
+        """Require documented `*OPC?` response 1 (Issue 14 printed pp. 33-34)."""
+        response = self._transport.query("*OPC?").strip()
+        if response != "1":
+            raise InstrumentProtocolError(
+                "Malformed *OPC? response; expected documented value 1."
+            )
+
     def read_output_state(self, channel: int) -> bool:
         """Query `OP<N>?` without changing output state (Issue 14 printed p. 33)."""
         self.capabilities.validate_channel(channel)

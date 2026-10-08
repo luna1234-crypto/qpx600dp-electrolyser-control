@@ -180,3 +180,54 @@ Follow-up offline validation:
 - automated Simulation Mode smoke: passed with clean disconnect and worker
   shutdown;
 - `git diff --check`: passed.
+
+## Stable Output-Off confirmation follow-up
+
+Subsequent supervised diagnostics showed that an immediate `OP<N>? = 0` was
+not sufficient: failed Pause operations could return OFF within 7-8 ms and then
+return ON about 41-42 ms after the single Output-Off write. Successful cases
+remained OFF. The transaction stream was aligned, writes were complete, and no
+other operation interleaved. The earlier single-OFF acceptance rule above is
+therefore superseded by stable confirmation.
+
+Each selected-channel shutdown attempt is now one atomic safety-priority queue
+operation with this exact sequence:
+
+1. transmit `OP<N> 0` exactly once;
+2. query `*OPC?` exactly once and require the documented response `1`;
+3. query `OP<N>?` immediately and then at approximately 50 ms intervals,
+   resetting the consecutive-OFF count whenever ON is reported;
+4. require two consecutive OFF responses within the original fixed one-second
+   deadline;
+5. perform one complete authoritative selected-channel readback and require its
+   final `OP<N>?` response to remain OFF.
+
+Voltage or current decay is never used as OFF evidence. A malformed or timed-out
+`*OPC?`, confirmation timeout, or authoritative ON result fails the operation,
+closes the Real Hardware session through the existing connection fail-safe, and
+retains the prominent manual front-panel intervention warning.
+
+The controller records that the Output-Off attempt was submitted before the
+worker can transmit it. Pause failure is terminal rather than recursively
+entering Stop cleanup, so no error callback can submit a second `OP<N> 0`.
+Stopping an already-paused channel also completes from its authoritative cached
+OFF state without another write. A fresh successful Output-On attempt starts a
+new shutdown-attempt lifetime. This applies identically to CH1/CH2 Pause, Stop,
+natural completion, failure cleanup, coordinated disconnect and shutdown.
+
+Deterministic fake-serial coverage includes immediate stable OFF, the observed
+OFF-ON rebound followed by stable OFF, repeated rebound through timeout,
+authoritative readback rebound, malformed and timed-out `*OPC?`, Pause near
+completion, stale callbacks, channel isolation, terminal cleanup and exact
+Output-Off write counts on success and every failure path. No physical port or
+instrument was accessed for this follow-up.
+
+Stable-confirmation offline validation:
+
+- focused driver, protocol and fake-serial suite: **121 passed**;
+- complete suite: **327 passed**;
+- `compileall`: passed;
+- `pip check`: no broken requirements;
+- automated Simulation Mode smoke: passed with clean disconnect and worker
+  shutdown;
+- `git diff --check`: passed.

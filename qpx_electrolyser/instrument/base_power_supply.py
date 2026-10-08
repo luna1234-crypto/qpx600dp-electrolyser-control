@@ -66,6 +66,9 @@ class PowerSupplyInterface(ABC):
     def output_off(self, channel: int) -> None:
         """Disable only the selected output without changing its settings."""
 
+    def confirm_operation_complete(self) -> None:
+        """Confirm preceding operations completed; synchronous backends need no I/O."""
+
     @abstractmethod
     def read_output_state(self, channel: int) -> bool:
         """Query output enable state; disconnected is unknown and must raise."""

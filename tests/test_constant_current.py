@@ -628,7 +628,7 @@ def test_pause_publishes_confirmed_off_readback_to_every_indicator(
         assert connection.shutdown(1)
 
 
-def test_pause_never_enters_paused_until_output_off_is_confirmed(
+def test_pause_failure_never_retries_output_off_or_enters_paused(
     qapp: QApplication, tmp_path: Path,
 ) -> None:
     class FirstOffAttemptNotAppliedSimulator(RecordingSimulator):
@@ -652,8 +652,10 @@ def test_pause_never_enters_paused_until_output_off_is_confirmed(
         wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.FAILED)
 
         assert ProtocolState.PAUSED not in states
-        assert backend.off_attempts == 2
-        assert backend._channels[0].output_enabled is False
+        assert backend.off_attempts == 1
+        assert backend._channels[0].output_enabled is True
+        assert protocol.snapshot.operator_warning
+        assert "physical OFF could not be confirmed" in protocol.snapshot.message
     finally:
         assert connection.shutdown(1)
 

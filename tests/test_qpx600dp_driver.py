@@ -156,6 +156,20 @@ def test_output_commands_are_channel_specific_and_never_implicit() -> None:
     assert fake.writes == [b"OP2 1\n", b"OP1 0\n"]
 
 
+@pytest.mark.parametrize("response", [b"0\r\n", b"2\r\n", b"bad\r\n"])
+def test_operation_complete_requires_documented_one(response: bytes) -> None:
+    driver, fake = connected_driver([response])
+    with pytest.raises(InstrumentProtocolError, match=r"\*OPC\?"):
+        driver.confirm_operation_complete()
+    assert fake.writes == [b"*OPC?\n"]
+
+
+def test_operation_complete_accepts_documented_one() -> None:
+    driver, fake = connected_driver([b"1\r\n"])
+    driver.confirm_operation_complete()
+    assert fake.writes == [b"*OPC?\n"]
+
+
 @pytest.mark.parametrize("method,response", [
     ("read_set_voltage", b"V2 1.000\r\n"),
     ("read_set_current", b"I1 1e1\r\n"),
