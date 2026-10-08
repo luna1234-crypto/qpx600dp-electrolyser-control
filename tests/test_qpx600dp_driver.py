@@ -149,6 +149,37 @@ def test_setpoint_measurement_state_range_and_status_parsing() -> None:
     ]
 
 
+def test_status_forensics_queries_parse_documented_responses_exactly_once() -> None:
+    driver, fake = connected_driver([
+        b"17\r\n", b"34\r\n", b"VP1 6.500\r\n", b"CP2 0.25\r\n",
+        b"24\r\n", b"5\r\n", b"20\r\n", b"103\r\n", b"1\r\n",
+    ])
+    assert driver.read_limit_status_enable(1) == 17
+    assert driver.read_standard_event_status_enable() == 34
+    assert driver.read_over_voltage_trip_setting(1) == pytest.approx(6.5)
+    assert driver.read_over_current_trip_setting(2) == pytest.approx(0.25)
+    assert driver.read_limit_status_and_clear(1) == 24
+    assert driver.read_limit_status_and_clear(2) == 5
+    assert driver.read_standard_event_status_and_clear() == 20
+    assert driver.read_execution_error_and_clear() == 103
+    assert driver.read_query_error_and_clear() == 1
+    assert fake.writes == [
+        b"LSE1?\n", b"*ESE?\n", b"OVP1?\n", b"OCP2?\n",
+        b"LSR1?\n", b"LSR2?\n", b"*ESR?\n", b"EER?\n", b"QER?\n",
+    ]
+
+
+@pytest.mark.parametrize("method", [
+    "read_limit_status_enable",
+    "read_limit_status_and_clear",
+])
+def test_channel_status_queries_reject_invalid_channel_without_writing(method: str) -> None:
+    driver, fake = connected_driver([])
+    with pytest.raises(InstrumentValueError):
+        getattr(driver, method)(3)
+    assert fake.writes == []
+
+
 def test_output_commands_are_channel_specific_and_never_implicit() -> None:
     driver, fake = connected_driver([])
     driver.output_on(2)

@@ -8,9 +8,12 @@ import argparse
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 import math
+from pathlib import Path
+import re
 import sys
 import time
 
+from qpx_electrolyser.app.paths import default_paths
 from qpx_electrolyser.instrument.qpx600dp import QPX600DPDriver
 from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES
 from qpx_electrolyser.instrument.serial_transport import SerialTransport
@@ -19,6 +22,7 @@ from qpx_electrolyser.instrument.serial_transport import SerialTransport
 WRITE_CONFIRMATION = "WRITE-QPX600DP"
 OUTPUT_ON_CONFIRMATION = "ENABLE-QPX600DP-OUTPUT"
 MONITORED_OUTPUT_CONFIRMATION = "MONITOR-QPX600DP-OUTPUT"
+STATUS_FORENSICS_CONFIRMATION = "CAPTURE-QPX600DP-STATUS-ONCE"
 MAX_MONITORED_DURATION_S = 60.0
 MAX_VOLTAGE_SETTLE_TIME_S = 5.0
 MIN_POLL_INTERVAL_S = 0.05
@@ -31,6 +35,10 @@ class HardwareCheckAuthorizationError(ValueError):
 
 class MonitoredOutputSafetyError(RuntimeError):
     """A monitored Output-On run stopped or could not prove a safe shutdown."""
+
+
+class StatusForensicsSafetyError(RuntimeError):
+    """A one-shot status capture could not proceed without consuming unsafe evidence."""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -106,12 +114,23 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=MONITORED_OUTPUT_CONFIRMATION,
         help="Separate exact token required for --monitor-output-for",
     )
+    parser.add_argument(
+        "--capture-status-once",
+        metavar=STATUS_FORENSICS_CONFIRMATION,
+        help=(
+            "One-shot status forensics; consumes LSR1, LSR2, ESR, EER and QER "
+            "after an OFF-only non-clearing preflight"
+        ),
+    )
     return parser
 
 
 def validate_authorization(args: argparse.Namespace) -> None:
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         raise HardwareCheckAuthorizationError("--timeout must be a finite positive number.")
+    if args.capture_status_once is not None:
+        _validate_status_forensics_authorization(args)
+        return
     monitored = args.monitor_output_for is not None
     mutations = (
         args.set_voltage is not None
@@ -159,6 +178,40 @@ def validate_authorization(args: argparse.Namespace) -> None:
     if args.set_voltage * args.set_current > args.safety_max_power:
         raise HardwareCheckAuthorizationError(
             "Setpoint/compliance product exceeds the explicit safety power limit."
+        )
+
+
+def _validate_status_forensics_authorization(args: argparse.Namespace) -> None:
+    if args.capture_status_once != STATUS_FORENSICS_CONFIRMATION:
+        raise HardwareCheckAuthorizationError(
+            "Status forensics requires the exact token "
+            f"--capture-status-once {STATUS_FORENSICS_CONFIRMATION}."
+        )
+    conflicts = (
+        args.channel is not None,
+        args.set_voltage is not None,
+        args.set_current is not None,
+        args.output_off,
+        args.output_on_for is not None,
+        args.monitor_output_for is not None,
+        args.confirm_write is not None,
+        args.confirm_output_on is not None,
+        args.confirm_monitored_output_on is not None,
+        args.safety_max_voltage is not None,
+        args.safety_max_current is not None,
+        args.safety_max_power is not None,
+        args.expected_voltage is not None,
+        args.expected_current_limit is not None,
+        args.max_measured_current is not None,
+        args.min_measured_voltage is not None,
+        args.max_measured_voltage is not None,
+        args.poll_interval is not None,
+        args.voltage_settle_time is not None,
+    )
+    if any(conflicts):
+        raise HardwareCheckAuthorizationError(
+            "Status forensics cannot be combined with channel, setting, output or "
+            "monitored-output options."
         )
 
 
@@ -272,15 +325,207 @@ def _emit_channel_state(
     channel: int,
     emit: Callable[[str], None],
 ) -> None:
+    line, _output_on = _read_channel_state(driver, channel)
+    emit(line)
+
+
+def _read_channel_state(
+    driver: QPX600DPDriver,
+    channel: int,
+) -> tuple[str, bool]:
     voltage_range = driver.read_voltage_range(channel)
-    emit(
+    set_voltage = driver.read_set_voltage(channel)
+    set_current = driver.read_set_current(channel)
+    output_on = driver.read_output_state(channel)
+    measured_voltage = driver.read_voltage(channel)
+    measured_current = driver.read_current(channel)
+    return (
         f"CH{channel}: range={voltage_range.name}; "
-        f"set={driver.read_set_voltage(channel):g} V/"
-        f"{driver.read_set_current(channel):g} A; "
-        f"output={'ON' if driver.read_output_state(channel) else 'OFF'}; "
-        f"measured={driver.read_voltage(channel):g} V/"
-        f"{driver.read_current(channel):g} A"
+        f"set={set_voltage:g} V/{set_current:g} A; "
+        f"output={'ON' if output_on else 'OFF'}; "
+        f"measured={measured_voltage:g} V/{measured_current:g} A",
+        output_on,
     )
+
+
+_STATUS_BYTE_BITS = (
+    "LIM1: enabled CH1 limit event pending",
+    "LIM2: enabled CH2 limit event pending",
+    "unused",
+    "unused",
+    "MAV: response message available",
+    "ESB: enabled standard event pending",
+    "RQS/MSS: service request/master summary",
+    "unused",
+)
+_STANDARD_EVENT_BITS = (
+    "operation complete",
+    "unused",
+    "query error",
+    "verify timeout",
+    "execution error",
+    "command error",
+    "unused",
+    "power on",
+)
+_LIMIT_STATUS_BITS = (
+    "constant-voltage limit entered",
+    "constant-current limit entered",
+    "power limit entered",
+    "over-voltage trip",
+    "over-current trip",
+    "sense trip",
+    "fault trip requiring AC power cycle",
+    "reserved",
+)
+_LIMIT_ENABLE_BITS = tuple(
+    f"enable reporting for {meaning}" if meaning != "reserved" else meaning
+    for meaning in _LIMIT_STATUS_BITS
+)
+
+
+def _decode_bits(value: int, meanings: tuple[str, ...]) -> str:
+    return "; ".join(
+        f"bit {bit}={(value >> bit) & 1} ({meaning})"
+        for bit, meaning in enumerate(meanings)
+    )
+
+
+def _decode_execution_error(value: int) -> str:
+    if value == 0:
+        return "no error encountered"
+    if 1 <= value <= 9:
+        return "hardware error"
+    return {
+        100: "numeric value outside the permitted range",
+        101: "recalled setup contains corrupted data",
+        102: "requested setup store is empty",
+        103: "command invalid in the present circumstances",
+        200: "write attempted without interface authority",
+    }.get(value, "undocumented execution error value")
+
+
+def _decode_query_error(value: int) -> str:
+    return {
+        0: "no query error",
+        1: "interrupted query",
+        2: "deadlock query error",
+        3: "unterminated query",
+    }.get(value, "undocumented query error value")
+
+
+def _redact_identity(identity: str) -> str:
+    parts = [part.strip() for part in identity.split(",")]
+    if len(parts) != 4 or parts[0] != "THURLBY THANDAR" or parts[1] != "QPX600DP":
+        raise StatusForensicsSafetyError(
+            "Identity is not an exact supported THURLBY THANDAR QPX600DP identity."
+        )
+    return f"{parts[0]}, {parts[1]}, [SERIAL REDACTED], {parts[3]}"
+
+
+def _report_path(report_directory: Path, captured_at: str) -> Path:
+    safe_timestamp = re.sub(r"[^0-9A-Za-z]+", "", captured_at)
+    if not safe_timestamp:
+        safe_timestamp = "unknown_time"
+    return report_directory / f"qpx600dp_status_forensics_{safe_timestamp}.txt"
+
+
+def _run_status_forensics(
+    driver: QPX600DPDriver,
+    *,
+    emit: Callable[[str], None],
+    timestamp: Callable[[], str],
+    report_directory: Path,
+) -> None:
+    captured_at = timestamp()
+    lines = [
+        "QPX600DP one-shot status forensics",
+        f"Captured at: {captured_at}",
+    ]
+
+    identity = _redact_identity(driver.identify())
+    lines.append(f"*IDN? = {identity}")
+
+    status_byte = driver.read_status_byte()
+    lines.append(f"*STB? = {status_byte}; {_decode_bits(status_byte, _STATUS_BYTE_BITS)}")
+    for channel in (1, 2):
+        value = driver.read_limit_status_enable(channel)
+        lines.append(
+            f"LSE{channel}? = {value}; "
+            f"{_decode_bits(value, _LIMIT_ENABLE_BITS)}"
+        )
+    event_enable = driver.read_standard_event_status_enable()
+    lines.append(
+        f"*ESE? = {event_enable}; "
+        f"{_decode_bits(event_enable, _STANDARD_EVENT_BITS)}"
+    )
+    for channel in (1, 2):
+        ovp = driver.read_over_voltage_trip_setting(channel)
+        ocp = driver.read_over_current_trip_setting(channel)
+        lines.append(f"OVP{channel}? = {ovp:g} V")
+        lines.append(f"OCP{channel}? = {ocp:g} A")
+
+    output_states: dict[int, bool] = {}
+    for channel in (1, 2):
+        line, output_on = _read_channel_state(driver, channel)
+        output_states[channel] = output_on
+        lines.append(line)
+
+    report_directory.mkdir(parents=True, exist_ok=True)
+    path = _report_path(report_directory, captured_at)
+    for line in lines:
+        emit(line)
+    with path.open("x", encoding="utf-8", newline="\n") as report:
+        for line in lines:
+            report.write(line + "\n")
+        report.flush()
+        emit(f"Diagnostic report: {path}")
+
+        if any(output_states.values()):
+            stopped = "ABORTED: both outputs must be OFF before clear-on-read queries."
+            emit(stopped)
+            report.write(stopped + "\n")
+            report.flush()
+            raise StatusForensicsSafetyError(stopped)
+
+        warning = (
+            "WARNING: the next five queries consume and clear their respective evidence: "
+            "LSR1?, LSR2?, *ESR?, EER?, QER?. Each will be read exactly once."
+        )
+        emit(warning)
+        report.write(warning + "\n")
+        report.flush()
+
+        for channel in (1, 2):
+            value = driver.read_limit_status_and_clear(channel)
+            line = (
+                f"LSR{channel}? = {value}; "
+                f"{_decode_bits(value, _LIMIT_STATUS_BITS)}"
+            )
+            emit(line)
+            report.write(line + "\n")
+            report.flush()
+
+        event_status = driver.read_standard_event_status_and_clear()
+        line = (
+            f"*ESR? = {event_status}; "
+            f"{_decode_bits(event_status, _STANDARD_EVENT_BITS)}"
+        )
+        emit(line)
+        report.write(line + "\n")
+        report.flush()
+
+        execution_error = driver.read_execution_error_and_clear()
+        line = f"EER? = {execution_error}; {_decode_execution_error(execution_error)}"
+        emit(line)
+        report.write(line + "\n")
+        report.flush()
+
+        query_error = driver.read_query_error_and_clear()
+        line = f"QER? = {query_error}; {_decode_query_error(query_error)}"
+        emit(line)
+        report.write(line + "\n")
+        report.flush()
 
 
 def _run_monitored_output(
@@ -445,12 +690,21 @@ def run_check(
     monotonic: Callable[[], float] = time.monotonic,
     timestamp: Callable[[], str] = _utc_timestamp,
     emit: Callable[[str], None] = print,
+    report_directory: Path | None = None,
 ) -> None:
     """Run after validating authorization; default path performs queries only."""
     validate_authorization(args)
     driver = driver_factory(args.port, args.timeout)
     driver.connect()
     try:
+        if args.capture_status_once is not None:
+            _run_status_forensics(
+                driver,
+                emit=emit,
+                timestamp=timestamp,
+                report_directory=report_directory or default_paths().log_directory,
+            )
+            return
         if args.monitor_output_for is not None:
             _run_monitored_output(
                 args,

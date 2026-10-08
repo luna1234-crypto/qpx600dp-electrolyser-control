@@ -2,6 +2,7 @@
 
 from argparse import Namespace
 from collections import deque
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,8 @@ from qpx_electrolyser.instrument.hardware_check import (
     MONITORED_OUTPUT_CONFIRMATION,
     MonitoredOutputSafetyError,
     OUTPUT_ON_CONFIRMATION,
+    STATUS_FORENSICS_CONFIRMATION,
+    StatusForensicsSafetyError,
     WRITE_CONFIRMATION,
     build_parser,
     run_check,
@@ -99,6 +102,37 @@ def test_default_hardware_check_is_read_only_and_checks_both_channels() -> None:
     assert ("read_voltage_range", 1) in driver.operations
     assert ("read_voltage_range", 2) in driver.operations
     assert output[0].startswith("Identification: THURLBY THANDAR,QPX600DP")
+
+
+def test_status_forensics_confirmation_is_rejected_before_driver_creation() -> None:
+    created = False
+
+    def factory(_port: str, _timeout: float) -> RecordingDriver:
+        nonlocal created
+        created = True
+        return RecordingDriver()
+
+    with pytest.raises(HardwareCheckAuthorizationError, match="exact token"):
+        run_check(
+            parse("--capture-status-once", "wrong"),
+            driver_factory=factory,
+        )
+    assert created is False
+
+
+@pytest.mark.parametrize("conflict", [
+    ("--channel", "1"),
+    ("--confirm-write", WRITE_CONFIRMATION),
+    ("--set-voltage", "1"),
+    ("--output-off",),
+])
+def test_status_forensics_rejects_conflicting_options_before_connect(
+    conflict: tuple[str, ...],
+) -> None:
+    with pytest.raises(HardwareCheckAuthorizationError, match="cannot be combined"):
+        validate_authorization(parse(
+            "--capture-status-once", STATUS_FORENSICS_CONFIRMATION, *conflict,
+        ))
 
 
 @pytest.mark.parametrize("arguments,match", [
@@ -664,3 +698,173 @@ def test_monitored_output_fake_serial_exact_command_sequence_and_closure() -> No
     ]]
     assert fake.output_states == {1: False, 2: False}
     assert fake.is_open is False
+
+
+class StatusForensicsSerial:
+    """Scripted query-only endpoint for the destructive one-shot status path."""
+
+    def __init__(self, *, output1_on: bool = False) -> None:
+        self.is_open = True
+        self.writes: list[bytes] = []
+        self.pending_response = b""
+        self.close_calls = 0
+        self.responses = {
+            "*IDN?": "THURLBY THANDAR,QPX600DP,SECRET-SERIAL,1.20",
+            "*STB?": "33",
+            "LSE1?": "24",
+            "LSE2?": "1",
+            "*ESE?": "20",
+            "OVP1?": "VP1 6.000",
+            "OCP1?": "CP1 0.10",
+            "OVP2?": "VP2 7.000",
+            "OCP2?": "CP2 0.20",
+            "VRANGE1?": "2",
+            "V1?": "V1 4.000",
+            "I1?": "I1 0.08",
+            "OP1?": "1" if output1_on else "0",
+            "V1O?": "0.000V",
+            "I1O?": "0.000A",
+            "VRANGE2?": "2",
+            "V2?": "V2 4.000",
+            "I2?": "I2 0.08",
+            "OP2?": "0",
+            "V2O?": "0.004V",
+            "I2O?": "0.001A",
+            "LSR1?": "24",
+            "LSR2?": "1",
+            "*ESR?": "20",
+            "EER?": "103",
+            "QER?": "1",
+        }
+
+    def write(self, data: bytes) -> int:
+        self.writes.append(data)
+        command = data.decode("ascii").rstrip("\n")
+        assert command.endswith("?"), f"unexpected mutation command: {command}"
+        self.pending_response = (self.responses[command] + "\r\n").encode("ascii")
+        return len(data)
+
+    def flush(self) -> None:
+        pass
+
+    def read_until(self, expected: bytes = b"\n", size: int | None = None) -> bytes:
+        response = self.pending_response
+        self.pending_response = b""
+        return response
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self.is_open = False
+
+
+def _status_forensics_args() -> Namespace:
+    return parse("--capture-status-once", STATUS_FORENSICS_CONFIRMATION)
+
+
+def _status_driver_factory(fake: StatusForensicsSerial):
+    def factory(port: str, timeout: float) -> QPX600DPDriver:
+        return QPX600DPDriver(SerialTransport(
+            port,
+            timeout_s=timeout,
+            write_timeout_s=timeout,
+            serial_factory=lambda **_settings: fake,
+        ))
+
+    return factory
+
+
+def test_status_forensics_fake_serial_exact_order_decoding_and_report(
+    tmp_path: Path,
+) -> None:
+    fake = StatusForensicsSerial()
+    output: list[str] = []
+    run_check(
+        _status_forensics_args(),
+        driver_factory=_status_driver_factory(fake),
+        timestamp=lambda: "2026-10-08T12:34:56.789+00:00",
+        emit=output.append,
+        report_directory=tmp_path,
+    )
+    commands = [data.decode("ascii").rstrip("\n") for data in fake.writes]
+    assert commands == [
+        "*IDN?", "*STB?", "LSE1?", "LSE2?", "*ESE?",
+        "OVP1?", "OCP1?", "OVP2?", "OCP2?",
+        "VRANGE1?", "V1?", "I1?", "OP1?", "V1O?", "I1O?",
+        "VRANGE2?", "V2?", "I2?", "OP2?", "V2O?", "I2O?",
+        "LSR1?", "LSR2?", "*ESR?", "EER?", "QER?",
+    ]
+    for command in ("LSR1?", "LSR2?", "*ESR?", "EER?", "QER?"):
+        assert commands.count(command) == 1
+    assert all(command.endswith("?") for command in commands)
+    assert fake.close_calls == 1
+    assert not fake.is_open
+
+    report_files = list(tmp_path.glob("qpx600dp_status_forensics_*.txt"))
+    assert len(report_files) == 1
+    report = report_files[0].read_text(encoding="utf-8")
+    assert "SECRET-SERIAL" not in report
+    assert "[SERIAL REDACTED]" in report
+    assert "bit 4=1 (over-current trip)" in report
+    assert "bit 3=1 (over-voltage trip)" in report
+    assert "bit 4=1 (execution error)" in report
+    assert "EER? = 103; command invalid in the present circumstances" in report
+    assert "QER? = 1; interrupted query" in report
+    assert "consume and clear their respective evidence" in report
+    assert any("Diagnostic report:" in line for line in output)
+
+
+def test_status_forensics_output_on_stops_before_clear_on_read_queries(
+    tmp_path: Path,
+) -> None:
+    fake = StatusForensicsSerial(output1_on=True)
+    with pytest.raises(StatusForensicsSafetyError, match="both outputs must be OFF"):
+        run_check(
+            _status_forensics_args(),
+            driver_factory=_status_driver_factory(fake),
+            timestamp=lambda: "2026-10-08T12:35:00.000+00:00",
+            emit=lambda _message: None,
+            report_directory=tmp_path,
+        )
+    commands = [data.decode("ascii").rstrip("\n") for data in fake.writes]
+    assert not {"LSR1?", "LSR2?", "*ESR?", "EER?", "QER?"}.intersection(commands)
+    assert fake.close_calls == 1
+    report = next(tmp_path.glob("qpx600dp_status_forensics_*.txt")).read_text(
+        encoding="utf-8"
+    )
+    assert "ABORTED: both outputs must be OFF" in report
+    assert "SECRET-SERIAL" not in report
+
+
+def test_status_forensics_malformed_preflight_stops_without_retry_or_clear(
+    tmp_path: Path,
+) -> None:
+    fake = StatusForensicsSerial()
+    fake.responses["LSE1?"] = "bad"
+    with pytest.raises(InstrumentProtocolError, match="LSE1"):
+        run_check(
+            _status_forensics_args(),
+            driver_factory=_status_driver_factory(fake),
+            emit=lambda _message: None,
+            report_directory=tmp_path,
+        )
+    commands = [data.decode("ascii").rstrip("\n") for data in fake.writes]
+    assert commands == ["*IDN?", "*STB?", "LSE1?"]
+    assert fake.close_calls == 1
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_status_forensics_identity_mismatch_stops_after_one_query(
+    tmp_path: Path,
+) -> None:
+    fake = StatusForensicsSerial()
+    fake.responses["*IDN?"] = "OTHER MAKER,QPX600DP,SECRET-SERIAL,1.20"
+    with pytest.raises(StatusForensicsSafetyError, match="exact supported"):
+        run_check(
+            _status_forensics_args(),
+            driver_factory=_status_driver_factory(fake),
+            emit=lambda _message: None,
+            report_directory=tmp_path,
+        )
+    assert fake.writes == [b"*IDN?\n"]
+    assert fake.close_calls == 1
+    assert list(tmp_path.iterdir()) == []

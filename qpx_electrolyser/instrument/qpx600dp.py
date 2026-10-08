@@ -142,12 +142,56 @@ class QPX600DPDriver(PowerSupplyInterface):
 
     def read_status_byte(self) -> int:
         """Query non-destructive `*STB?` (Issue 14 printed p. 35)."""
-        response = self._transport.query("*STB?").strip()
+        return self._read_register("*STB?")
+
+    def read_limit_status_enable(self, channel: int) -> int:
+        """Query non-clearing `LSE<N>?` enable mask (Issue 14 pp. 28, 35)."""
+        self.capabilities.validate_channel(channel)
+        return self._read_register(f"LSE{channel}?")
+
+    def read_standard_event_status_enable(self) -> int:
+        """Query non-clearing `*ESE?` enable mask (Issue 14 pp. 27, 34)."""
+        return self._read_register("*ESE?")
+
+    def read_over_voltage_trip_setting(self, channel: int) -> float:
+        """Query `OVP<N>?` trip setting without changing it (Issue 14 p. 33)."""
+        self.capabilities.validate_channel(channel)
+        response = self._transport.query(f"OVP{channel}?")
+        return self._parse_prefixed_value(response, f"VP{channel}")
+
+    def read_over_current_trip_setting(self, channel: int) -> float:
+        """Query `OCP<N>?` trip setting without changing it (Issue 14 p. 33)."""
+        self.capabilities.validate_channel(channel)
+        response = self._transport.query(f"OCP{channel}?")
+        return self._parse_prefixed_value(response, f"CP{channel}")
+
+    def read_limit_status_and_clear(self, channel: int) -> int:
+        """Query and clear `LSR<N>` exactly once (Issue 14 pp. 28-29, 35)."""
+        self.capabilities.validate_channel(channel)
+        return self._read_register(f"LSR{channel}?")
+
+    def read_standard_event_status_and_clear(self) -> int:
+        """Query and clear `*ESR` exactly once (Issue 14 pp. 27-28, 34)."""
+        return self._read_register("*ESR?")
+
+    def read_execution_error_and_clear(self) -> int:
+        """Query and clear `EER` exactly once (Issue 14 pp. 28, 35)."""
+        return self._read_register("EER?")
+
+    def read_query_error_and_clear(self) -> int:
+        """Query and clear `QER` exactly once (Issue 14 pp. 26, 35)."""
+        return self._read_register("QER?")
+
+    def _read_register(self, command: str) -> int:
+        """Parse one documented 8-bit status or event register response."""
+        response = self._transport.query(command).strip()
         if not re.fullmatch(r"\d+", response):
-            raise InstrumentProtocolError("Malformed status-byte response; expected an integer.")
+            raise InstrumentProtocolError(
+                f"Malformed {command} response; expected an integer."
+            )
         value = int(response)
         if not 0 <= value <= 255:
-            raise InstrumentProtocolError("Status-byte response is outside 0-255.")
+            raise InstrumentProtocolError(f"{command} response is outside 0-255.")
         return value
 
     @staticmethod
