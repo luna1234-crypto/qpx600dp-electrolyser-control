@@ -18,6 +18,9 @@ from typing import Generic, TypeVar, cast
 
 from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
 from qpx_electrolyser.instrument.exceptions import InstrumentNotConnectedError
+from qpx_electrolyser.instrument.transaction_diagnostics import (
+    transaction_diagnostic_context,
+)
 
 
 ResultT = TypeVar("ResultT")
@@ -87,6 +90,8 @@ class _QueuedCommand:
     cancellation_key: Hashable | None = field(compare=False, default=None)
     regular: bool = field(compare=False, default=True)
     shutdown: bool = field(compare=False, default=False)
+    session_id: int = field(compare=False, default=0)
+    diagnostic_reason: str = field(compare=False, default="")
 
 
 class InstrumentCommandWorker:
@@ -142,7 +147,7 @@ class InstrumentCommandWorker:
     def thread_name(self) -> str:
         return self._thread.name
 
-    def request_connect(self) -> bool:
+    def request_connect(self, *, session_id: int = 0) -> bool:
         """Queue creation, connection and identification on the owner thread."""
         try:
             self._enqueue(
@@ -150,6 +155,7 @@ class InstrumentCommandWorker:
                 self._connect,
                 priority=CommandPriority.CONNECTION,
                 regular=False,
+                session_id=session_id,
                 on_result=lambda _request_id, _name, result: self._safe_callback(
                     self._on_connected, result
                 ),
@@ -161,7 +167,7 @@ class InstrumentCommandWorker:
             return False
         return True
 
-    def request_disconnect(self) -> bool:
+    def request_disconnect(self, *, session_id: int = 0) -> bool:
         """Cancel queued ordinary work, then disconnect after any in-flight call."""
         self.cancel_pending()
         try:
@@ -170,6 +176,7 @@ class InstrumentCommandWorker:
                 self._disconnect,
                 priority=CommandPriority.CONNECTION,
                 regular=False,
+                session_id=session_id,
                 on_result=lambda _request_id, _name, _result: self._safe_callback(
                     self._on_disconnected
                 ),
@@ -190,6 +197,8 @@ class InstrumentCommandWorker:
         cancellation_key: Hashable | None = None,
         on_result: ResultCallback | None = None,
         on_error: ErrorCallback | None = None,
+        session_id: int = 0,
+        diagnostic_reason: str = "",
     ) -> CommandTicket[ResultT]:
         """Queue one atomic backend call without waiting for it to finish."""
         if not isinstance(name, str) or not name.strip():
@@ -215,6 +224,8 @@ class InstrumentCommandWorker:
             cancellation_key=cancellation_key,
             on_result=on_result,
             on_error=on_error,
+            session_id=session_id,
+            diagnostic_reason=diagnostic_reason,
         )
         return CommandTicket(
             request_id=item.request_id,
@@ -266,6 +277,8 @@ class InstrumentCommandWorker:
         cancellation_key: Hashable | None = None,
         on_result: ResultCallback | None = None,
         on_error: ErrorCallback | None = None,
+        session_id: int = 0,
+        diagnostic_reason: str = "",
     ) -> _QueuedCommand:
         with self._lock:
             if not self._accepting:
@@ -282,6 +295,8 @@ class InstrumentCommandWorker:
                 future=Future(),
                 on_result=on_result,
                 on_error=on_error,
+                session_id=session_id,
+                diagnostic_reason=diagnostic_reason,
                 cancellation_key=cancellation_key,
                 regular=regular,
             )
@@ -318,7 +333,14 @@ class InstrumentCommandWorker:
                 try:
                     if item.execute is None:
                         raise RuntimeError("Queued command has no executable operation.")
-                    result = item.execute()
+                    with transaction_diagnostic_context(
+                        session_id=item.session_id,
+                        request_id=item.request_id,
+                        operation_name=item.name,
+                        priority=CommandPriority(item.priority).name,
+                        output_off_reason=item.diagnostic_reason,
+                    ):
+                        result = item.execute()
                 except BaseException as error:
                     item.future.set_exception(error)
                     if item.on_error is not None:
@@ -362,7 +384,7 @@ class InstrumentCommandWorker:
                 "The failed session was cleaned up; no automatic retry was attempted."
             ) from error
         self._backend = candidate
-        self._logger.info("Instrument connection ready: %s", identification)
+        self._logger.info("Instrument connection ready; identity details redacted")
         return result
 
     def _disconnect(self) -> None:

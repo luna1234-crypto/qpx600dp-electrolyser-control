@@ -2,6 +2,8 @@
 
 from collections import deque
 from collections.abc import Callable, Iterator
+import json
+import logging
 import os
 from pathlib import Path
 import time
@@ -1031,6 +1033,9 @@ def test_real_cv_stale_start_cannot_turn_on_and_two_channels_are_serialized(
         wait_until(qapp, lambda: len(slow.writes) > len(initial_responses()))
         protocol.stop("cancel stale CV start")
         wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.COMPLETED)
+        for _ in range(10):
+            qapp.processEvents()
+            time.sleep(0.002)
         assert b"OP1 1\n" not in slow.writes
         assert slow.writes.count(b"OP1 0\n") == 1
     finally:
@@ -1081,3 +1086,107 @@ def test_real_cv_stale_start_cannot_turn_on_and_two_channels_are_serialized(
         assert fake.writes.count(b"OP2 0\n") == 1
     finally:
         assert connection2.shutdown(timeout_s=1)
+
+
+def test_real_cv_second_sample_off_logs_aligned_trace_then_one_safety_cleanup(
+    qapp: QApplication,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fake = FakeSerial([
+        *initial_responses(),
+        *protocol_start_responses(1),
+        *channel_responses(1, voltage=2, current=0.1, output=True),
+        *channel_responses(1, voltage=2, current=0.1, output=False),
+        *channel_responses(1, voltage=2, current=0.1, output=False),
+    ])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    protocol = ConstantVoltageController(1, connection)
+    caplog.set_level(
+        logging.INFO, logger="qpx_electrolyser.instrument.serial_transport"
+    )
+    diagnostic_logger = logging.getLogger("qpx_electrolyser.instrument.serial_transport")
+    previous_propagate = diagnostic_logger.propagate
+    diagnostic_logger.propagate = False
+    diagnostic_logger.addHandler(caplog.handler)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        baseline = len(fake.writes)
+        assert protocol.start(
+            "2", "0.1", "2", "0.1", "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.FAILED)
+
+        commands = fake.writes[baseline:]
+        sample_tail = [
+            b"VRANGE1?\n", b"V1?\n", b"I1?\n", b"V1O?\n", b"I1O?\n", b"OP1?\n",
+        ]
+        first_sample_start = 11
+        assert commands[first_sample_start:first_sample_start + 6] == sample_tail
+        assert commands[first_sample_start + 6:first_sample_start + 12] == sample_tail
+        second_output_query = first_sample_start + 11
+        cleanup_off = commands.index(b"OP1 0\n")
+        assert cleanup_off > second_output_query
+        assert commands.count(b"OP1 1\n") == 1
+        assert commands.count(b"OP1 0\n") == 1
+        assert protocol.snapshot.message == "Output unexpectedly reported OFF."
+
+        records = [
+            json.loads(record.message.removeprefix("hardware_transaction "))
+            for record in caplog.records
+            if record.message.startswith("hardware_transaction ")
+        ]
+        protocol_records = [
+            record for record in records
+            if str(record["operation"]).startswith("ch1-constant-voltage-")
+        ]
+        tx_commands = [
+            record["command"] for record in protocol_records
+            if record["event"] == "serial_tx"
+        ]
+        assert tx_commands == [item.decode().rstrip("\n") for item in commands]
+        rx_records = [
+            record for record in protocol_records if record["event"] == "serial_rx"
+        ]
+        assert len(rx_records) == sum(command.endswith(b"?\n") for command in commands)
+        off_intent = [
+            record for record in protocol_records
+            if record["event"] == "output_off_intent"
+        ]
+        assert len(off_intent) == 1
+        assert off_intent[0]["priority"] == "SAFETY"
+        assert off_intent[0]["reason"] == "Output unexpectedly reported OFF."
+        assert all(record["session_id"] == connection.snapshot.session_id for record in protocol_records)
+        assert all(record["request_id"] > 0 for record in protocol_records)
+    finally:
+        diagnostic_logger.removeHandler(caplog.handler)
+        diagnostic_logger.propagate = previous_propagate
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_active_real_logger_is_strictly_read_only(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    fake = FakeSerial([*initial_responses(), *channel_responses(1)])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    logger = ChannelLoggingController(1, connection)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        baseline = len(fake.writes)
+        assert logger.start(tmp_path, 10)
+        wait_until(qapp, lambda: logger.snapshot.sample_count == 1)
+        logger.stop("diagnostic read-only regression complete")
+        logging_commands = fake.writes[baseline:]
+        assert logging_commands
+        assert all(command.rstrip(b"\n").endswith(b"?") for command in logging_commands)
+        assert not any(command.startswith(b"OP1 ") for command in logging_commands)
+        assert not any(command.startswith(b"OP2 ") for command in logging_commands)
+    finally:
+        logger.shutdown()
+        assert connection.shutdown(timeout_s=1)

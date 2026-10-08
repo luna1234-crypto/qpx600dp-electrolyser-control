@@ -334,7 +334,12 @@ class ConstantCurrentController(QObject):
             state=ProtocolState.PAUSING,
             message="Turning the selected output OFF and confirming readback...",
         ))
-        self._submit_action("pause", self._output_off_operation, priority=CommandPriority.SAFETY)
+        self._submit_action(
+            "pause",
+            self._output_off_operation,
+            priority=CommandPriority.SAFETY,
+            diagnostic_reason="Protocol pause requested",
+        )
 
     @Slot()
     def resume(self, real_hardware_confirmation: str | None = None) -> bool:
@@ -541,12 +546,14 @@ class ConstantCurrentController(QObject):
         operation,
         *,
         priority: CommandPriority = CommandPriority.NORMAL,
+        diagnostic_reason: str = "",
     ) -> bool:
         ticket = self._connection.submit_command(
             f"ch{self._channel}-{self._command_slug}-{action}",
             operation,
             priority=priority,
             cancellation_key=self._action_key,
+            diagnostic_reason=diagnostic_reason,
         )
         if ticket is None:
             self._finish_terminal(
@@ -767,7 +774,12 @@ class ConstantCurrentController(QObject):
                 warning=True,
             )
             return
-        self._submit_action("stop", self._output_off_operation, priority=CommandPriority.SAFETY)
+        self._submit_action(
+            "stop",
+            self._output_off_operation,
+            priority=CommandPriority.SAFETY,
+            diagnostic_reason=message,
+        )
 
     def _finish_terminal(
         self,

@@ -114,3 +114,27 @@ Pause/Resume confirmation and CSV reuse, natural completion, early Stop,
 coordinated disconnect, logger failure, stale start cancellation, duplicate-click
 protection, simultaneous channels and CH1/CH2 mutation isolation. Physical
 Constant Voltage acceptance remains pending.
+
+## Real-hardware transaction diagnostics follow-up
+
+The shared worker now attaches the active session ID, request ID, queue operation
+name, priority and Output-Off cause to each atomic backend operation. The real
+serial transport records structured `hardware_transaction` JSON objects for each
+transmitted command and each exact framed response, using a monotonic timestamp.
+`*IDN?` response content is always replaced by an explicit redaction marker, and
+the general connection-ready message no longer contains identity details.
+
+Every intentional `OP1 0` or `OP2 0` additionally records an
+`output_off_intent` object before transmission. Protocol Pause records its pause
+cause; Stop, completion and failure cleanup record the initiating terminal cause.
+These diagnostics append to the existing rotating
+`logs/application_YYYYMMDD.log`; they do not alter CSV data or its schema.
+
+Fake-serial regression coverage reproduces authoritative ON confirmation, a
+first ON sample and a second OFF sample. It proves the second `OP1?` response is
+received before exactly one safety-priority cleanup `OP1 0`, validates complete
+TX/RX alignment, confirms active logging remains query-only, and confirms a
+delayed stale callback cannot submit additional output commands. The existing
+fail-safe rule remains unchanged: one unexpected OFF fails the protocol and
+requests Output Off, with no retry, debounce, ignored response or automatic
+Output On.

@@ -6,7 +6,11 @@ requires LF-terminated ASCII commands and CRLF-terminated responses.
 """
 
 from collections.abc import Callable
+import json
+import logging
+import re
 from threading import Lock
+import time
 from typing import Protocol, runtime_checkable
 
 from qpx_electrolyser.instrument.exceptions import (
@@ -17,10 +21,15 @@ from qpx_electrolyser.instrument.exceptions import (
     InstrumentTransportError,
     InstrumentValueError,
 )
+from qpx_electrolyser.instrument.transaction_diagnostics import (
+    current_transaction_context,
+)
 
 
 COMMAND_TERMINATOR = b"\n"
 RESPONSE_TERMINATOR = b"\r\n"
+_OUTPUT_OFF_COMMAND = re.compile(r"OP[12] 0")
+_LOGGER = logging.getLogger("qpx_electrolyser.instrument.serial_transport")
 
 
 @runtime_checkable
@@ -144,7 +153,15 @@ class SerialTransport:
         encoded = self._encode_command(command)
         with self._transaction_lock:
             serial_port = self._require_port()
+            if _OUTPUT_OFF_COMMAND.fullmatch(command):
+                context = current_transaction_context()
+                self._log_diagnostic(
+                    "output_off_intent",
+                    command=command,
+                    reason=context.output_off_reason or context.operation_name,
+                )
             self._write(serial_port, encoded)
+            self._log_diagnostic("serial_tx", command=command)
 
     def query(self, command: str) -> str:
         """Send one LF-terminated query and return one ASCII payload before CRLF."""
@@ -152,6 +169,7 @@ class SerialTransport:
         with self._transaction_lock:
             serial_port = self._require_port()
             self._write(serial_port, encoded)
+            self._log_diagnostic("serial_tx", command=command)
             try:
                 framed = serial_port.read_until(
                     expected=RESPONSE_TERMINATOR,
@@ -160,6 +178,16 @@ class SerialTransport:
             except Exception as error:
                 self._invalidate(serial_port)
                 raise InstrumentTransportError("Serial response read failed.") from error
+            self._log_diagnostic(
+                "serial_rx",
+                command=command,
+                raw_response=(
+                    "<redacted QPX600DP identity>"
+                    if command.strip().upper() == "*IDN?"
+                    else repr(framed)
+                ),
+                redacted=command.strip().upper() == "*IDN?",
+            )
             if not framed.endswith(RESPONSE_TERMINATOR):
                 self._invalidate(serial_port)
                 raise InstrumentTimeoutError(
@@ -174,6 +202,20 @@ class SerialTransport:
             except UnicodeDecodeError as error:
                 self._invalidate(serial_port)
                 raise InstrumentProtocolError("Instrument response is not ASCII.") from error
+
+    @staticmethod
+    def _log_diagnostic(event: str, **fields: object) -> None:
+        context = current_transaction_context()
+        record = {
+            "event": event,
+            "monotonic_s": round(time.monotonic(), 9),
+            "session_id": context.session_id,
+            "request_id": context.request_id,
+            "operation": context.operation_name,
+            "priority": context.priority,
+            **fields,
+        }
+        _LOGGER.info("hardware_transaction %s", json.dumps(record, sort_keys=True))
 
     def _require_port(self) -> SerialPort:
         serial_port = self._serial

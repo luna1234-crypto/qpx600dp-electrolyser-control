@@ -1,6 +1,8 @@
 """Offline serial transport tests; no port discovery or hardware access."""
 
 from collections import deque
+import json
+import logging
 from typing import Any
 
 import pytest
@@ -14,6 +16,9 @@ from qpx_electrolyser.instrument.exceptions import (
     InstrumentValueError,
 )
 from qpx_electrolyser.instrument.serial_transport import SerialTransport
+from qpx_electrolyser.instrument.transaction_diagnostics import (
+    transaction_diagnostic_context,
+)
 
 
 class FakeSerial:
@@ -110,6 +115,63 @@ def test_command_and_query_use_exact_terminators() -> None:
     assert fake.flush_calls == 2
     assert fake.read_calls == [(b"\r\n", 514)]
     assert response == "THURLBY THANDAR,QPX600DP,0,1.00"
+
+
+def test_structured_transaction_diagnostics_include_context_and_redact_identity(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transport, _fake, _ = connected_transport([
+        b"0\r\n",
+        b"THURLBY THANDAR,QPX600DP,SENSITIVE-SERIAL,1.00\r\n",
+    ])
+    caplog.set_level(
+        logging.INFO, logger="qpx_electrolyser.instrument.serial_transport"
+    )
+    diagnostic_logger = logging.getLogger("qpx_electrolyser.instrument.serial_transport")
+    previous_propagate = diagnostic_logger.propagate
+    diagnostic_logger.propagate = False
+    diagnostic_logger.addHandler(caplog.handler)
+    try:
+        with transaction_diagnostic_context(
+            session_id=7,
+            request_id=42,
+            operation_name="ch1-constant-voltage-stop",
+            priority="SAFETY",
+            output_off_reason="Output unexpectedly reported OFF.",
+        ):
+            transport.command("OP1 0")
+            assert transport.query("OP1?") == "0"
+            transport.query("*IDN?")
+    finally:
+        diagnostic_logger.removeHandler(caplog.handler)
+        diagnostic_logger.propagate = previous_propagate
+
+    records = [
+        json.loads(record.message.removeprefix("hardware_transaction "))
+        for record in caplog.records
+        if record.message.startswith("hardware_transaction ")
+    ]
+    assert all(record["session_id"] == 7 for record in records)
+    assert all(record["request_id"] == 42 for record in records)
+    assert all(record["operation"] == "ch1-constant-voltage-stop" for record in records)
+    assert all(record["priority"] == "SAFETY" for record in records)
+    assert all(isinstance(record["monotonic_s"], float) for record in records)
+    assert records[0]["event"] == "output_off_intent"
+    assert records[0]["reason"] == "Output unexpectedly reported OFF."
+    assert records[1]["event"] == "serial_tx"
+    assert records[1]["command"] == "OP1 0"
+    output_state_rx = next(
+        record for record in records
+        if record["event"] == "serial_rx" and record["command"] == "OP1?"
+    )
+    assert output_state_rx["raw_response"] == "b'0\\r\\n'"
+    identity_rx = next(
+        record for record in records
+        if record["event"] == "serial_rx" and record["command"] == "*IDN?"
+    )
+    assert identity_rx["redacted"] is True
+    assert identity_rx["raw_response"] == "<redacted QPX600DP identity>"
+    assert "SENSITIVE-SERIAL" not in caplog.text
 
 
 @pytest.mark.parametrize("response", [b"", b"partial", b"value\n"])

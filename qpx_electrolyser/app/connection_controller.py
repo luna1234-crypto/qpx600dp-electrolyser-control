@@ -200,7 +200,7 @@ class ConnectionController(QObject):
             initial_readbacks=(),
             message=f"Connecting to {target}; identifying and reading both channels...",
         ))
-        if not self._worker.request_connect():
+        if not self._worker.request_connect(session_id=self._session_id + 1):
             self._handle_failed("connect", "The connection worker is not accepting requests.")
 
     @Slot()
@@ -213,7 +213,7 @@ class ConnectionController(QObject):
             initial_readbacks=(),
             message="Closing the instrument session without changing either output...",
         ))
-        if not self._worker.request_disconnect():
+        if not self._worker.request_disconnect(session_id=self._snapshot.session_id):
             self._handle_failed("disconnect", "The connection worker is not accepting requests.")
 
     def submit_command(
@@ -223,6 +223,7 @@ class ConnectionController(QObject):
         *,
         priority: CommandPriority = CommandPriority.NORMAL,
         cancellation_key: Hashable | None = None,
+        diagnostic_reason: str = "",
     ) -> CommandTicket[object] | None:
         if self._shutting_down or self._snapshot.state is not ConnectionState.CONNECTED:
             self._reject("Connect and initialize the selected instrument before submitting a command.")
@@ -235,6 +236,8 @@ class ConnectionController(QObject):
                 cancellation_key=cancellation_key,
                 on_result=self._worker_signals.command_completed.emit,
                 on_error=self._worker_signals.command_failed.emit,
+                session_id=self._snapshot.session_id,
+                diagnostic_reason=diagnostic_reason,
             )
         except (CommandWorkerError, TypeError, ValueError) as error:
             self._reject(str(error))
@@ -349,7 +352,7 @@ class ConnectionController(QObject):
                 initial_readbacks=(),
                 message="Real-hardware command failed; closing the shared session...",
             ))
-            if not self._worker.request_disconnect():
+            if not self._worker.request_disconnect(session_id=self._snapshot.session_id):
                 self._handle_failed("disconnect", self._failure_during_disconnect)
 
     def _reject(self, message: str) -> None:
