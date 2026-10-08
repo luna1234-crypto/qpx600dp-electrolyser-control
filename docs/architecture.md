@@ -6,9 +6,9 @@ code implements the entrypoints, dual-channel manual-control GUI, diagnostic log
 `SimulatedPowerSupply`, the milestone 4 asynchronous simulation lifecycle,
 the Milestone 5 `SerialTransport` / `QPX600DPDriver`, the Milestone 6 shared
 priority command worker, Milestone 7 per-channel controllers, Milestone 8
-independent CSV loggers and Milestone 9 Constant Current state machines. The guarded
-follow-up connects the physical backend through that same worker only after an
-explicit mode, port and Connect action.
+independent CSV loggers, Milestone 9 Constant Current state machines and Milestone
+10 bounded live-plot models. The guarded follow-up connects the physical backend
+through that same worker only after an explicit mode, port and Connect action.
 See [simulator behaviour](simulator.md).
 The remaining design follows the [QPX600DP command reference](qpx600dp_commands.md).
 
@@ -26,9 +26,15 @@ flowchart TD
     L2 --> IC
     GUI --> E1["ConstantCurrentController 1"]
     GUI --> E2["ConstantCurrentController 2"]
+    GUI --> P1["ChannelPlotController 1"]
+    GUI --> P2["ChannelPlotController 2"]
     GUI --> IC["InstrumentController"]
     E1 --> IC
     E2 --> IC
+    L1 -. existing sample signal .-> P1
+    E1 -. existing sample signal .-> P1
+    L2 -. existing sample signal .-> P2
+    E2 -. existing sample signal .-> P2
     IC --> Q["Bounded priority command queue"]
     Q --> W["Single communication worker"]
     W --> API["PowerSupplyInterface"]
@@ -65,6 +71,7 @@ independent of the selected transport.
 | TestProtocol implementations | Generate planned steps and averaging rules | No GUI, serial handles or wall-clock sleeps |
 | SafetyValidator | Validate full protocol against software and documented hardware capability before Start | No silent clamping or device writes |
 | ChannelLoggingController / CsvLogFile, one per channel | Monotonic scheduling through the shared queue; exclusive creation, CSV rows, flush/close and file errors | No direct backend, plot buffer or software diagnostic logging |
+| ChannelPlotController / ChannelPlotPanel, one per channel | Consume existing measurement signals, retain bounded/downsampled display points, coalesce repaints and render voltage/current | No queue submission, backend access, CSV ownership or output control |
 
 Milestone 7 instantiates two `ManualChannelController` objects in the Qt thread.
 They share the same `ConnectionController` and therefore the same worker/backend.
@@ -105,6 +112,21 @@ read-only requests. Pause/Resume retains the sink. Stop/completion detaches from
 an operator-started logger without stopping it; loss or file failure of the sink
 drives the protocol through its normal bounded Output-Off failure cleanup.
 
+Milestone 10 connects both existing per-channel `sample_received` paths to one
+`ChannelPlotController` per channel. Plot controllers run in the Qt thread and
+perform no measurement scheduling: logger and protocol requests remain the only
+sources of backend reads. Each controller timestamps signal receipt with a
+monotonic display clock, tags points with the connection session generation and
+coalesces snapshot notifications to at most 10 Hz. The custom Qt canvas draws
+voltage against a left V axis and current against a right A axis over elapsed
+seconds. Session changes break line segments without erasing history.
+
+Display storage is bounded at 2,000 points per channel. Progressive decimation
+retains representative history plus the first and newest points; full-resolution
+CSV rows are unaffected because plotting is a downstream consumer. Clear resets
+only the selected display model. Malformed samples or paint failures update plot
+status and never call logging, protocol, queue or output-control APIs.
+
 The connection controller defaults to Simulation Mode. Real Hardware selection
 requires a warning acknowledgement and a manually typed `COM<N>` name; neither
 action constructs a backend or opens a port. Only explicit Connect lets the
@@ -128,7 +150,9 @@ real command failure closes the shared session and requires manual recovery.
 
 Milestone 6 uses one Python communication thread with `queue.PriorityQueue`.
 Milestone 9 protocol state machines and single-shot timers remain in the Qt main
-thread and submit only bounded backend operations; they do not add engine threads. The Qt GUI stays on the main thread;
+thread and submit only bounded backend operations; they do not add engine threads.
+Milestone 10 plot buffers, coalescing timers and canvases also stay in the Qt main
+thread and add no worker. The Qt GUI stays on the main thread;
 typed Qt signals deliver immutable snapshots back to its slots. Signal delivery
 must be queued across threads. Do not call a widget from any worker or wait for
 I/O in a GUI callback.
@@ -156,7 +180,8 @@ Milestone 6 adds request IDs, FIFO sequence metadata, command futures, explicit
 priorities and cancellation keys; Milestone 7 uses them for manual controls,
 Milestone 8 uses `BACKGROUND` priority with independent cancellation keys for
 logging, and Milestone 9 uses normal atomic state transitions, safety-priority
-Output Off and background sampling. Session generations are recorded in each CSV row.
+Output Off and background sampling. Milestone 10 consumes their returned samples
+without queue submission. Session generations are recorded in each CSV row.
 Run generations and cross-channel telemetry fairness remain engine-level
 work for later milestones. No direct-serial GUI callbacks are acceptable.
 
@@ -242,7 +267,7 @@ protocol fault should stop only its own output if the transport is still healthy
 
 ## Protocols, safety, data and plotting
 
-Constant Current is implemented first. Later milestones add time plots, CV,
+Constant Current and bounded time plots are implemented. Later milestones add CV,
 staircase voltage sweep, current sweep, polarisation and custom sequence. Use explicit V, A, s, cm2
 and A/cm2 fields internally. Convert `I = j * area` at the boundary, reject
 non-finite values, and validate every step before arming. Scheduling and final
@@ -280,11 +305,10 @@ affected logger and never command an output or change any instrument setting.
 The logger records an error row only when the file remains writable and never
 invents a successful error row.
 
-Retain full data on disk. Plotting receives bounded snapshots through signals,
-with at most 5,000-20,000 retained display points per channel. Pause-plot affects
-only display refresh. Engines and loggers continue. Do not enqueue one unbounded
-Qt signal per acquisition if the GUI cannot keep up; report overload and use
-bounded/coalesced display snapshots. Polarisation summary writes occur at each
+Retain full data on disk. Implemented plotting receives existing sample signals
+and retains at most 2,000 downsampled display points per channel. Display reset
+does not pause or alter engines, loggers or CSV output. Snapshot/repaint delivery
+is coalesced at 10 Hz. Polarisation summary writes occur at each
 completed step and use only the measured final averaging window.
 
 ## Milestone boundaries and acceptance
@@ -302,7 +326,9 @@ guarded Real Hardware follow-up is fake-serial tested, and supervised resistor-l
 functional acceptance later passed on both channels. Electrolyser and unattended
 use remain unapproved pending transient assessment and later safety milestones.
 Milestone 7 real-hardware GUI acceptance and Milestone 8 read-only hardware
-logging acceptance are complete. Later protocol types remain out of scope.
+logging acceptance are complete. Milestone 10 adds Simulation Mode validated
+live plots without extra polling or another worker. Later protocol types remain
+out of scope.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Logging tests cover unwritable files, interruption and bounded in-flight work.

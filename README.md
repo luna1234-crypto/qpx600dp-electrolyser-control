@@ -2,13 +2,13 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.9.0 preserves those historical records, the Milestone 5
+assumption. Version 0.10.0 preserves those historical records, the Milestone 5
 QPX600DP serial backend and completed two-channel standard-load Windows
 validation, the Milestone 6 shared
 asynchronous command queue, Milestone 7 dual-channel manual controls with a
 guarded explicit-port hardware connection, Milestone 8 independent CSV logging,
-and Milestone 9 independent Constant Current protocols with an offline-tested,
-guarded Real Hardware follow-up.
+Milestone 9 independent Constant Current protocols with an offline-tested,
+guarded Real Hardware follow-up, and Milestone 10 bounded real-time plots.
 
 Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
@@ -213,9 +213,34 @@ readback. Supervised resistor-load acceptance passed on both channels, including
 Pause/Resume, completion, CSV continuity and final OFF confirmation. The supplied
 CSVs contain a brief 0.189-0.201 A first loaded sample after startup/resume before
 stable readings; electrolyser and unattended use remain unapproved pending its
-assessment and later safety milestones. Milestone 10 plotting and later
+assessment and later safety milestones. Milestone 10 adds downstream live plots;
 sweep/polarization protocols are not implemented. See
 [Milestone 9 verification](docs/verification/milestone9.md).
+
+## Milestone 10 responsive real-time plotting
+
+CH1 and CH2 each have an independent live plot of measured voltage and current
+against monotonic elapsed time. Plots consume the existing Milestone 8 logger and
+Milestone 9 protocol sample signals; they never poll, submit queue work or access
+an instrument backend. Both channels can update simultaneously while the shared
+worker continues to serialize the original measurement operations.
+
+Voltage uses the left axis in volts, current uses the right axis in amperes, and
+the x-axis is elapsed seconds. Legends, channel identity, latest values,
+connection state and retained/displayed sample counts are shown. Pause/Resume,
+Stop and completion follow the samples already emitted by the protocol. A
+disconnect retains visible history, and samples after an explicit reconnect form
+a separate line segment. **Clear plot** resets display history only; it does not
+change CSV files, logging, protocols or outputs.
+
+Each display retains at most 2,000 representative points. When that bound is
+reached, older display points are progressively decimated while the first and
+latest samples remain visible. The complete CSV remains unchanged and continues
+to be flushed by the existing logger. Repaint notifications are coalesced to at
+most ten per second. Plot parsing or rendering failure is isolated to the plot
+status and cannot stop recording or control an output. Sweeps and later protocols
+remain unimplemented. See
+[Milestone 10 verification](docs/verification/milestone10.md).
 
 ## Milestone 5 offline physical backend
 
@@ -340,7 +365,8 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Dual-channel manual controls | Simulation and real-hardware standard-load acceptance passed independently on CH1 and CH2; stronger real Output-On confirmation verified |
 | Independent continuous CSV data logging | Implemented for both channels through the shared queue; Simulation and read-only hardware acceptance passed |
 | Independent Constant Current protocols | Simulation/fake-serial validated; supervised CH1/CH2 resistor-load acceptance passed, electrolyser and unattended use unapproved |
-| Live plots and later sweep/polarization protocols | Not implemented |
+| Independent live voltage/current plots | Implemented for both channels with bounded display memory and unchanged full CSV data |
+| Later sweep/polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
 
@@ -359,6 +385,7 @@ control potential against a reference electrode.
 - [Guarded real-hardware follow-up verification](docs/verification/milestone7_real_hardware.md)
 - [Milestone 8 CSV logging verification](docs/verification/milestone8.md)
 - [Milestone 9 Constant Current verification](docs/verification/milestone9.md)
+- [Milestone 10 real-time plotting verification](docs/verification/milestone10.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 
@@ -367,5 +394,5 @@ The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption; the model-correction and Milestones 5-9 commits record the
+CPX400DP assumption; the model-correction and Milestones 5-10 commits record the
 current QPX600DP basis.

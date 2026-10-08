@@ -7,12 +7,14 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QDoubleSpinBox,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -30,6 +32,7 @@ from qpx_electrolyser.engine.constant_current import (
 from qpx_electrolyser.gui.channel_panel import ChannelPanel
 from qpx_electrolyser.gui.connection_panel import ConnectionPanel
 from qpx_electrolyser.gui.constant_current_panel import ConstantCurrentPanel
+from qpx_electrolyser.gui.plots.realtime import ChannelPlotController, ChannelPlotPanel
 
 
 class MainWindow(QMainWindow):
@@ -44,8 +47,8 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self._connection_controller = connection_controller
-        self.setWindowTitle("QPX600DP Electrolyser - Constant Current protocols")
-        self.resize(1180, 940)
+        self.setWindowTitle("QPX600DP Electrolyser - Live plots")
+        self.resize(1280, 960)
         self.setMinimumSize(760, 540)
 
         root = QWidget()
@@ -96,14 +99,18 @@ class MainWindow(QMainWindow):
         self.channel_controllers: dict[int, ManualChannelController] = {}
         self.logging_controllers: dict[int, ChannelLoggingController] = {}
         self.protocol_controllers: dict[int, ConstantCurrentController] = {}
+        self.plot_controllers: dict[int, ChannelPlotController] = {}
         self.channel_panels: dict[int, ChannelPanel] = {}
         self.protocol_panels: dict[int, ConstantCurrentPanel] = {}
+        self.plot_panels: dict[int, ChannelPlotPanel] = {}
         for channel in (1, 2):
             controller = ManualChannelController(channel, connection_controller, self)
             logging_controller = ChannelLoggingController(channel, connection_controller, self)
             protocol_controller = ConstantCurrentController(channel, connection_controller, self)
+            plot_controller = ChannelPlotController(channel, connection_controller, self)
             panel = ChannelPanel(channel)
             protocol_panel = ConstantCurrentPanel(channel)
+            plot_panel = ChannelPlotPanel(channel)
             panel.refresh_requested.connect(controller.request_refresh)
             panel.voltage_requested.connect(controller.request_set_voltage)
             panel.current_requested.connect(controller.request_set_current)
@@ -123,12 +130,16 @@ class MainWindow(QMainWindow):
                 protocol_controller.logging_snapshot_changed
             )
             logging_controller.sample_received.connect(controller.accept_logging_readback)
+            logging_controller.sample_received.connect(plot_controller.accept_sample)
             protocol_controller.snapshot_changed.connect(protocol_panel.apply_snapshot)
             protocol_controller.snapshot_changed.connect(
                 lambda snapshot, selected_channel=channel:
                 self._apply_protocol_snapshot(selected_channel, snapshot)
             )
             protocol_controller.sample_received.connect(controller.accept_logging_readback)
+            protocol_controller.sample_received.connect(plot_controller.accept_sample)
+            plot_controller.snapshot_changed.connect(plot_panel.apply_snapshot)
+            plot_panel.clear_requested.connect(plot_controller.reset)
             panel.start_logging_requested.connect(
                 lambda selected_channel=channel: self._start_logging(selected_channel)
             )
@@ -145,11 +156,14 @@ class MainWindow(QMainWindow):
             )
             protocol_panel.stop_requested.connect(protocol_controller.stop)
             panel.apply_snapshot(controller.snapshot)
+            plot_panel.apply_snapshot(plot_controller.snapshot)
             self.channel_controllers[channel] = controller
             self.logging_controllers[channel] = logging_controller
             self.protocol_controllers[channel] = protocol_controller
+            self.plot_controllers[channel] = plot_controller
             self.channel_panels[channel] = panel
             self.protocol_panels[channel] = protocol_panel
+            self.plot_panels[channel] = plot_panel
             panels.addWidget(panel, 1)
         layout.addLayout(panels)
 
@@ -159,6 +173,12 @@ class MainWindow(QMainWindow):
             protocol_panels.addWidget(self.protocol_panels[channel], 1)
             self._update_protocol_context(channel)
         layout.addLayout(protocol_panels)
+
+        plot_panels = QHBoxLayout()
+        plot_panels.setSpacing(18)
+        for channel in (1, 2):
+            plot_panels.addWidget(self.plot_panels[channel], 1)
+        layout.addLayout(plot_panels)
 
         self._disconnect_pending = False
         self._close_pending = False
@@ -171,7 +191,12 @@ class MainWindow(QMainWindow):
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)
-        self.setCentralWidget(root)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(root)
+        self.content_scroll = scroll
+        self.setCentralWidget(scroll)
         self.statusBar().showMessage("Disconnected | Simulation available | Diagnostic logging active")
         self.statusBar().setToolTip(str(log_file))
 
@@ -195,12 +220,13 @@ class MainWindow(QMainWindow):
             self,
             "About QPX600DP Electrolyser",
             f"QPX600DP Electrolyser {__version__}\n\n"
-            "Milestone 9 independent Constant Current protocol build.\n\n"
+            "Milestone 10 responsive real-time plotting build.\n\n"
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
             "Simulation is the default. Real Hardware uses only a manually entered COM port. "
             "Independent CSV logging and guarded Constant Current protocols are available. "
             "Real Hardware protocols require explicit confirmation and remain acceptance-"
-            "pending. Plotting, sweeps and emergency-all-off remain future work.",
+            "pending. Live voltage/current plotting uses existing queued samples; sweeps and "
+            "emergency-all-off remain future work.",
         )
 
     def _choose_logging_directory(self) -> None:

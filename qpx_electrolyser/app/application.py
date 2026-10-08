@@ -154,16 +154,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                         fail_smoke_test("Simulation Mode smoke test did not log both channels.")
                     QTimer.singleShot(25, verify_logging_smoke_test)
                     return
+                plot_snapshots = [item.snapshot for item in window.plot_controllers.values()]
+                if any(item.total_samples < 1 for item in plot_snapshots):
+                    fail_smoke_test("Simulation Mode smoke test did not plot both channels.")
+                if any(item.latest_voltage_v is None or item.latest_current_a is None
+                       for item in plot_snapshots):
+                    fail_smoke_test("Simulation Mode smoke-test plots lack latest values.")
                 for logger_controller in window.logging_controllers.values():
                     logger_controller.stop("Smoke-test logging complete")
                 if args.screenshot is not None:
+                    window.content_scroll.verticalScrollBar().setValue(
+                        window.content_scroll.verticalScrollBar().maximum()
+                    )
+                    app.processEvents()
                     args.screenshot.parent.mkdir(parents=True, exist_ok=True)
                     if not window.grab().save(str(args.screenshot), "PNG"):
                         raise OSError("Could not write the requested window screenshot.")
                 logger.info(
                     "Smoke test: window visible=%s; Qt event loop processed events; "
                     "simulator connected, both Constant Current protocols completed and "
-                    "shared their independently active channel CSV logs",
+                    "shared their independently active channel CSV logs while updating "
+                    "bounded live plots",
                     window.isVisible(),
                 )
                 connection_controller.request_disconnect()

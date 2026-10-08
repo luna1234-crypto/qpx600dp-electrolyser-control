@@ -254,7 +254,7 @@ not replayed as a burst, and overlapping channel polls are prevented.
 Disconnect, reconnect, shutdown, missing directory, permission/disk/write error,
 malformed results and backend/queue failures are covered. A file failure stops
 only its channel. Reconnect requires a new explicit Start and new file. Protocols
-and live plotting remain deferred. The complete suite and Simulation Mode smoke
+and live plotting were deferred at the Milestone 8 checkpoint. The complete suite and Simulation Mode smoke
 test passed without residual worker threads or QThread warnings. See
 [verification details](verification/milestone8.md).
 
@@ -302,7 +302,8 @@ Real Hardware follow-up adds default-cancel Start/Resume authorization, stale an
 duplicate request rejection, authoritative OFF cleanup, channel isolation and
 single-writer CSV ownership. The implementation was first validated with injected
 fake serial only, followed by the supervised resistor-load acceptance below.
-Milestone 10 plotting, CV, sweeps and polarization remain out of scope. See
+At the Milestone 9 checkpoint, plotting, CV, sweeps and polarization remained
+out of scope. See
 [verification details](verification/milestone9.md).
 
 The later supervised CH1/CH2 resistor-load acceptance passed. At 2.000 V
@@ -312,3 +313,24 @@ normal completion, continued CSV ownership and final Output Off all passed. A
 brief 0.189-0.201 A first loaded sample was observed after startup/resume.
 Electrolyser validation and unattended operation remain unapproved pending
 assessment of that transient and later safety milestones.
+
+## Milestone 10 - Responsive real-time plotting
+
+Added independent CH1 and CH2 voltage/current plots driven only by the existing
+Milestone 8 logger and Milestone 9 protocol sample signals. Plotting performs no
+instrument polling, owns no backend and submits no queue commands. Manual logging
+and Constant Current can update either plot independently or both simultaneously.
+
+Each channel displays elapsed seconds, voltage in volts, current in amperes,
+legends, channel identity, latest values, connection state and retained/received
+sample counts. Pause, Resume, Stop and completion follow authoritative protocol
+samples. Disconnect retains history; reconnect starts a separate line segment.
+Clear affects only the selected display and never CSV data, logging, protocols or
+outputs.
+
+Display storage is bounded at 2,000 points per channel. Progressive decimation
+retains representative history plus the first and latest points while the full
+CSV remains unchanged. Repaint snapshots are coalesced at 10 Hz, no additional
+thread is created, and plot update/rendering failure is isolated from recording
+and output control. Voltage/current sweeps and later protocols remain deferred.
+See [verification details](verification/milestone10.md).

@@ -31,6 +31,7 @@ QPX 600 DP/
         gui/
             plots/
                 __init__.py
+                realtime.py
             test_setup/
                 __init__.py
             __init__.py
@@ -77,6 +78,7 @@ QPX 600 DP/
             milestone7_real_hardware.md
             milestone8.md
             milestone9.md
+            milestone10.md
             model_correction_qpx600dp.md
         architecture.md
         qpx600dp_commands.md
@@ -104,6 +106,7 @@ QPX 600 DP/
         test_model_identity.py
         test_qpx600dp_driver.py
         test_real_hardware_gui.py
+        test_realtime_plot.py
         test_serial_transport.py
         test_simulator.py
     .gitattributes
