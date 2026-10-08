@@ -6,8 +6,9 @@ code implements the entrypoints, dual-channel manual-control GUI, diagnostic log
 `SimulatedPowerSupply`, the milestone 4 asynchronous simulation lifecycle,
 the Milestone 5 `SerialTransport` / `QPX600DPDriver`, the Milestone 6 shared
 priority command worker, Milestone 7 per-channel controllers, Milestone 8
-independent CSV loggers, Milestone 9 Constant Current state machines and Milestone
-10 bounded live-plot models. The guarded follow-up connects the physical backend
+independent CSV loggers, Milestone 9 Constant Current state machines, Milestone
+10 bounded live-plot models and Milestone 11 Simulation Mode Constant Voltage
+state machines. The guarded follow-up connects the physical backend
 through that same worker only after an explicit mode, port and Connect action.
 See [simulator behaviour](simulator.md).
 The remaining design follows the [QPX600DP command reference](qpx600dp_commands.md).
@@ -26,11 +27,15 @@ flowchart TD
     L2 --> IC
     GUI --> E1["ConstantCurrentController 1"]
     GUI --> E2["ConstantCurrentController 2"]
+    GUI --> V1["ConstantVoltageController 1"]
+    GUI --> V2["ConstantVoltageController 2"]
     GUI --> P1["ChannelPlotController 1"]
     GUI --> P2["ChannelPlotController 2"]
     GUI --> IC["InstrumentController"]
     E1 --> IC
     E2 --> IC
+    V1 --> IC
+    V2 --> IC
     L1 -. existing sample signal .-> P1
     E1 -. existing sample signal .-> P1
     L2 -. existing sample signal .-> P2
@@ -72,6 +77,7 @@ independent of the selected transport.
 | SafetyValidator | Validate full protocol against software and documented hardware capability before Start | No silent clamping or device writes |
 | ChannelLoggingController / CsvLogFile, one per channel | Monotonic scheduling through the shared queue; exclusive creation, CSV rows, flush/close and file errors | No direct backend, plot buffer or software diagnostic logging |
 | ChannelPlotController / ChannelPlotPanel, one per channel | Consume existing measurement signals, retain bounded/downsampled display points, coalesce repaints and render voltage/current | No queue submission, backend access, CSV ownership or output control |
+| ConstantVoltageController / panel, one per channel | Specialize the Milestone 9 state machine for Simulation Mode target voltage/current limit operation | No direct backend, extra polling, duplicate CSV writer or Real Hardware enablement |
 
 Milestone 7 instantiates two `ManualChannelController` objects in the Qt thread.
 They share the same `ConnectionController` and therefore the same worker/backend.
@@ -127,6 +133,14 @@ CSV rows are unaffected because plotting is a downstream consumer. Clear resets
 only the selected display model. Malformed samples or paint failures update plot
 status and never call logging, protocol, queue or output-control APIs.
 
+Milestone 11 reuses the same state-machine implementation for Constant Voltage.
+Its public inputs map target voltage and current limit to the shared validated
+setting/preflight operations, while its CSV identity is `constant_voltage` and
+its queue/cancellation keys are distinct. Only one protocol may own a channel;
+the other channel remains independent. CV samples feed the same logger sink and
+plot signal as Constant Current, so no second writer or measurement poll exists.
+The CV panel is unavailable outside Simulation Mode.
+
 The connection controller defaults to Simulation Mode. Real Hardware selection
 requires a warning acknowledgement and a manually typed `COM<N>` name; neither
 action constructs a backend or opens a port. Only explicit Connect lets the
@@ -149,7 +163,7 @@ real command failure closes the shared session and requires manual recovery.
 ## Threads and scheduling
 
 Milestone 6 uses one Python communication thread with `queue.PriorityQueue`.
-Milestone 9 protocol state machines and single-shot timers remain in the Qt main
+Milestone 9/11 protocol state machines and single-shot timers remain in the Qt main
 thread and submit only bounded backend operations; they do not add engine threads.
 Milestone 10 plot buffers, coalescing timers and canvases also stay in the Qt main
 thread and add no worker. The Qt GUI stays on the main thread;
@@ -179,7 +193,7 @@ All connection and command work runs off the GUI thread through the same worker.
 Milestone 6 adds request IDs, FIFO sequence metadata, command futures, explicit
 priorities and cancellation keys; Milestone 7 uses them for manual controls,
 Milestone 8 uses `BACKGROUND` priority with independent cancellation keys for
-logging, and Milestone 9 uses normal atomic state transitions, safety-priority
+logging, and Milestones 9/11 use normal atomic state transitions, safety-priority
 Output Off and background sampling. Milestone 10 consumes their returned samples
 without queue submission. Session generations are recorded in each CSV row.
 Run generations and cross-channel telemetry fairness remain engine-level
@@ -267,8 +281,8 @@ protocol fault should stop only its own output if the transport is still healthy
 
 ## Protocols, safety, data and plotting
 
-Constant Current and bounded time plots are implemented. Later milestones add CV,
-staircase voltage sweep, current sweep, polarisation and custom sequence. Use explicit V, A, s, cm2
+Constant Current, Constant Voltage and bounded time plots are implemented. Later
+milestones add staircase voltage sweep, current sweep, polarisation and custom sequence. Use explicit V, A, s, cm2
 and A/cm2 fields internally. Convert `I = j * area` at the boundary, reject
 non-finite values, and validate every step before arming. Scheduling and final
 polarisation-window averaging must be testable with a fake monotonic clock.
@@ -320,14 +334,15 @@ offline-tested physical driver and explicit-port transport but deliberately does
 not connect them to the GUI. Milestone 6 integrates a shared priority command
 queue into the existing single-owner boundary without adding a second backend
 owner. Milestone 7 adds manual control and a guarded explicit-port follow-up;
-Milestone 8 adds queue-fed CSV logging and Milestone 9 adds Constant Current
+Milestone 8 adds queue-fed CSV logging, Milestone 9 adds Constant Current,
+Milestone 10 adds bounded plotting and Milestone 11 adds Simulation Mode Constant Voltage
 protocols without port discovery, plotting or global emergency control. Its
 guarded Real Hardware follow-up is fake-serial tested, and supervised resistor-load
 functional acceptance later passed on both channels. Electrolyser and unattended
 use remain unapproved pending transient assessment and later safety milestones.
 Milestone 7 real-hardware GUI acceptance and Milestone 8 read-only hardware
-logging acceptance are complete. Milestone 10 adds Simulation Mode validated
-live plots without extra polling or another worker. Later protocol types remain
+logging acceptance are complete. Milestones 10/11 add Simulation Mode validated
+live plots and Constant Voltage without extra polling or another worker. Later protocol types remain
 out of scope.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.

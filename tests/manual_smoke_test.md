@@ -1,4 +1,4 @@
-# Windows visual smoke test (milestone 10)
+# Windows visual smoke test (milestone 11)
 
 This procedure checks the simulation connection GUI. Do not connect a power supply.
 
@@ -41,35 +41,46 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
     and confirm both counters increase while the window remains responsive. Stop
     CH1 logging and confirm CH2 continues. Open both CSV files and confirm one
     header plus incrementally written rows for the correct channel.
-15. Scroll to the CH1 and CH2 live plots. While both loggers run, confirm both
+15. In CH1 Constant Voltage, enter 2 V, 0.1 A, 1.0 s and 0.1 s. Start and
+    confirm STARTING, RUNNING, STOPPING and COMPLETED, live plot updates,
+    `constant_voltage` CSV rows and final OUTPUT OFF.
+16. Repeat on CH2, then run both Constant Voltage protocols simultaneously.
+    Confirm channel independence, responsive plots and separate/safely shared
+    channel CSV ownership. Confirm Constant Current Start is disabled only on a
+    channel currently owned by Constant Voltage.
+17. Run CH1 Constant Voltage for 2 s; Pause after a sample and confirm PAUSED and
+    OUTPUT OFF with frozen active time. Resume, then Stop early and confirm
+    authoritative OUTPUT OFF. Keep a manually started CH1 logger active throughout
+    and confirm it remains active with one writer and one file after protocol Stop.
+18. Scroll to the CH1 and CH2 live plots. While both loggers run, confirm both
     plots update independently, the legends distinguish Voltage (V) and Current
     (A), elapsed seconds increase, and latest values match the channel panels.
-16. Run a protocol without standalone logging, Pause and wait. Confirm its plot
+19. Run a protocol without standalone logging, Pause and wait. Confirm its plot
     receives the authoritative Output-Off sample and then stops changing while
     paused. Resume and confirm the same trace continues; Stop and normal
     completion must leave the GUI responsive.
-17. Run both channel protocols together and confirm both plots update. Clear CH1
+20. Run both channel protocols together and confirm both plots update. Clear CH1
     while CH2 continues; confirm only CH1 display history resets and both CSVs
     remain readable and continue receiving rows.
-18. Disconnect while CH2 logs. Confirm CH2 logging stops, its file closes, both
+21. Disconnect while CH2 logs. Confirm CH2 logging stops, its file closes, both
     plots retain their history and show disconnected, and
     reconnect does not resume it. Start again and confirm a new file is created.
     Confirm new plot samples form a separate segment after reconnect.
-19. Disconnect and confirm both channel panels and protocol Start controls become
+22. Disconnect and confirm both channel panels and protocol Start controls become
     disabled with output state
     `UNKNOWN`. Resize the window and open Help > About. Text should remain readable
     and the application should respond immediately.
-20. Close with File > Exit while a simulated protocol is active; confirm Output
+23. Close with File > Exit while a simulated protocol is active; confirm Output
     Off cleanup occurs, its CSV remains readable and no worker/thread warning
     appears. Launch again and use the window's close button to exit.
-21. Close with File > Exit while a simulated logger is active; confirm the CSV
+24. Close with File > Exit while a simulated logger is active; confirm the CSV
     remains readable and no worker/thread warning appears. Launch again and use
     the window's close button to exit.
-22. Verify `logs/application_YYYYMMDD.log` contains startup, connection,
+25. Verify `logs/application_YYYYMMDD.log` contains startup, connection,
    disconnection, worker cleanup and shutdown records
    from both runs. The first run's records must remain.
 
 Record the Windows edition, Python/PySide6 versions, date and observed result.
 The historical Milestone 4 visual check used the earlier CPX model identity.
-This Milestone 10 procedure is Simulation Mode only: do not select Real Hardware,
+This Milestone 11 procedure is Simulation Mode only: do not select Real Hardware,
 enter a port, invoke the hardware checker or connect the GUI to a physical supply.

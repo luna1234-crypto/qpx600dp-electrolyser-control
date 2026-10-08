@@ -37,9 +37,11 @@ class ConstantCurrentPanel(QGroupBox):
         self.interval_input.setText("1")
 
         inputs = QGridLayout()
-        inputs.addWidget(QLabel("Target current (A):"), 0, 0)
+        self.current_label = QLabel("Target current (A):")
+        self.voltage_label = QLabel("Voltage compliance (V):")
+        inputs.addWidget(self.current_label, 0, 0)
         inputs.addWidget(self.current_input, 0, 1)
-        inputs.addWidget(QLabel("Voltage compliance (V):"), 1, 0)
+        inputs.addWidget(self.voltage_label, 1, 0)
         inputs.addWidget(self.voltage_input, 1, 1)
         inputs.addWidget(QLabel("Duration (s):"), 2, 0)
         inputs.addWidget(self.duration_input, 2, 1)

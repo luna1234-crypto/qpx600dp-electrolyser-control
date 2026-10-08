@@ -1,1 +1,1 @@
-"""Reserved for bounded pyqtgraph displays from milestone 10."""
+"""Bounded real-time plot components introduced in Milestone 10."""

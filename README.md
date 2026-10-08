@@ -2,13 +2,14 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.10.0 preserves those historical records, the Milestone 5
+assumption. Version 0.11.0 preserves those historical records, the Milestone 5
 QPX600DP serial backend and completed two-channel standard-load Windows
 validation, the Milestone 6 shared
 asynchronous command queue, Milestone 7 dual-channel manual controls with a
 guarded explicit-port hardware connection, Milestone 8 independent CSV logging,
 Milestone 9 independent Constant Current protocols with an offline-tested,
-guarded Real Hardware follow-up, and Milestone 10 bounded real-time plots.
+guarded Real Hardware follow-up, Milestone 10 bounded real-time plots, and
+Milestone 11 independent Simulation Mode Constant Voltage protocols.
 
 Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
@@ -242,6 +243,30 @@ status and cannot stop recording or control an output. Sweeps and later protocol
 remain unimplemented. See
 [Milestone 10 verification](docs/verification/milestone10.md).
 
+## Milestone 11 independent Constant Voltage protocols
+
+CH1 and CH2 each provide a Constant Voltage panel with target voltage, current
+limit, active duration, sample interval, Start, Pause, Resume and Stop. The
+protocol uses the Milestone 9 state machine and safety cleanup: Start confirms
+OFF, sets voltage and current limit, verifies both read-backs, performs one
+Output-On attempt and confirms ON. Pause, Stop, normal completion, failure,
+coordinated disconnect and application shutdown use safety-priority Output Off
+and authoritative read-back.
+
+Constant Voltage is Simulation Mode only in Milestone 11. Both channels may run
+independently or simultaneously through the one shared command queue. Constant
+Current and Constant Voltage cannot own the same channel at the same time. An
+already-active Milestone 8 logger is reused as the single CSV writer, with
+`constant_voltage` in `protocol_name`; otherwise the protocol creates and closes
+one channel CSV. The same emitted readbacks feed the Milestone 10 plots, with no
+extra polling or duplicate writer. See
+[Milestone 11 verification](docs/verification/milestone11.md).
+
+Windows Simulation Mode manual acceptance confirmed independent and simultaneous
+CH1/CH2 operation, automatic per-run CSV creation when no logger was active,
+reuse of one active same-channel CSV through Pause/Resume, and a new CSV for a
+new protocol run. Real Hardware Constant Voltage remains out of scope.
+
 ## Milestone 5 offline physical backend
 
 `SerialTransport` opens only an explicitly supplied port. It never enumerates
@@ -366,6 +391,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent continuous CSV data logging | Implemented for both channels through the shared queue; Simulation and read-only hardware acceptance passed |
 | Independent Constant Current protocols | Simulation/fake-serial validated; supervised CH1/CH2 resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Independent live voltage/current plots | Implemented for both channels with bounded display memory and unchanged full CSV data |
+| Independent Constant Voltage protocols | Implemented and validated in Simulation Mode only for both channels |
 | Later sweep/polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
@@ -386,6 +412,7 @@ control potential against a reference electrode.
 - [Milestone 8 CSV logging verification](docs/verification/milestone8.md)
 - [Milestone 9 Constant Current verification](docs/verification/milestone9.md)
 - [Milestone 10 real-time plotting verification](docs/verification/milestone10.md)
+- [Milestone 11 Constant Voltage verification](docs/verification/milestone11.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 
@@ -394,5 +421,5 @@ The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption; the model-correction and Milestones 5-10 commits record the
+CPX400DP assumption; the model-correction and Milestones 5-11 work record the
 current QPX600DP basis.

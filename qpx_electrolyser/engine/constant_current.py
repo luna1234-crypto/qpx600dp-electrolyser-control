@@ -150,6 +150,11 @@ class ConstantCurrentController(QObject):
         monotonic=time.monotonic,
         utc_now=lambda: datetime.now(timezone.utc),
         writer_factory=CsvLogFile,
+        protocol_name: str = "constant_current",
+        display_name: str = "Constant Current",
+        command_slug: str = "constant-current",
+        current_label: str = "Target current",
+        voltage_label: str = "Voltage compliance",
     ) -> None:
         super().__init__(parent)
         QPX600DP_CAPABILITIES.validate_channel(channel)
@@ -160,14 +165,22 @@ class ConstantCurrentController(QObject):
         self._monotonic = monotonic
         self._utc_now = utc_now
         self._writer_factory = writer_factory
-        self._snapshot = ProtocolSnapshot(channel=channel)
+        self._protocol_name = protocol_name
+        self._display_name = display_name
+        self._command_slug = command_slug
+        self._current_label = current_label
+        self._voltage_label = voltage_label
+        self._snapshot = ProtocolSnapshot(
+            channel=channel,
+            message=f"{display_name} protocol idle",
+        )
         self._writer: CsvWriter | None = None
         self._logging_sink: ProtocolLogSink | None = None
         self._session_id = 0
         self._pending_request_id: int | None = None
         self._pending_action = ""
-        self._action_key = f"constant-current-action-{channel}"
-        self._sample_key = f"constant-current-sample-{channel}"
+        self._action_key = f"{command_slug}-action-{channel}"
+        self._sample_key = f"{command_slug}-sample-{channel}"
         self._run_started_at = 0.0
         self._active_before_run_s = 0.0
         self._next_sample_slot = 0
@@ -200,6 +213,22 @@ class ConstantCurrentController(QObject):
         voltage_range_name: str | None,
     ) -> str | None:
         """Return a user-facing validation error without queue or file side effects."""
+        return self._validate_controller_inputs(
+            target_current,
+            voltage_compliance,
+            duration,
+            interval,
+            voltage_range_name,
+        )
+
+    def _validate_controller_inputs(
+        self,
+        target_current: str,
+        voltage_compliance: str,
+        duration: str,
+        interval: str,
+        voltage_range_name: str | None,
+    ) -> str | None:
         if self._connection.snapshot.state is not ConnectionState.CONNECTED:
             return "Connect and initialize the selected instrument before starting."
         if voltage_range_name is None:
@@ -237,7 +266,7 @@ class ConstantCurrentController(QObject):
     ) -> bool:
         if self._snapshot.owns_channel:
             return False
-        validation_error = self.validate_inputs(
+        validation_error = self._validate_controller_inputs(
             target_current,
             voltage_compliance,
             duration,
@@ -282,7 +311,9 @@ class ConstantCurrentController(QObject):
             config=config,
             remaining_active_s=config.duration_s,
             file_path=file_path,
-            message="Checking OFF state and applying constant-current settings...",
+            message=(
+                f"Checking OFF state and applying {self._display_name.lower()} settings..."
+            ),
         ))
         return self._submit_action(
             "start-prepare", lambda supply: self._start_prepare_operation(supply, config)
@@ -358,8 +389,8 @@ class ConstantCurrentController(QObject):
         interval: str,
         voltage_range_name: str,
     ) -> ConstantCurrentConfig:
-        current = self._number(target_current, "Target current")
-        voltage = self._number(voltage_compliance, "Voltage compliance")
+        current = self._number(target_current, self._current_label)
+        voltage = self._number(voltage_compliance, self._voltage_label)
         duration_s = self._number(duration, "Duration")
         interval_s = self._number(interval, "Measurement interval")
         current = QPX600DP_CAPABILITIES.validate_current(current)
@@ -370,10 +401,12 @@ class ConstantCurrentController(QObject):
             else self._real_hardware_limits
         )
         if current > limits.max_current_a:
-            raise ValueError(f"Target current exceeds the {limits.max_current_a:g} A project limit.")
+            raise ValueError(
+                f"{self._current_label} exceeds the {limits.max_current_a:g} A project limit."
+            )
         if voltage > limits.max_voltage_v:
             raise ValueError(
-                f"Voltage compliance exceeds the {limits.max_voltage_v:g} V project limit."
+                f"{self._voltage_label} exceeds the {limits.max_voltage_v:g} V project limit."
             )
         if voltage * current > limits.max_power_w:
             raise ValueError(f"Requested V*I exceeds the {limits.max_power_w:g} W project limit.")
@@ -472,13 +505,13 @@ class ConstantCurrentController(QObject):
             config.voltage_range_name
         ).programming_resolution_v
         if not _matches(voltage, config.voltage_compliance_v, voltage_resolution):
-            raise SettingsMismatchError("Voltage compliance read-back mismatch.")
+            raise SettingsMismatchError(f"{self._voltage_label} read-back mismatch.")
         if not _matches(
             current,
             config.target_current_a,
             QPX600DP_CAPABILITIES.current_programming_resolution_a,
         ):
-            raise SettingsMismatchError("Current target read-back mismatch.")
+            raise SettingsMismatchError(f"{self._current_label} read-back mismatch.")
 
     def _output_off_operation(self, supply: PowerSupplyInterface) -> ChannelReadback:
         supply.output_off(self._channel)
@@ -506,7 +539,7 @@ class ConstantCurrentController(QObject):
         priority: CommandPriority = CommandPriority.NORMAL,
     ) -> bool:
         ticket = self._connection.submit_command(
-            f"ch{self._channel}-constant-current-{action}",
+            f"ch{self._channel}-{self._command_slug}-{action}",
             operation,
             priority=priority,
             cancellation_key=self._action_key,
@@ -538,7 +571,7 @@ class ConstantCurrentController(QObject):
             ))
             self._next_sample_slot = current_slot
         ticket = self._connection.submit_command(
-            f"ch{self._channel}-constant-current-sample",
+            f"ch{self._channel}-{self._command_slug}-sample",
             self._sample_operation,
             priority=CommandPriority.BACKGROUND,
             cancellation_key=self._sample_key,
@@ -601,7 +634,7 @@ class ConstantCurrentController(QObject):
                 self._snapshot,
                 state=ProtocolState.RUNNING,
                 output_enabled=True,
-                message="Constant Current protocol running",
+                message=f"{self._display_name} protocol running",
                 error=False,
                 operator_warning=False,
             ))
@@ -828,6 +861,7 @@ class ConstantCurrentController(QObject):
                 status=status,
                 protocol_state=state.value,
                 error=error,
+                protocol_name=self._protocol_name,
             )
             return
         writer = self._writer
@@ -842,7 +876,7 @@ class ConstantCurrentController(QObject):
             session_id=self._session_id,
             status=status,
             error=error,
-            protocol_name="constant_current",
+            protocol_name=self._protocol_name,
             protocol_state=state.value,
         )
 

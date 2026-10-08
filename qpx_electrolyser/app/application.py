@@ -143,6 +143,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                         fail_smoke_test("Protocol completion stopped an active channel logger.")
                     if protocol_snapshot.file_path != logger_snapshot.file_path:
                         fail_smoke_test("Protocol did not reuse the active channel CSV file.")
+                for panel in window.voltage_protocol_panels.values():
+                    panel.target_voltage_input.setText("2")
+                    panel.current_limit_input.setText("0.1")
+                    panel.duration_input.setText("0.3")
+                    panel.interval_input.setText("0.1")
+                    panel.start_button.click()
+                QTimer.singleShot(25, verify_voltage_protocol_smoke_test)
+
+            def verify_voltage_protocol_smoke_test() -> None:
+                snapshots = [
+                    item.snapshot for item in window.voltage_protocol_controllers.values()
+                ]
+                if any(item.state is ProtocolState.FAILED for item in snapshots):
+                    fail_smoke_test("Simulation Mode Constant Voltage smoke test failed.")
+                if any(item.state is not ProtocolState.COMPLETED for item in snapshots):
+                    if time.monotonic() >= smoke_deadline:
+                        fail_smoke_test("Constant Voltage protocols did not complete in time.")
+                    QTimer.singleShot(25, verify_voltage_protocol_smoke_test)
+                    return
+                for channel in (1, 2):
+                    logger_snapshot = window.logging_controllers[channel].snapshot
+                    protocol_snapshot = window.voltage_protocol_controllers[channel].snapshot
+                    if not logger_snapshot.active:
+                        fail_smoke_test(
+                            "Constant Voltage completion stopped an active channel logger."
+                        )
+                    if protocol_snapshot.file_path != logger_snapshot.file_path:
+                        fail_smoke_test(
+                            "Constant Voltage did not reuse the active channel CSV file."
+                        )
                 QTimer.singleShot(25, verify_logging_smoke_test)
 
             def verify_logging_smoke_test() -> None:
@@ -172,7 +202,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         raise OSError("Could not write the requested window screenshot.")
                 logger.info(
                     "Smoke test: window visible=%s; Qt event loop processed events; "
-                    "simulator connected, both Constant Current protocols completed and "
+                    "simulator connected, both Constant Current and Constant Voltage "
+                    "protocols completed and "
                     "shared their independently active channel CSV logs while updating "
                     "bounded live plots",
                     window.isVisible(),

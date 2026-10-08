@@ -25,6 +25,7 @@ QPX 600 DP/
             csv_logging.py
         engine/
             constant_current.py
+            constant_voltage.py
             protocols/
                 __init__.py
             __init__.py
@@ -38,6 +39,7 @@ QPX 600 DP/
             connection_panel.py
             channel_panel.py
             constant_current_panel.py
+            constant_voltage_panel.py
             main_window.py
         instrument/
             __init__.py
@@ -79,6 +81,7 @@ QPX 600 DP/
             milestone8.md
             milestone9.md
             milestone10.md
+            milestone11.md
             model_correction_qpx600dp.md
         architecture.md
         qpx600dp_commands.md
@@ -100,6 +103,7 @@ QPX 600 DP/
         test_connection_gui.py
         test_connection_worker.py
         test_constant_current.py
+        test_constant_voltage.py
         test_csv_logging.py
         test_hardware_check.py
         test_logging_config.py

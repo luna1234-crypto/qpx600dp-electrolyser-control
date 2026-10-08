@@ -334,3 +334,31 @@ CSV remains unchanged. Repaint snapshots are coalesced at 10 Hz, no additional
 thread is created, and plot update/rendering failure is isolated from recording
 and output control. Voltage/current sweeps and later protocols remain deferred.
 See [verification details](verification/milestone10.md).
+
+## Milestone 11 - Independent Constant Voltage protocols
+
+Added independent CH1 and CH2 Constant Voltage panels with target voltage,
+current limit, duration, interval, Start, Pause, Resume and Stop. The implementation
+specializes the Milestone 9 state machine, so queue serialization, fixed
+active-time scheduling, missed-slot accounting, settings read-back, exactly-one
+Output-On attempts and safety-priority confirmed Output-Off cleanup stay on the
+same proven paths.
+
+Constant Voltage is intentionally Simulation Mode only at this milestone. Either
+channel or both can run, while one channel cannot run Constant Current and
+Constant Voltage simultaneously. A channel-local failure does not stop the other
+channel. Coordinated disconnect and application shutdown stop every active
+protocol and await selected-channel OFF confirmation before proceeding.
+
+Protocol samples use the existing Milestone 8 CSV writer and Milestone 10 plot
+signal. An operator-started logger remains the single writer and receives
+`constant_voltage` protocol rows through Pause/Resume/Stop; protocol completion
+does not stop that logger. With no active logger, the protocol owns one exclusive
+CSV and closes it deterministically. No extra measurement polling, backend path
+or thread was added. Real Hardware Constant Voltage and Milestone 12 are outside
+scope. See [verification details](verification/milestone11.md).
+
+Windows Simulation Mode manual acceptance subsequently passed for independent
+and simultaneous CH1/CH2 operation. A protocol without standalone logging
+created one channel CSV; an already-active same-channel logger was reused;
+Pause/Resume retained the same file; and a later new run created a new file.

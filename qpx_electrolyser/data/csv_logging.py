@@ -77,6 +77,7 @@ class ProtocolLogSink(Protocol):
         status: str,
         protocol_state: str,
         error: str = "",
+        protocol_name: str = "constant_current",
     ) -> None: ...
 
 
@@ -269,6 +270,7 @@ class ChannelLoggingController(QObject):
         status: str,
         protocol_state: str,
         error: str = "",
+        protocol_name: str = "constant_current",
     ) -> None:
         """Append a protocol row through this logger's one open writer.
 
@@ -290,7 +292,7 @@ class ChannelLoggingController(QObject):
                 session_id=connection.session_id,
                 status=status,
                 error=error,
-                protocol_name="constant_current",
+                protocol_name=protocol_name,
                 protocol_state=protocol_state,
             )
         except (OSError, ValueError) as append_error:
@@ -299,7 +301,7 @@ class ChannelLoggingController(QObject):
         self._publish(replace(
             self._snapshot,
             sample_count=self._snapshot.sample_count + 1,
-            message=f"Logged Constant Current {status} row",
+            message=f"Logged {protocol_name.replace('_', ' ').title()} {status} row",
             error=False,
         ))
 
