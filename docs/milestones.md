@@ -344,8 +344,8 @@ active-time scheduling, missed-slot accounting, settings read-back, exactly-one
 Output-On attempts and safety-priority confirmed Output-Off cleanup stay on the
 same proven paths.
 
-Constant Voltage is intentionally Simulation Mode only at this milestone. Either
-channel or both can run, while one channel cannot run Constant Current and
+Constant Voltage was initially implemented and accepted in Simulation Mode.
+Either channel or both can run, while one channel cannot run Constant Current and
 Constant Voltage simultaneously. A channel-local failure does not stop the other
 channel. Coordinated disconnect and application shutdown stop every active
 protocol and await selected-channel OFF confirmation before proceeding.
@@ -355,10 +355,17 @@ signal. An operator-started logger remains the single writer and receives
 `constant_voltage` protocol rows through Pause/Resume/Stop; protocol completion
 does not stop that logger. With no active logger, the protocol owns one exclusive
 CSV and closes it deterministically. No extra measurement polling, backend path
-or thread was added. Real Hardware Constant Voltage and Milestone 12 are outside
-scope. See [verification details](verification/milestone11.md).
+or thread was added. See [verification details](verification/milestone11.md).
 
 Windows Simulation Mode manual acceptance subsequently passed for independent
 and simultaneous CH1/CH2 operation. A protocol without standalone logging
 created one channel CSV; an already-active same-channel logger was reused;
 Pause/Resume retained the same file; and a later new run created a new file.
+
+The guarded Real Hardware follow-up reuses Milestone 9's explicit default-cancel
+Start/Resume confirmation, exact QPX identity/session checks, fresh selected-OFF
+and range/settings preflight, exactly-one Output-On attempt, safety-priority OFF
+cleanup, authoritative OFF readback, stale-request rejection and single-writer
+CSV ownership. Injected fake-serial tests passed for both channels, simultaneous
+queue use and failure paths. Physical Constant Voltage acceptance remains pending;
+Milestone 12 is not started.

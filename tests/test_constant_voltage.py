@@ -141,21 +141,6 @@ def test_invalid_inputs_have_no_file_or_queue_side_effect(
         assert connection.shutdown(1)
 
 
-def test_real_hardware_mode_is_rejected_before_backend_or_file_access(
-    tmp_path: Path,
-) -> None:
-    connection = ConnectionController()
-    connection.set_simulation_mode(False)
-    protocol = ConstantVoltageController(1, connection)
-    try:
-        message = protocol.validate_inputs("2", "0.1", "1", "0.1", "60 V")
-        assert message == "Constant Voltage protocols are available in Simulation Mode only."
-        assert not protocol.start("2", "0.1", "1", "0.1", "60 V", tmp_path)
-        assert not list(tmp_path.glob("*.csv"))
-    finally:
-        assert connection.shutdown(1)
-
-
 def test_simultaneous_channels_share_queue_and_remain_isolated(
     qapp: QApplication, tmp_path: Path,
 ) -> None:

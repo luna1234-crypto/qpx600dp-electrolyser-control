@@ -29,7 +29,10 @@ from qpx_electrolyser.engine.constant_current import (
     ProtocolSnapshot,
     REAL_HARDWARE_PROTOCOL_CONFIRMATION,
 )
-from qpx_electrolyser.engine.constant_voltage import ConstantVoltageController
+from qpx_electrolyser.engine.constant_voltage import (
+    ConstantVoltageController,
+    REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
+)
 from qpx_electrolyser.gui.channel_panel import ChannelPanel
 from qpx_electrolyser.gui.connection_panel import ConnectionPanel
 from qpx_electrolyser.gui.constant_current_panel import ConstantCurrentPanel
@@ -187,7 +190,8 @@ class MainWindow(QMainWindow):
                 voltage_protocol_controller.pause
             )
             voltage_protocol_panel.resume_requested.connect(
-                voltage_protocol_controller.resume
+                lambda selected_channel=channel:
+                self._resume_voltage_protocol(selected_channel)
             )
             voltage_protocol_panel.stop_requested.connect(
                 voltage_protocol_controller.stop
@@ -269,7 +273,7 @@ class MainWindow(QMainWindow):
             "Milestone 11 Constant Voltage protocol build.\n\n"
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
             "Simulation is the default. Real Hardware uses only a manually entered COM port. "
-            "Independent CSV logging, Constant Current and Simulation Mode Constant Voltage "
+            "Independent CSV logging and guarded Constant Current/Constant Voltage "
             "protocols are available. "
             "Real Hardware protocols require explicit confirmation and remain acceptance-"
             "pending. Live voltage/current plotting uses existing queued samples; sweeps and "
@@ -409,6 +413,37 @@ class MainWindow(QMainWindow):
         if validation_error is not None:
             self.statusBar().showMessage(validation_error)
             return
+        confirmation = None
+        if not self._connection_controller.snapshot.simulation_mode:
+            log_target = (
+                str(logger.snapshot.file_path)
+                if logger.snapshot.active and logger.snapshot.file_path is not None
+                else f"new channel {channel} CSV in {self._data_directory}"
+            )
+            answer = QMessageBox.warning(
+                self,
+                f"Confirm REAL HARDWARE Constant Voltage - CH{channel}",
+                "REAL HARDWARE OUTPUT-ON AUTHORIZATION\n\n"
+                f"Channel: CH{channel}\n"
+                f"Target voltage: {voltage} V\n"
+                f"Current limit: {current} A\n"
+                f"Active duration: {duration} s\n"
+                f"Measurement interval: {interval} s\n"
+                f"Current displayed output state: "
+                f"{'OFF' if manual.output_enabled is False else 'NOT CONFIRMED OFF'}\n"
+                f"CSV destination: {log_target}\n\n"
+                "Confirm the intended load and wiring are connected to this channel, the other "
+                "channel is safe, and energizing this output is authorized. The application will "
+                "perform a fresh OFF/range/settings preflight before one Output-On attempt.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage(
+                    f"CH{channel} Real Hardware Constant Voltage cancelled; no command submitted."
+                )
+                return
+            confirmation = REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION
         if not protocol.start(
             voltage,
             current,
@@ -417,7 +452,36 @@ class MainWindow(QMainWindow):
             manual.voltage_range_name,
             self._data_directory,
             logging_sink=logger if logger.snapshot.active else None,
+            real_hardware_confirmation=confirmation,
         ):
+            self.statusBar().showMessage(protocol.snapshot.message)
+
+    def _resume_voltage_protocol(self, channel: int) -> None:
+        protocol = self.voltage_protocol_controllers[channel]
+        confirmation = None
+        if not self._connection_controller.snapshot.simulation_mode:
+            config = protocol.snapshot.config
+            if config is None:
+                return
+            answer = QMessageBox.warning(
+                self,
+                f"Confirm REAL HARDWARE Constant Voltage resume - CH{channel}",
+                "REAL HARDWARE OUTPUT-ON AUTHORIZATION\n\n"
+                f"Resume CH{channel} at {config.target_voltage_v:g} V with "
+                f"{config.current_limit_a:g} A current limit?\n\n"
+                "Confirm the load and wiring remain safe. A fresh OFF/range/settings preflight "
+                "will precede one Output-On attempt.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage(
+                    f"CH{channel} Real Hardware Constant Voltage resume cancelled; "
+                    "no command submitted."
+                )
+                return
+            confirmation = REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION
+        if not protocol.resume(confirmation):
             self.statusBar().showMessage(protocol.snapshot.message)
 
     def _apply_protocol_snapshot(self, channel: int, snapshot: ProtocolSnapshot) -> None:
@@ -456,7 +520,6 @@ class MainWindow(QMainWindow):
         self.voltage_protocol_panels[channel].set_context(
             available=(
                 common_available
-                and connection.simulation_mode
                 and not self.protocol_controllers[channel].snapshot.owns_channel
             )
         )

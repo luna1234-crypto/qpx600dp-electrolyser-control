@@ -253,8 +253,10 @@ Output-On attempt and confirms ON. Pause, Stop, normal completion, failure,
 coordinated disconnect and application shutdown use safety-priority Output Off
 and authoritative read-back.
 
-Constant Voltage is Simulation Mode only in Milestone 11. Both channels may run
-independently or simultaneously through the one shared command queue. Constant
+Constant Voltage was introduced and manually accepted in Simulation Mode. Its
+guarded Real Hardware follow-up reuses the Milestone 9 confirmation and preflight
+architecture and has been validated offline with injected fake serial only. Both
+channels may run independently or simultaneously through the one shared command queue. Constant
 Current and Constant Voltage cannot own the same channel at the same time. An
 already-active Milestone 8 logger is reused as the single CSV writer, with
 `constant_voltage` in `protocol_name`; otherwise the protocol creates and closes
@@ -265,7 +267,18 @@ extra polling or duplicate writer. See
 Windows Simulation Mode manual acceptance confirmed independent and simultaneous
 CH1/CH2 operation, automatic per-run CSV creation when no logger was active,
 reuse of one active same-channel CSV through Pause/Resume, and a new CSV for a
-new protocol run. Real Hardware Constant Voltage remains out of scope.
+new protocol run. Physical Real Hardware Constant Voltage acceptance remains pending.
+
+Real Hardware Start and Resume each use a distinct, detailed, default-cancel
+authorization showing the channel, target voltage, current limit, duration,
+interval, displayed OFF state and CSV destination. After confirmation, the
+controller requires the current identified QPX600DP session, rechecks selected
+output OFF and voltage range, writes voltage/current limit, verifies both
+readbacks, repeats the OFF/settings preflight, and permits exactly one Output-On
+attempt. Pause, Stop, completion, failure, coordinated disconnect and shutdown
+use safety-priority Output Off with authoritative readback. Failure to confirm
+OFF raises a prominent warning; there is no automatic ON retry or reconnect.
+Physical Constant Voltage acceptance remains pending.
 
 ## Milestone 5 offline physical backend
 
@@ -391,7 +404,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent continuous CSV data logging | Implemented for both channels through the shared queue; Simulation and read-only hardware acceptance passed |
 | Independent Constant Current protocols | Simulation/fake-serial validated; supervised CH1/CH2 resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Independent live voltage/current plots | Implemented for both channels with bounded display memory and unchanged full CSV data |
-| Independent Constant Voltage protocols | Implemented and validated in Simulation Mode only for both channels |
+| Independent Constant Voltage protocols | Simulation accepted; guarded Real Hardware path fake-serial validated, physical acceptance pending |
 | Later sweep/polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |

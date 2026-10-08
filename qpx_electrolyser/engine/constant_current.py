@@ -155,6 +155,7 @@ class ConstantCurrentController(QObject):
         command_slug: str = "constant-current",
         current_label: str = "Target current",
         voltage_label: str = "Voltage compliance",
+        real_hardware_confirmation_token: str = REAL_HARDWARE_PROTOCOL_CONFIRMATION,
     ) -> None:
         super().__init__(parent)
         QPX600DP_CAPABILITIES.validate_channel(channel)
@@ -170,6 +171,7 @@ class ConstantCurrentController(QObject):
         self._command_slug = command_slug
         self._current_label = current_label
         self._voltage_label = voltage_label
+        self._real_hardware_confirmation_token = real_hardware_confirmation_token
         self._snapshot = ProtocolSnapshot(
             channel=channel,
             message=f"{display_name} protocol idle",
@@ -277,9 +279,11 @@ class ConstantCurrentController(QObject):
             return self._reject(validation_error)
         if (
             not self._connection.snapshot.simulation_mode
-            and real_hardware_confirmation != REAL_HARDWARE_PROTOCOL_CONFIRMATION
+            and real_hardware_confirmation != self._real_hardware_confirmation_token
         ):
-            return self._reject("Real Hardware Constant Current start was not confirmed.")
+            return self._reject(
+                f"Real Hardware {self._display_name} start was not confirmed."
+            )
         assert voltage_range_name is not None
         try:
             config = self._validate_config(
@@ -348,11 +352,11 @@ class ConstantCurrentController(QObject):
             return False
         if (
             not self._connection.snapshot.simulation_mode
-            and real_hardware_confirmation != REAL_HARDWARE_PROTOCOL_CONFIRMATION
+            and real_hardware_confirmation != self._real_hardware_confirmation_token
         ):
             self._publish(replace(
                 self._snapshot,
-                message="Real Hardware Constant Current resume was not confirmed.",
+                message=f"Real Hardware {self._display_name} resume was not confirmed.",
                 error=True,
             ))
             return False

@@ -7,8 +7,8 @@ code implements the entrypoints, dual-channel manual-control GUI, diagnostic log
 the Milestone 5 `SerialTransport` / `QPX600DPDriver`, the Milestone 6 shared
 priority command worker, Milestone 7 per-channel controllers, Milestone 8
 independent CSV loggers, Milestone 9 Constant Current state machines, Milestone
-10 bounded live-plot models and Milestone 11 Simulation Mode Constant Voltage
-state machines. The guarded follow-up connects the physical backend
+10 bounded live-plot models and Milestone 11 Constant Voltage state machines.
+The guarded follow-up connects the physical backend
 through that same worker only after an explicit mode, port and Connect action.
 See [simulator behaviour](simulator.md).
 The remaining design follows the [QPX600DP command reference](qpx600dp_commands.md).
@@ -77,7 +77,7 @@ independent of the selected transport.
 | SafetyValidator | Validate full protocol against software and documented hardware capability before Start | No silent clamping or device writes |
 | ChannelLoggingController / CsvLogFile, one per channel | Monotonic scheduling through the shared queue; exclusive creation, CSV rows, flush/close and file errors | No direct backend, plot buffer or software diagnostic logging |
 | ChannelPlotController / ChannelPlotPanel, one per channel | Consume existing measurement signals, retain bounded/downsampled display points, coalesce repaints and render voltage/current | No queue submission, backend access, CSV ownership or output control |
-| ConstantVoltageController / panel, one per channel | Specialize the Milestone 9 state machine for Simulation Mode target voltage/current limit operation | No direct backend, extra polling, duplicate CSV writer or Real Hardware enablement |
+| ConstantVoltageController / panel, one per channel | Specialize the Milestone 9 state machine for target voltage/current limit operation, including guarded real confirmation | No direct backend, extra polling, duplicate CSV writer, automatic retry or reconnect |
 
 Milestone 7 instantiates two `ManualChannelController` objects in the Qt thread.
 They share the same `ConnectionController` and therefore the same worker/backend.
@@ -139,7 +139,11 @@ setting/preflight operations, while its CSV identity is `constant_voltage` and
 its queue/cancellation keys are distinct. Only one protocol may own a channel;
 the other channel remains independent. CV samples feed the same logger sink and
 plot signal as Constant Current, so no second writer or measurement poll exists.
-The CV panel is unavailable outside Simulation Mode.
+Real Hardware CV Start/Resume additionally require the distinct
+`RUN-QPX600DP-CONSTANT-VOLTAGE` token supplied only after a default-cancel GUI
+confirmation. The controller independently enforces the identified session,
+fresh OFF/range/settings preflight and authoritative cleanup. This path is
+fake-serial validated; physical acceptance remains pending.
 
 The connection controller defaults to Simulation Mode. Real Hardware selection
 requires a warning acknowledgement and a manually typed `COM<N>` name; neither
@@ -335,14 +339,15 @@ not connect them to the GUI. Milestone 6 integrates a shared priority command
 queue into the existing single-owner boundary without adding a second backend
 owner. Milestone 7 adds manual control and a guarded explicit-port follow-up;
 Milestone 8 adds queue-fed CSV logging, Milestone 9 adds Constant Current,
-Milestone 10 adds bounded plotting and Milestone 11 adds Simulation Mode Constant Voltage
+Milestone 10 adds bounded plotting and Milestone 11 adds Constant Voltage
 protocols without port discovery, plotting or global emergency control. Its
 guarded Real Hardware follow-up is fake-serial tested, and supervised resistor-load
 functional acceptance later passed on both channels. Electrolyser and unattended
 use remain unapproved pending transient assessment and later safety milestones.
 Milestone 7 real-hardware GUI acceptance and Milestone 8 read-only hardware
-logging acceptance are complete. Milestones 10/11 add Simulation Mode validated
-live plots and Constant Voltage without extra polling or another worker. Later protocol types remain
+logging acceptance are complete. Milestones 10/11 add live plots and Constant
+Voltage without extra polling or another worker. The guarded CV hardware path is
+fake-serial validated but not physically accepted. Later protocol types remain
 out of scope.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.

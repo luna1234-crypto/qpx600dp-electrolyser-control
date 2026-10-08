@@ -17,6 +17,9 @@ from qpx_electrolyser.engine.constant_current import (
 )
 
 
+REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION = "RUN-QPX600DP-CONSTANT-VOLTAGE"
+
+
 @dataclass(frozen=True, slots=True)
 class ConstantVoltageConfig:
     """Validated constant-voltage settings with controller compatibility aliases."""
@@ -59,6 +62,9 @@ class ConstantVoltageController(ConstantCurrentController):
             "command_slug": "constant-voltage",
             "current_label": "Current limit",
             "voltage_label": "Target voltage",
+            "real_hardware_confirmation_token": (
+                REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION
+            ),
         }
         if monotonic is not None:
             kwargs["monotonic"] = monotonic
@@ -74,8 +80,6 @@ class ConstantVoltageController(ConstantCurrentController):
         interval: str,
         voltage_range_name: str | None,
     ) -> str | None:
-        if not self._connection.snapshot.simulation_mode:
-            return "Constant Voltage protocols are available in Simulation Mode only."
         return self._validate_controller_inputs(
             current_limit,
             target_voltage,
@@ -94,11 +98,8 @@ class ConstantVoltageController(ConstantCurrentController):
         directory: Path,
         *,
         logging_sink: ProtocolLogSink | None = None,
+        real_hardware_confirmation: str | None = None,
     ) -> bool:
-        if not self._connection.snapshot.simulation_mode:
-            return self._reject(
-                "Constant Voltage protocols are available in Simulation Mode only."
-            )
         return super().start(
             current_limit,
             target_voltage,
@@ -107,6 +108,7 @@ class ConstantVoltageController(ConstantCurrentController):
             voltage_range_name,
             directory,
             logging_sink=logging_sink,
+            real_hardware_confirmation=real_hardware_confirmation,
         )
 
     def _validate_config(

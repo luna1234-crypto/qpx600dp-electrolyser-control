@@ -6,8 +6,9 @@ Date: 2026-10-08
 
 CH1 and CH2 each have a Constant Voltage panel with target voltage, current
 limit, active duration, measurement interval, Start, Pause, Resume and Stop.
-Milestone 11 is Simulation Mode only. No COM port or physical instrument was
-enumerated, opened, probed or commanded during implementation or validation.
+The initial implementation and manual acceptance used Simulation Mode. The later
+guarded Real Hardware follow-up was developed with injected fake serial only. No
+COM port or physical instrument was enumerated, opened, probed or commanded.
 
 `ConstantVoltageController` specializes the Milestone 9 state machine rather
 than creating another scheduler. It uses the same `IDLE`, `STARTING`, `RUNNING`,
@@ -52,7 +53,8 @@ warnings or residual processes.
 
 Validation results:
 
-- complete suite: **304 passed in 23.65s**;
+- guarded Constant Voltage focused suite: **65 passed in 7.35s**;
+- complete suite: **311 passed in 23.52s**;
 - `compileall`: passed;
 - `pip check`: no broken requirements;
 - automated Simulation Mode smoke: passed for simultaneous CH1/CH2 Constant
@@ -61,7 +63,7 @@ Validation results:
 - `git diff --check`: passed;
 - no residual smoke process or QThread-destroyed warning was observed.
 
-Real Hardware Constant Voltage, sweeps and Milestone 12 are not implemented.
+Sweeps and Milestone 12 are not implemented.
 
 ## Manual Windows Simulation Mode acceptance
 
@@ -78,4 +80,37 @@ ownership and concurrency behavior was confirmed:
 - simultaneous CH1/CH2 operation passed.
 
 The acceptance used Simulation Mode only. No real instrument or COM port was
-accessed, and no Real Hardware Constant Voltage acceptance is claimed.
+accessed.
+
+## Guarded Real Hardware follow-up
+
+Real Hardware Constant Voltage Start and Resume now require a distinct exact
+confirmation token that is supplied only after a detailed, default-cancel GUI
+dialog. The dialog identifies Real Hardware, channel, target voltage, current
+limit, duration, sample interval, current displayed OFF state and CSV destination.
+Cancelling submits no command and creates no protocol file.
+
+The controller independently requires the current identified QPX600DP session.
+Its queued start transaction queries selected output state, refuses an initially
+ON output, queries the existing voltage range before writing, writes only selected
+channel voltage/current limit and verifies both readbacks. A second fresh
+OFF/settings preflight immediately precedes exactly one Output-On attempt and ON
+readback. Resume repeats the confirmation and preflight. There is no automatic
+Output-On retry, connection retry or reconnect.
+
+Pause, Stop, natural completion, failure, coordinated disconnect and shutdown use
+safety-priority selected-channel Output Off followed by a complete authoritative
+readback. An unavailable or unconfirmed OFF state produces a prominent operator
+warning. Request IDs, channel-specific cancellation keys and owning states reject
+double-clicks and stale callbacks. CH1/CH2 remain isolated on the one shared
+worker. Existing logger ownership and plot signals are unchanged, so the guarded
+path creates one CSV only when needed, reuses an active same-channel CSV, and
+adds no measurement polling.
+
+Fake-serial coverage verifies exact query/write order, cancelled confirmation,
+missing token, invalid values, initially-ON refusal, readback mismatch, ambiguous
+Output-On failure without retry, cleanup/readback failure warnings, priority OFF,
+Pause/Resume confirmation and CSV reuse, natural completion, early Stop,
+coordinated disconnect, logger failure, stale start cancellation, duplicate-click
+protection, simultaneous channels and CH1/CH2 mutation isolation. Physical
+Constant Voltage acceptance remains pending.
