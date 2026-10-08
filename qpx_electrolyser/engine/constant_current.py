@@ -67,6 +67,8 @@ class ConstantCurrentSafetyLimits:
 DEFAULT_CONSTANT_CURRENT_LIMITS = ConstantCurrentSafetyLimits()
 REAL_HARDWARE_CONSTANT_CURRENT_LIMITS = ConstantCurrentSafetyLimits()
 REAL_HARDWARE_PROTOCOL_CONFIRMATION = "RUN-QPX600DP-CONSTANT-CURRENT"
+OUTPUT_OFF_CONFIRMATION_WINDOW_S = 1.0
+OUTPUT_OFF_POLL_INTERVAL_S = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +150,7 @@ class ConstantCurrentController(QObject):
             REAL_HARDWARE_CONSTANT_CURRENT_LIMITS
         ),
         monotonic=time.monotonic,
+        sleep=time.sleep,
         utc_now=lambda: datetime.now(timezone.utc),
         writer_factory=CsvLogFile,
         protocol_name: str = "constant_current",
@@ -164,6 +167,7 @@ class ConstantCurrentController(QObject):
         self._limits = safety_limits
         self._real_hardware_limits = real_hardware_safety_limits
         self._monotonic = monotonic
+        self._sleep = sleep
         self._utc_now = utc_now
         self._writer_factory = writer_factory
         self._protocol_name = protocol_name
@@ -524,9 +528,33 @@ class ConstantCurrentController(QObject):
 
     def _output_off_operation(self, supply: PowerSupplyInterface) -> ChannelReadback:
         supply.output_off(self._channel)
+        deadline = self._monotonic() + OUTPUT_OFF_CONFIRMATION_WINDOW_S
+        first_poll = True
+        while True:
+            if not first_poll:
+                # Check before issuing each follow-up query so a scheduler delay or
+                # floating-point boundary cannot dispatch a poll after the deadline.
+                if deadline - self._monotonic() <= 1e-9:
+                    raise OutputStateError(
+                        "Output OFF could not be confirmed within 1.0 s; "
+                        "manual front-panel intervention is required."
+                    )
+            first_poll = False
+            if not supply.read_output_state(self._channel):
+                break
+            remaining_s = deadline - self._monotonic()
+            if remaining_s <= 0:
+                raise OutputStateError(
+                    "Output OFF could not be confirmed within 1.0 s; "
+                    "manual front-panel intervention is required."
+                )
+            self._sleep(min(OUTPUT_OFF_POLL_INTERVAL_S, remaining_s))
         readback = read_channel(supply, self._channel)
         if readback.output_enabled:
-            raise OutputStateError("Output OFF could not be confirmed.")
+            raise OutputStateError(
+                "Output OFF did not remain confirmed during authoritative read-back; "
+                "manual front-panel intervention is required."
+            )
         return readback
 
     def _sample_operation(
@@ -770,7 +798,8 @@ class ConstantCurrentController(QObject):
         if not self._session_is_current():
             self._finish_terminal(
                 ProtocolState.FAILED,
-                f"{message}; physical OFF could not be confirmed because the session is unavailable.",
+                f"{message}; physical OFF could not be confirmed because the session is "
+                "unavailable. Manual front-panel intervention is required.",
                 warning=True,
             )
             return
@@ -931,7 +960,8 @@ class ConstantCurrentController(QObject):
         ):
             self._finish_terminal(
                 ProtocolState.FAILED,
-                "Connection lost; physical OFF could not be confirmed.",
+                "Connection lost; physical OFF could not be confirmed. "
+                "Manual front-panel intervention is required.",
                 warning=True,
             )
 

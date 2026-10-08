@@ -138,3 +138,45 @@ delayed stale callback cannot submit additional output commands. The existing
 fail-safe rule remains unchanged: one unexpected OFF fails the protocol and
 requests Output Off, with no retry, debounce, ignored response or automatic
 Output On.
+
+## Bounded Output-Off confirmation follow-up
+
+Diagnostics from a supervised Pause showed that the single `OP1 0` write was
+followed about 37 ms later by `OP1? = 1`, while the channel still measured
+3.991 V / 0.037 A. Command/response alignment was intact and no other operation
+interleaved. A prior successful completion had reported OFF about 45 ms after
+its Output-Off write. This established that one immediate query was not a
+reliable confirmation boundary; it did not justify repeating the write or
+treating voltage decay as proof of OFF.
+
+All protocol Output-Off paths now use one shared safety-priority transaction:
+
+- transmit `OP<N> 0` exactly once;
+- query `OP<N>?` immediately, then at approximately 50 ms intervals while it
+  remains ON;
+- stop polling at a fixed one-second deadline, without issuing a query after
+  that deadline;
+- after the first explicit OFF response, perform one complete authoritative
+  selected-channel readback and require its output field to remain OFF;
+- on timeout or readback failure, retain the prominent physical-OFF-unconfirmed
+  warning, close the Real Hardware session and require manual front-panel
+  intervention.
+
+The helper is used for Pause, Stop, natural completion, protocol failure,
+coordinated disconnect and application shutdown. It does not retry Output Off
+or Output On, and it does not affect the other channel. Deterministic
+fake-serial tests cover immediate confirmation, one and multiple delayed ON
+responses before OFF, timeout, exactly one Output-Off write, Pause near natural
+completion, Stop, completion, disconnect, shutdown and stale callbacks. Real
+hardware was not accessed for this follow-up; guarded Constant Voltage physical
+acceptance remains pending.
+
+Follow-up offline validation:
+
+- focused protocol and fake-serial suite: **73 passed**;
+- complete suite: **320 passed**;
+- `compileall`: passed;
+- `pip check`: no broken requirements;
+- automated Simulation Mode smoke: passed with clean disconnect and worker
+  shutdown;
+- `git diff --check`: passed.

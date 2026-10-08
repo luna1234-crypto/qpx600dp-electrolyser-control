@@ -50,6 +50,7 @@ class ConstantVoltageController(ConstantCurrentController):
         *,
         safety_limits: ConstantCurrentSafetyLimits = DEFAULT_CONSTANT_CURRENT_LIMITS,
         monotonic=None,
+        sleep=None,
         utc_now=None,
         writer_factory=CsvLogFile,
     ) -> None:
@@ -68,6 +69,8 @@ class ConstantVoltageController(ConstantCurrentController):
         }
         if monotonic is not None:
             kwargs["monotonic"] = monotonic
+        if sleep is not None:
+            kwargs["sleep"] = sleep
         if utc_now is not None:
             kwargs["utc_now"] = utc_now
         super().__init__(channel, connection, parent, **kwargs)
