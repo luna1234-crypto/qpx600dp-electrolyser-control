@@ -80,6 +80,10 @@ class ProtocolLogSink(Protocol):
         protocol_name: str = "constant_current",
     ) -> None: ...
 
+    def suspend_sampling(self) -> None: ...
+
+    def resume_sampling(self) -> None: ...
+
 
 class CsvLogFile:
     """One exclusively-created, incrementally flushed channel log."""
@@ -187,6 +191,7 @@ class ChannelLoggingController(QObject):
         self._started_at = 0.0
         self._next_slot = 0
         self._pending_request_id: int | None = None
+        self._sampling_suspended = False
         self._cancellation_key = f"csv-logger-channel-{channel}"
         self._snapshot = LoggingSnapshot(channel=channel)
         self._timer = QTimer(self)
@@ -232,6 +237,7 @@ class ChannelLoggingController(QObject):
         self._started_at = self._monotonic()
         self._next_slot = 0
         self._pending_request_id = None
+        self._sampling_suspended = False
         self._publish(LoggingSnapshot(
             channel=self._channel,
             active=True,
@@ -245,6 +251,7 @@ class ChannelLoggingController(QObject):
         self._timer.stop()
         self._connection.cancel_commands(self._cancellation_key)
         self._pending_request_id = None
+        self._sampling_suspended = False
         writer, self._writer = self._writer, None
         close_error: OSError | None = None
         if writer is not None:
@@ -305,9 +312,33 @@ class ChannelLoggingController(QObject):
             error=False,
         ))
 
+    def suspend_sampling(self) -> None:
+        """Temporarily suppress standalone polls while a hardware output settles."""
+        if not self._snapshot.active or self._sampling_suspended:
+            return
+        self._sampling_suspended = True
+        self._timer.stop()
+        # A queued poll is cancelled. An already-running poll remains atomic and
+        # necessarily completes before the later output-transition command.
+        if self._connection.cancel_commands(self._cancellation_key):
+            self._pending_request_id = None
+            self._publish(replace(self._snapshot, pending=False))
+
+    def resume_sampling(self) -> None:
+        """Resume the same file and monotonic logging schedule after settling."""
+        if not self._snapshot.active or not self._sampling_suspended:
+            return
+        self._sampling_suspended = False
+        if self._pending_request_id is None:
+            self._schedule_next()
+
     @Slot()
     def _submit_due_sample(self) -> None:
-        if not self._snapshot.active or self._pending_request_id is not None:
+        if (
+            not self._snapshot.active
+            or self._sampling_suspended
+            or self._pending_request_id is not None
+        ):
             return
         if self._connection.snapshot.state is not ConnectionState.CONNECTED:
             self._stop_with_event("disconnected", "Connection is not available.")
@@ -354,7 +385,8 @@ class ChannelLoggingController(QObject):
             message=f"Logged sample {self._snapshot.sample_count + 1}",
             error=False,
         ))
-        self._schedule_next()
+        if not self._sampling_suspended:
+            self._schedule_next()
 
     @Slot(int, str, object)
     def _command_failed(self, request_id: int, _name: str, error: BaseException) -> None:
@@ -369,7 +401,7 @@ class ChannelLoggingController(QObject):
             self._stop_with_event(snapshot.state.value, snapshot.message)
 
     def _schedule_next(self) -> None:
-        if not self._snapshot.active:
+        if not self._snapshot.active or self._sampling_suspended:
             return
         now = self._monotonic()
         elapsed = max(0.0, now - self._started_at)

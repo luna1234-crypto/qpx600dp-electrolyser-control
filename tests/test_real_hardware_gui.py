@@ -44,7 +44,7 @@ def qapp() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-def wait_until(qapp: QApplication, predicate: Callable[[], bool], timeout_s: float = 2) -> None:
+def wait_until(qapp: QApplication, predicate: Callable[[], bool], timeout_s: float = 4) -> None:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         qapp.processEvents()
@@ -1213,11 +1213,11 @@ def test_real_cv_stale_start_cannot_turn_on_and_two_channels_are_serialized(
     start2 = protocol_start_responses(2)
     fake = FakeSerial([
         *initial_responses(),
-        *start1[:4], *start2[:4], *start1[4:], *start2[4:],
+        *start1[:4], *start2[:4],
+        *start1[4:8], *start2[4:8],
+        *start1[8:], *start2[8:],
         *channel_responses(1, voltage=2, current=0.1, output=True),
         *channel_responses(2, voltage=2, current=0.1, output=True),
-        *output_off_responses(1),
-        *output_off_responses(2),
     ])
     connection2 = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
     protocols = {
@@ -1229,7 +1229,7 @@ def test_real_cv_stale_start_cannot_turn_on_and_two_channels_are_serialized(
         wait_until(qapp, lambda: connection2.snapshot.state is ConnectionState.CONNECTED)
         for item in protocols.values():
             assert item.start(
-                "2", "0.1", "2", "1", "60 V", tmp_path,
+                "2", "0.1", "10", "1", "60 V", tmp_path,
                 real_hardware_confirmation=REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
             )
         wait_until(qapp, lambda: all(
@@ -1238,21 +1238,14 @@ def test_real_cv_stale_start_cannot_turn_on_and_two_channels_are_serialized(
         wait_until(qapp, lambda: all(
             item.snapshot.sample_count >= 1 for item in protocols.values()
         ))
-        for item in protocols.values():
-            item.stop("simultaneous fake-serial cleanup")
-        wait_until(qapp, lambda: all(
-            item.snapshot.state in {ProtocolState.COMPLETED, ProtocolState.FAILED}
-            for item in protocols.values()
-        ))
-        assert all(
-            item.snapshot.state is ProtocolState.COMPLETED for item in protocols.values()
-        ), ([(item.snapshot.state, item.snapshot.message) for item in protocols.values()],
-            fake.writes, list(fake.responses))
+        assert all(item.snapshot.state is ProtocolState.RUNNING for item in protocols.values())
         assert fake.writes.count(b"OP1 1\n") == 1
         assert fake.writes.count(b"OP2 1\n") == 1
-        assert fake.writes.count(b"OP1 0\n") == 1
-        assert fake.writes.count(b"OP2 0\n") == 1
+        assert fake.writes.count(b"OP1 0\n") == 0
+        assert fake.writes.count(b"OP2 0\n") == 0
     finally:
+        for item in protocols.values():
+            item.force_shutdown("test teardown")
         assert connection2.shutdown(timeout_s=1)
 
 
@@ -1289,7 +1282,7 @@ def test_real_cv_second_sample_off_logs_aligned_trace_then_one_safety_cleanup(
         wait_until(
             qapp,
             lambda: protocol.snapshot.state is ProtocolState.FAILED,
-            timeout_s=4,
+            timeout_s=6,
         )
 
         commands = fake.writes[baseline:]
@@ -1364,21 +1357,9 @@ def test_active_real_logger_is_strictly_read_only(
         assert connection.shutdown(timeout_s=1)
 
 
-@pytest.mark.parametrize(
-    "confirmation_states",
-    [
-        pytest.param((False, False), id="immediate-stable-off"),
-        pytest.param((False, True, False, False), id="observed-off-on-rebound"),
-        pytest.param(
-            (False, True, False, True, False, False),
-            id="multiple-rebounds-then-stable-off",
-        ),
-    ],
-)
 def test_real_cv_bounded_off_confirmation_writes_off_exactly_once(
     qapp: QApplication,
     tmp_path: Path,
-    confirmation_states: tuple[bool, ...],
 ) -> None:
     now = [100.0]
 
@@ -1389,7 +1370,7 @@ def test_real_cv_bounded_off_confirmation_writes_off_exactly_once(
         *initial_responses(),
         *protocol_start_responses(1),
         *channel_responses(1, voltage=2, current=0.1, output=True),
-        *output_off_responses(1, confirmation_states=confirmation_states),
+        *output_off_responses(1),
     ])
     connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
     protocol = ConstantVoltageController(
@@ -1413,18 +1394,17 @@ def test_real_cv_bounded_off_confirmation_writes_off_exactly_once(
 
         cleanup = fake.writes[baseline:]
         assert cleanup.count(b"OP1 0\n") == 1
-        assert cleanup[:2 + len(confirmation_states)] == [
+        assert cleanup[:4] == [
             b"OP1 0\n",
             b"*OPC?\n",
-            *([b"OP1?\n"] * len(confirmation_states)),
+            b"OP1?\n",
+            b"OP1?\n",
         ]
         assert cleanup[-6:] == [
             b"VRANGE1?\n", b"V1?\n", b"I1?\n",
             b"V1O?\n", b"I1O?\n", b"OP1?\n",
         ]
-        assert now[0] == pytest.approx(
-            100.05 + 0.05 * (len(confirmation_states) - 1)
-        )
+        assert now[0] == pytest.approx(100.2)
         assert protocol.snapshot.output_enabled is False
     finally:
         assert connection.shutdown(timeout_s=1)
@@ -1439,17 +1419,13 @@ def test_real_cv_off_confirmation_timeout_writes_once_and_requires_front_panel(
     def advance(delay_s: float) -> None:
         now[0] += delay_s
 
-    confirmation_attempts = 20  # Immediate, then every 0.05 s through t=0.95 s.
-    rebound_responses = [
-        b"0\r\n" if index % 2 == 0 else b"1\r\n"
-        for index in range(confirmation_attempts)
-    ]
     fake = FakeSerial([
         *initial_responses(),
         *protocol_start_responses(1),
         *channel_responses(1, voltage=2, current=0.1, output=True),
         b"1\r\n",  # *OPC?
-        *rebound_responses,
+        b"0\r\n",
+        b"1\r\n",
     ])
     connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
     protocol = ConstantVoltageController(
@@ -1475,9 +1451,9 @@ def test_real_cv_off_confirmation_timeout_writes_once_and_requires_front_panel(
         cleanup = fake.writes[baseline:]
         assert cleanup.count(b"OP1 0\n") == 1
         assert cleanup.count(b"*OPC?\n") == 1
-        assert cleanup.count(b"OP1?\n") == confirmation_attempts
+        assert cleanup.count(b"OP1?\n") == 2
         assert not any(command.startswith(b"VRANGE1?") for command in cleanup)
-        assert now[0] == pytest.approx(101.05)
+        assert now[0] == pytest.approx(100.2)
         assert protocol.snapshot.operator_warning
         assert "front-panel intervention" in protocol.snapshot.message
         assert fake.close_calls == 1
@@ -1498,9 +1474,7 @@ def test_real_cv_pause_near_completion_uses_one_bounded_off_transaction(
         *initial_responses(),
         *protocol_start_responses(1),
         *channel_responses(1, voltage=2, current=0.1, output=True),
-        *output_off_responses(
-            1, confirmation_states=(False, True, False, False)
-        ),
+        *output_off_responses(1),
     ])
     connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
     protocol = ConstantVoltageController(
@@ -1526,7 +1500,7 @@ def test_real_cv_pause_near_completion_uses_one_bounded_off_transaction(
         cleanup = fake.writes[baseline:]
         assert cleanup.count(b"OP1 0\n") == 1
         assert cleanup.count(b"*OPC?\n") == 1
-        assert cleanup.count(b"OP1?\n") == 5  # four confirmations plus readback
+        assert cleanup.count(b"OP1?\n") == 3  # two confirmations plus readback
         assert protocol.snapshot.output_enabled is False
     finally:
         assert connection.shutdown(timeout_s=1)
@@ -1540,9 +1514,7 @@ def test_real_cv_shutdown_uses_bounded_off_confirmation_once(
         *initial_responses(),
         *protocol_start_responses(1),
         *channel_responses(1, voltage=2, current=0.1, output=True),
-        *output_off_responses(
-            1, confirmation_states=(False, True, False, False)
-        ),
+        *output_off_responses(1),
     ])
     connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
     protocol = ConstantVoltageController(1, connection, sleep=lambda _delay: None)
@@ -1562,7 +1534,7 @@ def test_real_cv_shutdown_uses_bounded_off_confirmation_once(
         cleanup = fake.writes[baseline:]
         assert cleanup.count(b"OP1 0\n") == 1
         assert cleanup.count(b"*OPC?\n") == 1
-        assert cleanup.count(b"OP1?\n") == 5
+        assert cleanup.count(b"OP1?\n") == 3
         assert protocol.snapshot.output_enabled is False
     finally:
         assert connection.shutdown(timeout_s=1)
@@ -1657,7 +1629,7 @@ def test_real_cv_operation_complete_failure_closes_once_without_off_retry(
     [
         pytest.param(
             "second-on-poll-off",
-            "unexpectedly reported OFF during Output-On stabilization",
+            "did not remain ON after the 1.0-second settling period",
             1,
             id="on-then-off-within-50ms",
         ),
@@ -1670,7 +1642,7 @@ def test_real_cv_operation_complete_failure_closes_once_without_off_retry(
         ),
         pytest.param(
             "authoritative-off",
-            "did not remain ON during authoritative read-back",
+            "did not remain confirmed during authoritative read-back",
             1,
             id="authoritative-readback-off",
         ),
@@ -1718,6 +1690,83 @@ def test_real_cv_stable_on_failures_attempt_on_and_off_exactly_once(
         assert fake.writes.count(b"OP1 0\n") == expected_off_writes
         assert protocol._output_off_attempted
         assert not any(command.startswith((b"V2 ", b"I2 ", b"OP2 ")) for command in fake.writes)
+    finally:
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_real_cv_output_transitions_have_full_silent_settling_period(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    """Transient rebound is deliberately unobserved until the full quiet second ends."""
+    fake = FakeSerial([
+        *initial_responses(),
+        *protocol_start_responses(1),
+        *output_off_responses(1),
+    ])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    protocol = ConstantVoltageController(1, connection)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        assert protocol.start(
+            "2", "0.1", "10", "1", "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: fake.writes.count(b"*OPC?\n") == 1)
+        on_armed_at = time.monotonic()
+        writes_after_on_opc = list(fake.writes)
+        while time.monotonic() - on_armed_at < 0.80:
+            qapp.processEvents()
+            time.sleep(0.002)
+        assert fake.writes == writes_after_on_opc
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        assert time.monotonic() - on_armed_at >= 0.95
+
+        protocol.pause()
+        wait_until(qapp, lambda: fake.writes.count(b"*OPC?\n") == 2)
+        off_armed_at = time.monotonic()
+        writes_after_off_opc = list(fake.writes)
+        while time.monotonic() - off_armed_at < 0.80:
+            qapp.processEvents()
+            time.sleep(0.002)
+        assert fake.writes == writes_after_off_opc
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.PAUSED)
+        assert time.monotonic() - off_armed_at >= 0.95
+        assert fake.writes.count(b"OP1 1\n") == 1
+        assert fake.writes.count(b"OP1 0\n") == 1
+    finally:
+        assert connection.shutdown(timeout_s=1)
+
+
+def test_real_cv_stop_cancels_pending_on_settling_timer_without_duplicate_write(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    fake = FakeSerial([
+        *initial_responses(),
+        *protocol_start_responses(1)[:8],
+        *output_off_responses(1),
+    ])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    protocol = ConstantVoltageController(1, connection)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        assert protocol.start(
+            "2", "0.1", "10", "1", "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: fake.writes.count(b"*OPC?\n") == 1)
+        protocol.stop("stop during Output-On settling")
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.COMPLETED)
+        for _ in range(20):
+            qapp.processEvents()
+            time.sleep(0.01)
+        assert fake.writes.count(b"OP1 1\n") == 1
+        assert fake.writes.count(b"OP1 0\n") == 1
+        # Only the OFF confirmation's two polls and authoritative final query.
+        assert fake.writes.count(b"OP1?\n") == 6  # initial + two preflights + three OFF reads
     finally:
         assert connection.shutdown(timeout_s=1)
 

@@ -398,3 +398,42 @@ stable-ON confirmation, and continuation in the same CSV. Simulation Mode keeps
 its existing immediate post-Pause Resume behavior. This change was developed
 and tested with fake serial only; no COM port or physical instrument was
 accessed.
+
+## Real-hardware output-settling follow-up
+
+Forensic traces from CH1 and CH2 showed that the instrument can report an
+ON/OFF rebound for about 327 ms. Two equal `OP<N>?` responses 50 ms apart were
+therefore not sufficient evidence of a stable transition. Real Hardware
+Constant Current and Constant Voltage protocols now use this sequence for both
+ON and OFF transitions:
+
+1. transmit the requested `OP<N> 1` or `OP<N> 0` exactly once;
+2. query `*OPC?` exactly once and require `1`;
+3. use a single-shot Qt timer for a full 1.0-second silent settling period;
+4. after the timer expires, query `OP<N>?` twice approximately 100 ms apart and
+   require both responses to equal the requested state;
+5. perform the complete authoritative channel readback and require its final
+   `OP<N>?` to retain that state.
+
+No instrument query for the selected channel is submitted by the protocol
+during the silent second. If a manually owned same-channel CSV logger is being
+reused, its standalone polling timer is temporarily suspended before the
+transition and resumed afterward using the same writer and monotonic schedule;
+protocol rows, file ownership and CSV schema are unchanged. The other channel
+continues independently through the shared queue.
+
+Start, Resume, Pause, Stop, natural completion, failure cleanup, coordinated
+disconnect and shutdown share the same transition mechanism. Ownership remains
+held while the timer is active, repeated clicks cannot submit a duplicate
+write, and session/state checks discard stale timer callbacks. A mismatch,
+malformed response or timeout fails without retry and without a second output
+write. The separate post-Pause one-second Resume gate remains in force after
+authoritative OFF confirmation. Simulation Mode retains its fast deterministic
+path.
+
+Fake-serial and Qt regressions cover the full query-free settling interval,
+stable post-rebound ON/OFF confirmation, post-settling and authoritative
+mismatches, exactly-once writes, Stop cancellation of an outstanding timer,
+early/repeated actions, session and terminal cancellation, two-channel
+serialization, and logging-file continuity. This follow-up was implemented and
+validated offline; COM3 and the physical instrument were not accessed.

@@ -67,10 +67,8 @@ class ConstantCurrentSafetyLimits:
 DEFAULT_CONSTANT_CURRENT_LIMITS = ConstantCurrentSafetyLimits()
 REAL_HARDWARE_CONSTANT_CURRENT_LIMITS = ConstantCurrentSafetyLimits(min_interval_s=1.0)
 REAL_HARDWARE_PROTOCOL_CONFIRMATION = "RUN-QPX600DP-CONSTANT-CURRENT"
-OUTPUT_ON_STABILIZATION_WINDOW_S = 1.0
-OUTPUT_ON_POLL_INTERVAL_S = 0.05
-OUTPUT_OFF_CONFIRMATION_WINDOW_S = 1.0
-OUTPUT_OFF_POLL_INTERVAL_S = 0.05
+OUTPUT_SETTLING_PERIOD_S = 1.0
+OUTPUT_CONFIRMATION_INTERVAL_S = 0.1
 REAL_HARDWARE_RESUME_QUIESCENCE_S = 1.0
 
 
@@ -118,6 +116,15 @@ class _StartResult:
 class _PreparedResult:
     programmed_voltage_v: float
     programmed_current_a: float
+
+
+@dataclass(frozen=True, slots=True)
+class _OutputTransitionArmed:
+    """One real-hardware output write and its *OPC? have completed."""
+
+    expected_enabled: bool
+    programmed_voltage_v: float = 0.0
+    programmed_current_a: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +209,11 @@ class ConstantCurrentController(QObject):
         self._real_hardware_run = False
         self._resume_quiescence_started_at: float | None = None
         self._resume_quiescence_session_id = 0
+        self._output_settling_action = ""
+        self._output_settling_session_id = 0
+        self._output_settling_expected: bool | None = None
+        self._output_settling_voltage_v = 0.0
+        self._output_settling_current_a = 0.0
 
         self._sample_timer = QTimer(self)
         self._sample_timer.setSingleShot(True)
@@ -215,6 +227,10 @@ class ConstantCurrentController(QObject):
         self._resume_enable_timer.setSingleShot(True)
         self._resume_enable_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._resume_enable_timer.timeout.connect(self._complete_resume_quiescence)
+        self._output_settling_timer = QTimer(self)
+        self._output_settling_timer.setSingleShot(True)
+        self._output_settling_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._output_settling_timer.timeout.connect(self._complete_output_settling)
 
         connection.snapshot_changed.connect(self._connection_changed)
         connection.command_completed.connect(self._command_completed)
@@ -511,7 +527,7 @@ class ConstantCurrentController(QObject):
 
     def _output_on_operation(
         self, supply: PowerSupplyInterface, config: ConstantCurrentConfig
-    ) -> _StartResult | _GuardFailure:
+    ) -> _StartResult | _OutputTransitionArmed | _GuardFailure:
         """Revalidate immediately before the one permitted Output-On attempt."""
         try:
             if supply.read_output_state(self._channel):
@@ -530,45 +546,13 @@ class ConstantCurrentController(QObject):
                         "Output On could not be confirmed.", cleanup_required=True
                     )
                 return _StartResult(voltage, current, output_enabled)
-
-            deadline = self._monotonic() + OUTPUT_ON_STABILIZATION_WINDOW_S
             supply.confirm_operation_complete()
-            if self._monotonic() >= deadline:
-                return _GuardFailure(
-                    "Output On did not stabilize within 1.0 s.", cleanup_required=True
-                )
-            if not supply.read_output_state(self._channel):
-                return _GuardFailure(
-                    "Output unexpectedly reported OFF during Output-On stabilization.",
-                    cleanup_required=True,
-                )
-            remaining_s = deadline - self._monotonic()
-            if remaining_s < OUTPUT_ON_POLL_INTERVAL_S:
-                return _GuardFailure(
-                    "Output On did not stabilize within 1.0 s.", cleanup_required=True
-                )
-            self._sleep(OUTPUT_ON_POLL_INTERVAL_S)
-            if self._monotonic() > deadline:
-                return _GuardFailure(
-                    "Output On did not stabilize within 1.0 s.", cleanup_required=True
-                )
-            if not supply.read_output_state(self._channel):
-                return _GuardFailure(
-                    "Output unexpectedly reported OFF during Output-On stabilization.",
-                    cleanup_required=True,
-                )
-            readback = read_channel(supply, self._channel)
-            if not readback.output_enabled:
-                return _GuardFailure(
-                    "Output did not remain ON during authoritative read-back.",
-                    cleanup_required=True,
-                )
+            return _OutputTransitionArmed(True, voltage, current)
         except Exception as error:
             return _GuardFailure(
                 f"Output-On transaction failed: {str(error) or type(error).__name__}",
                 cleanup_required=True,
             )
-        return _StartResult(voltage, current, True, readback)
 
     def _verify_settings(
         self, voltage: float, current: float, config: ConstantCurrentConfig
@@ -585,40 +569,62 @@ class ConstantCurrentController(QObject):
         ):
             raise SettingsMismatchError(f"{self._current_label} read-back mismatch.")
 
-    def _output_off_operation(self, supply: PowerSupplyInterface) -> ChannelReadback:
+    def _output_off_operation(
+        self, supply: PowerSupplyInterface
+    ) -> ChannelReadback | _OutputTransitionArmed:
         supply.output_off(self._channel)
-        deadline = self._monotonic() + OUTPUT_OFF_CONFIRMATION_WINDOW_S
+        if not self._real_hardware_run:
+            readback = read_channel(supply, self._channel)
+            if readback.output_enabled:
+                raise OutputStateError("Output OFF could not be confirmed.")
+            return readback
         supply.confirm_operation_complete()
-        consecutive_off = 0
-        first_poll = True
-        while True:
-            if not first_poll:
-                # Check before issuing each follow-up query so a scheduler delay or
-                # floating-point boundary cannot dispatch a poll after the deadline.
-                if deadline - self._monotonic() <= 1e-9:
-                    raise OutputStateError(
-                        "Output OFF could not be confirmed within 1.0 s; "
-                        "manual front-panel intervention is required."
-                    )
-            first_poll = False
-            if supply.read_output_state(self._channel):
-                consecutive_off = 0
-            else:
-                consecutive_off += 1
-                if consecutive_off == 2:
-                    break
-            remaining_s = deadline - self._monotonic()
-            if remaining_s <= 0:
+        return _OutputTransitionArmed(False)
+
+    def _confirm_output_transition_operation(
+        self,
+        supply: PowerSupplyInterface,
+        expected_enabled: bool,
+        programmed_voltage_v: float,
+        programmed_current_a: float,
+    ) -> ChannelReadback | _StartResult:
+        try:
+            first = supply.read_output_state(self._channel)
+            self._sleep(OUTPUT_CONFIRMATION_INTERVAL_S)
+            second = supply.read_output_state(self._channel)
+            if first is not expected_enabled or second is not expected_enabled:
+                state = "ON" if expected_enabled else "OFF"
                 raise OutputStateError(
-                    "Output OFF could not be confirmed within 1.0 s; "
-                    "manual front-panel intervention is required."
+                    f"Output did not remain {state} after the 1.0-second settling period."
+                    + (
+                        " Manual front-panel intervention is required."
+                        if not expected_enabled
+                        else ""
+                    )
                 )
-            self._sleep(min(OUTPUT_OFF_POLL_INTERVAL_S, remaining_s))
-        readback = read_channel(supply, self._channel)
-        if readback.output_enabled:
-            raise OutputStateError(
-                "Output OFF did not remain confirmed during authoritative read-back; "
-                "manual front-panel intervention is required."
+            readback = read_channel(supply, self._channel)
+            if readback.output_enabled is not expected_enabled:
+                state = "ON" if expected_enabled else "OFF"
+                raise OutputStateError(
+                    f"Output {state} did not remain confirmed during authoritative read-back."
+                    + (
+                        " Manual front-panel intervention is required."
+                        if not expected_enabled
+                        else ""
+                    )
+                )
+        except Exception as error:
+            if expected_enabled:
+                return _GuardFailure(
+                    str(error) or type(error).__name__, cleanup_required=True
+                )
+            raise
+        if expected_enabled:
+            return _StartResult(
+                programmed_voltage_v,
+                programmed_current_a,
+                True,
+                readback,
             )
         return readback
 
@@ -633,6 +639,8 @@ class ConstantCurrentController(QObject):
             )
             return False
         self._output_off_attempted = True
+        if self._real_hardware_run:
+            self._suspend_logging_sampling()
         return self._submit_action(
             action,
             self._output_off_operation,
@@ -739,12 +747,20 @@ class ConstantCurrentController(QObject):
             ))
             # A fresh Output-On attempt starts a new shutdown-attempt lifetime.
             self._output_off_attempted = False
+            if self._real_hardware_run:
+                self._suspend_logging_sampling()
             self._submit_action(
                 phase,
                 lambda supply: self._output_on_operation(supply, config),
             )
             return
+        if action in {"start-output-on-confirm", "resume-output-on-confirm"}:
+            action = action.removesuffix("-confirm")
+            self._resume_logging_sampling()
         if action in {"start-output-on", "resume-output-on"}:
+            if isinstance(result, _OutputTransitionArmed):
+                self._start_output_settling(action, result)
+                return
             if isinstance(result, _GuardFailure):
                 self._begin_cleanup(ProtocolState.FAILED, result.message)
                 return
@@ -820,6 +836,12 @@ class ConstantCurrentController(QObject):
             ))
             self._schedule_next_sample()
             return
+        if action in {"pause", "stop"} and isinstance(result, _OutputTransitionArmed):
+            self._start_output_settling(action, result)
+            return
+        if action in {"pause-confirm", "stop-confirm"}:
+            action = action.removesuffix("-confirm")
+            self._resume_logging_sampling()
         if action == "pause":
             if (
                 not isinstance(result, ChannelReadback)
@@ -892,7 +914,8 @@ class ConstantCurrentController(QObject):
         self._pending_request_id = None
         self._pending_action = ""
         message = str(error) or type(error).__name__
-        if action in {"pause", "stop"}:
+        if action in {"pause", "stop", "pause-confirm", "stop-confirm"}:
+            self._resume_logging_sampling()
             self._finish_terminal(
                 ProtocolState.FAILED,
                 f"Output-Off cleanup failed: {message}; physical OFF could not be confirmed.",
@@ -904,6 +927,7 @@ class ConstantCurrentController(QObject):
     def _begin_cleanup(self, terminal: ProtocolState, message: str) -> None:
         if self._snapshot.state is ProtocolState.STOPPING:
             return
+        self._cancel_output_settling()
         self._cancel_resume_quiescence()
         self._sample_timer.stop()
         self._clock_timer.stop()
@@ -950,6 +974,8 @@ class ConstantCurrentController(QObject):
         warning: bool = False,
     ) -> None:
         self._cancel_resume_quiescence()
+        self._cancel_output_settling()
+        self._resume_logging_sampling()
         self._sample_timer.stop()
         self._clock_timer.stop()
         self._connection.cancel_commands(self._sample_key)
@@ -1006,6 +1032,86 @@ class ConstantCurrentController(QObject):
         """Start a fresh interval grid without consuming an immediate sample slot."""
         self._sample_epoch_active_s = self._elapsed_active()
         self._next_sample_slot = 1
+
+    def _start_output_settling(
+        self, action: str, transition: _OutputTransitionArmed
+    ) -> None:
+        """Wait a full second without channel traffic before queued confirmation."""
+        self._cancel_output_settling()
+        self._output_settling_action = action
+        self._output_settling_session_id = self._session_id
+        self._output_settling_expected = transition.expected_enabled
+        self._output_settling_voltage_v = transition.programmed_voltage_v
+        self._output_settling_current_a = transition.programmed_current_a
+        state = "ON" if transition.expected_enabled else "OFF"
+        self._publish(replace(
+            self._snapshot,
+            message=f"Output {state} requested; waiting 1.0 s for hardware settling...",
+            resume_ready=False,
+        ))
+        self._output_settling_timer.start(math.ceil(OUTPUT_SETTLING_PERIOD_S * 1000))
+
+    def _cancel_output_settling(self) -> None:
+        self._output_settling_timer.stop()
+        self._output_settling_action = ""
+        self._output_settling_session_id = 0
+        self._output_settling_expected = None
+        self._output_settling_voltage_v = 0.0
+        self._output_settling_current_a = 0.0
+
+    @Slot()
+    def _complete_output_settling(self) -> None:
+        action = self._output_settling_action
+        expected_session_id = self._output_settling_session_id
+        expected_enabled = self._output_settling_expected
+        voltage = self._output_settling_voltage_v
+        current = self._output_settling_current_a
+        self._cancel_output_settling()
+        if not action or expected_enabled is None:
+            return
+        expected_protocol_state = (
+            {ProtocolState.STARTING, ProtocolState.RESUMING}
+            if expected_enabled
+            else {ProtocolState.PAUSING, ProtocolState.STOPPING}
+        )
+        if (
+            not self._real_hardware_run
+            or self._snapshot.state not in expected_protocol_state
+            or self._pending_request_id is not None
+            or expected_session_id != self._session_id
+            or not self._session_is_current()
+        ):
+            return
+        confirmation_action = f"{action}-confirm"
+        self._submit_action(
+            confirmation_action,
+            lambda supply: self._confirm_output_transition_operation(
+                supply,
+                expected_enabled,
+                voltage,
+                current,
+            ),
+            priority=(
+                CommandPriority.NORMAL
+                if expected_enabled
+                else CommandPriority.SAFETY
+            ),
+            diagnostic_reason=(
+                ""
+                if expected_enabled
+                else self._terminal_message or "Confirming selected-channel Output Off"
+            ),
+        )
+
+    def _suspend_logging_sampling(self) -> None:
+        sink = self._logging_sink
+        if sink is not None:
+            sink.suspend_sampling()
+
+    def _resume_logging_sampling(self) -> None:
+        sink = self._logging_sink
+        if sink is not None:
+            sink.resume_sampling()
 
     def _start_resume_quiescence(self) -> None:
         """Gate Real Hardware Resume for a full monotonic second after confirmed OFF."""

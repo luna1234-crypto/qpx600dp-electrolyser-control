@@ -302,6 +302,32 @@ def test_application_style_shutdown_cancels_timer_and_closes_file(
     assert connection.shutdown(1)
 
 
+def test_sampling_suspension_preserves_active_file_and_resumes_schedule(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection = connected(qapp)
+    logger = ChannelLoggingController(1, connection)
+    try:
+        assert logger.start(tmp_path, 0.1)
+        wait_until(qapp, lambda: logger.snapshot.sample_count >= 1)
+        path = logger.snapshot.file_path
+        logger.suspend_sampling()
+        count = logger.snapshot.sample_count
+        deadline = time.monotonic() + 0.25
+        while time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.002)
+        assert logger.snapshot.active
+        assert logger.snapshot.file_path == path
+        assert logger.snapshot.sample_count == count
+        logger.resume_sampling()
+        wait_until(qapp, lambda: logger.snapshot.sample_count > count)
+        assert logger.snapshot.file_path == path
+    finally:
+        logger.shutdown()
+        assert connection.shutdown(1)
+
+
 def test_gui_has_independent_start_stop_controls_and_closes_both_on_exit(
     qapp: QApplication, tmp_path: Path,
 ) -> None:
