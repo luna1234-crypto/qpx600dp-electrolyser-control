@@ -51,6 +51,7 @@ QPX 600 DP/
             exceptions.py
             hardware_check.py
             qpx600dp.py
+            remote_output_diagnostic.py
             serial_transport.py
             simulator.py
             simulator_config.py
@@ -110,6 +111,7 @@ QPX 600 DP/
         test_model_identity.py
         test_qpx600dp_driver.py
         test_real_hardware_gui.py
+        test_remote_output_diagnostic.py
         test_realtime_plot.py
         test_serial_transport.py
         test_simulator.py

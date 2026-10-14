@@ -283,3 +283,32 @@ Resume-stabilization offline validation:
 - automated Simulation Mode smoke: passed with final OFF cleanup, clean
   disconnect and worker shutdown;
 - `git diff --check`: passed.
+
+## Standalone remote-output diagnostic follow-up
+
+An additional one-shot CLI isolates the real QPX600DP serial transport and
+driver from Qt, the GUI, protocol controllers, the shared queue, CSV logging,
+plots and background threads. It accepts only an explicitly supplied port and
+does not enumerate ports. Authorization is rejected before backend construction
+unless both existing exact tokens are supplied:
+
+```powershell
+.\.venv\Scripts\python.exe -m qpx_electrolyser.instrument.remote_output_diagnostic --port COM3 --confirm-write WRITE-QPX600DP --confirm-output-on MONITOR-QPX600DP-OUTPUT
+```
+
+One process can perform only the fixed CH1 run: identify QPX600DP; require both
+outputs OFF; verify existing CH1 settings and the 80 V range; program and verify
+4.000 V / 0.080 A; transmit `OP1 1` once; require `*OPC? = 1` and two stable ON
+responses; then take ten once-per-second samples containing only `OP1?`, `V1O?`
+and `I1O?`. An OFF response stops monitoring immediately. The `finally` path
+attempts `OP1 0` once and applies the same one-second, two-consecutive-OFF plus
+authoritative-readback confirmation policy. There is no retry or second run.
+
+Each invocation creates one exclusive timestamped raw diagnostic under `logs/`
+by default. Every serial TX and exact framed RX is timestamped; the identity
+response is redacted. Fake-serial tests cover success, spontaneous OFF, timeout,
+identity mismatch, either initially-ON output, authorization rejection and exact
+Output-On/Output-Off counts. A timeout deliberately invalidates framing, so the
+one cleanup attempt can be rejected before transmission and is reported as
+physical OFF unconfirmed rather than reopening or writing through an unaligned
+session. This tool was not run against COM3 or any physical instrument.

@@ -322,6 +322,24 @@ The helper attempts OFF in a `finally` block after the requested interval, but
 software cannot guarantee OFF after cable loss, OS failure or instrument failure.
 Use an independent physical shutdown method during any future test.
 
+A separate one-shot remote-output diagnostic isolates the synchronous serial
+transport and QPX600DP driver from Qt, GUI controllers, the shared command queue,
+CSV logging and plotting. It is fixed to CH1 at 4.000 V / 0.080 A, requires the
+80 V range and both outputs initially OFF, uses one guarded Output-On attempt,
+records ten one-second `OP1?` / `V1O?` / `I1O?` samples, and performs one stable
+Output-Off cleanup attempt. It never enumerates ports, retries or starts another
+run. The future supervised syntax is:
+
+```powershell
+.\.venv\Scripts\python.exe -m qpx_electrolyser.instrument.remote_output_diagnostic --port COM3 --confirm-write WRITE-QPX600DP --confirm-output-on MONITOR-QPX600DP-OUTPUT
+```
+
+Do not run it without a separately approved physical setup. Timestamped raw
+TX/RX diagnostics are written under `logs/` by default with identity details
+redacted. A serial timeout invalidates framing; cleanup is still attempted once,
+but the tool reports physical OFF as unconfirmed when the invalidated transport
+cannot safely transmit or query.
+
 For supervised loaded validation, the separate monitored-output mode requires
 explicit expected setpoints, maximum measured current, minimum/maximum measured
 voltage, polling interval, voltage-settling time, the write token, and the strong
