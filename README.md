@@ -355,6 +355,25 @@ stable-OFF cleanup. Each output lifetime permits exactly one `OP1 1` and one
 `OP1 0`; no Start, Pause, Resume or cleanup action is retried. Separate raw
 reports use the `qpx600dp_pause_resume_*.log` filename prefix.
 
+A still lower-level one-shot diagnostic is implemented directly on `pyserial`
+without importing the project driver, transport, Qt, GUI, controllers, shared
+queue, logging engine, CSV or plotting code. It opens only the explicit port at
+9600 baud, 8N1 with XON/XOFF; verifies QPX600DP identity, both outputs OFF and
+the CH1 80 V range; writes and verifies 4.000 V / 0.080 A; performs one stable
+Output-On attempt; records ten one-second `OP1?` / `V1O?` / `I1O?` samples; and
+sends `OP1 0` exactly once in guaranteed cleanup before stable-OFF confirmation.
+It does not enumerate, retry or reopen ports. The future supervised command is:
+
+```powershell
+.\.venv\Scripts\python.exe -m qpx_electrolyser.instrument.pyserial_output_diagnostic --port COM3 --confirm-write WRITE-QPX600DP --confirm-output-on MONITOR-QPX600DP-OUTPUT
+```
+
+Each invocation creates a separate `logs/qpx600dp_direct_pyserial_*.log` file
+containing UTC and monotonic timestamps plus exact byte representations for
+every TX and RX frame. Because this is intentionally a raw diagnostic, its
+`*IDN?` receive frame is not redacted; preserve the report as sensitive test
+evidence. This tool remains offline-only until separately authorized.
+
 For supervised loaded validation, the separate monitored-output mode requires
 explicit expected setpoints, maximum measured current, minimum/maximum measured
 voltage, polling interval, voltage-settling time, the write token, and the strong

@@ -50,6 +50,7 @@ QPX 600 DP/
             connection_worker.py
             exceptions.py
             hardware_check.py
+            pyserial_output_diagnostic.py
             qpx600dp.py
             remote_output_diagnostic.py
             serial_transport.py
@@ -109,6 +110,7 @@ QPX 600 DP/
         test_hardware_check.py
         test_logging_config.py
         test_model_identity.py
+        test_pyserial_output_diagnostic.py
         test_qpx600dp_driver.py
         test_real_hardware_gui.py
         test_remote_output_diagnostic.py

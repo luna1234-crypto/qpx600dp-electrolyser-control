@@ -346,3 +346,32 @@ Offline fake-serial coverage verifies full success, Pause OFF failure, Resume
 ON-to-OFF failure, pre-Resume setpoint mismatch, exact one ON/OFF write per
 output lifetime, failure cleanup, token rejection, serial closure and absence of
 automatic retry. This mode has not been run against COM3 or physical hardware.
+
+## Direct-pyserial isolation follow-up
+
+A separate one-shot module now implements the fixed CH1 diagnostic directly on
+`pyserial`. It imports no project driver or transport and has no Qt, GUI,
+controller, shared-queue, logging-engine, CSV, plotting or thread dependency.
+It opens only the explicitly supplied port using 9600 baud, 8 data bits, no
+parity, one stop bit and XON/XOFF; it never enumerates ports.
+
+```powershell
+.\.venv\Scripts\python.exe -m qpx_electrolyser.instrument.pyserial_output_diagnostic --port COM3 --confirm-write WRITE-QPX600DP --confirm-output-on MONITOR-QPX600DP-OUTPUT
+```
+
+Authorization is validated before report creation or serial construction. The
+fixed run identifies QPX600DP, requires `OP1? = 0` and `OP2? = 0`, requires the
+CH1 80 V range, programs and verifies 4.000 V / 0.080 A, sends `OP1 1` once,
+requires `*OPC? = 1` plus two ON responses, and records ten once-per-second
+`OP1?`, `V1O?`, `I1O?` samples. After any Output-On attempt, `finally` sends
+`OP1 0` once and requires `*OPC? = 1` plus two OFF responses. It never retries
+or automatically starts another run.
+
+The exclusive `qpx600dp_direct_pyserial_*.log` report records UTC and monotonic
+timestamps and exact byte representations for every TX and RX frame. The raw
+identity frame is intentionally retained and the report must therefore be
+handled as sensitive evidence. Fake-serial tests cover the exact configuration
+and command order, success, spontaneous OFF, ON-confirmation failure, timeout,
+identity mismatch, initially-ON rejection, authorization-before-open, guaranteed
+single cleanup and prohibited-import isolation. This implementation and its
+tests were completed offline; COM3 and physical hardware were not accessed.
