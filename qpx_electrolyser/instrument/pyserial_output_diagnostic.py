@@ -25,6 +25,7 @@ CURRENT_A = 0.080
 RUN_DURATION_S = 10.0
 SAMPLE_INTERVAL_S = 1.0
 CONFIRMATION_INTERVAL_S = 0.05
+OFF_CONFIRMATION_WINDOW_S = 1.0
 MAX_FRAME_BYTES = 512
 _FIXED_NUMBER = re.compile(r"[+-]?\d+(?:\.\d+)?")
 
@@ -226,24 +227,56 @@ def _require_opc(session: _DirectSession) -> None:
         raise DirectDiagnosticError("Malformed *OPC? response; expected 1.")
 
 
-def _confirm_stable_state(
+def _confirm_stable_on(
     session: _DirectSession,
-    expected_on: bool,
     *,
     sleep: Callable[[float], None],
 ) -> None:
     _require_opc(session)
     first = _parse_output(session.query("OP1?"))
-    if first is not expected_on:
-        raise DirectDiagnosticError(
-            f"CH1 did not report {'ON' if expected_on else 'OFF'}."
-        )
+    if not first:
+        raise DirectDiagnosticError("CH1 did not report ON.")
     sleep(CONFIRMATION_INTERVAL_S)
     second = _parse_output(session.query("OP1?"))
-    if second is not expected_on:
+    if not second:
+        raise DirectDiagnosticError("CH1 did not remain ON.")
+
+
+def _confirm_stable_off(
+    session: _DirectSession,
+    *,
+    monotonic: Callable[[], float],
+    sleep: Callable[[float], None],
+) -> tuple[float, float, float, float]:
+    """Accept bounded OP1? rebound, then require an authoritative OFF readback."""
+    deadline = monotonic() + OFF_CONFIRMATION_WINDOW_S
+    _require_opc(session)
+    consecutive_off = 0
+    while True:
+        output_on = _parse_output(session.query("OP1?"))
+        consecutive_off = 0 if output_on else consecutive_off + 1
+        if consecutive_off == 2:
+            break
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise DirectDiagnosticError(
+                "CH1 physical OFF could not be confirmed within 1.0 s."
+            )
+        sleep(min(CONFIRMATION_INTERVAL_S, remaining))
+
+    if session.query("VRANGE1?").strip() != "2":
         raise DirectDiagnosticError(
-            f"CH1 did not remain {'ON' if expected_on else 'OFF'}."
+            "CH1 authoritative readback did not retain the 80 V range."
         )
+    set_voltage = _parse_prefixed(session.query("V1?"), "V1")
+    set_current = _parse_prefixed(session.query("I1?"), "I1")
+    measured_voltage = _parse_suffixed(session.query("V1O?"), "V")
+    measured_current = _parse_suffixed(session.query("I1O?"), "A")
+    if _parse_output(session.query("OP1?")):
+        raise DirectDiagnosticError(
+            "CH1 did not remain OFF during authoritative final readback."
+        )
+    return set_voltage, set_current, measured_voltage, measured_current
 
 
 def _verify_and_program_settings(session: _DirectSession) -> None:
@@ -311,7 +344,7 @@ def run_diagnostic(
         output_on_attempted = True
         session.command("OP1 1")
         report.note("OP1 1 transmitted exactly once")
-        _confirm_stable_state(session, True, sleep=sleep)
+        _confirm_stable_on(session, sleep=sleep)
         report.note("CH1 stable ON confirmed by *OPC? and two OP1? responses")
 
         started_at = monotonic()
@@ -343,9 +376,23 @@ def run_diagnostic(
             try:
                 session.command("OP1 0")
                 report.note("OP1 0 transmitted exactly once for guaranteed cleanup")
-                _confirm_stable_state(session, False, sleep=sleep)
+                (
+                    final_set_voltage,
+                    final_set_current,
+                    final_measured_voltage,
+                    final_measured_current,
+                ) = _confirm_stable_off(
+                    session,
+                    monotonic=monotonic,
+                    sleep=sleep,
+                )
                 final_output_off = True
-                report.note("CH1 stable OFF confirmed")
+                report.note(
+                    "CH1 stable OFF confirmed by authoritative readback: "
+                    f"set={final_set_voltage:.6g} V/{final_set_current:.6g} A, "
+                    f"measured={final_measured_voltage:.6g} V/"
+                    f"{final_measured_current:.6g} A, OP1=0"
+                )
             except BaseException as error:
                 cleanup_error = error
                 report.note(

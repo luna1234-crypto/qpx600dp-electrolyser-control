@@ -54,7 +54,12 @@ def args(tmp_path: Path, **overrides: object) -> Namespace:
     return Namespace(**values)
 
 
-def successful_responses(*, states: tuple[bool, ...] = (True,) * 10) -> list[bytes]:
+def successful_responses(
+    *,
+    states: tuple[bool, ...] = (True,) * 10,
+    cleanup_states: tuple[bool, ...] = (False, False),
+    authoritative_on: bool = False,
+) -> list[bytes]:
     responses = [
         b"THURLBY THANDAR,QPX600DP,RAW-SERIAL,1.20\r\n",
         b"0\r\n", b"0\r\n",
@@ -65,7 +70,13 @@ def successful_responses(*, states: tuple[bool, ...] = (True,) * 10) -> list[byt
         responses.append(b"1\r\n" if state else b"0\r\n")
         if state:
             responses.extend([b"3.990V\r\n", b"0.040A\r\n"])
-    responses.extend([b"1\r\n", b"0\r\n", b"0\r\n"])
+    responses.append(b"1\r\n")
+    responses.extend(b"1\r\n" if state else b"0\r\n" for state in cleanup_states)
+    responses.extend([
+        b"2\r\n", b"V1 4.000\r\n", b"I1 0.080\r\n",
+        b"0.000V\r\n", b"0.000A\r\n",
+        b"1\r\n" if authoritative_on else b"0\r\n",
+    ])
     return responses
 
 
@@ -120,6 +131,8 @@ def test_success_is_raw_pyserial_8n1_xonxoff_and_exactly_one_on_off(
         b"OP1 1\n", b"*OPC?\n", b"OP1?\n", b"OP1?\n",
         *([b"OP1?\n", b"V1O?\n", b"I1O?\n"] * 10),
         b"OP1 0\n", b"*OPC?\n", b"OP1?\n", b"OP1?\n",
+        b"VRANGE1?\n", b"V1?\n", b"I1?\n",
+        b"V1O?\n", b"I1O?\n", b"OP1?\n",
     ]
     assert now[0] == pytest.approx(110.1)
     report_text = result.report_path.read_text(encoding="utf-8")
@@ -143,7 +156,11 @@ def test_spontaneous_off_stops_and_cleans_up_once(tmp_path: Path) -> None:
 def test_stable_on_failure_still_has_one_guaranteed_cleanup(tmp_path: Path) -> None:
     responses = successful_responses()
     responses[8] = b"0\r\n"
-    responses = responses[:9] + [b"1\r\n", b"0\r\n", b"0\r\n"]
+    responses = responses[:9] + [
+        b"1\r\n", b"0\r\n", b"0\r\n",
+        b"2\r\n", b"V1 4.000\r\n", b"I1 0.080\r\n",
+        b"0.000V\r\n", b"0.000A\r\n", b"0\r\n",
+    ]
     fake, run, _now = harness(tmp_path, responses)
 
     with pytest.raises(diagnostic.DirectDiagnosticError, match="remain ON"):
@@ -189,6 +206,64 @@ def test_timeout_after_output_on_attempts_off_once_and_reports_cleanup_failure(
     assert fake.writes.count(b"OP1 1\n") == 1
     assert fake.writes.count(b"OP1 0\n") == 1
     assert fake.writes.count(b"*OPC?\n") == 1  # no query on misaligned framing
+    assert fake.close_calls == 1
+
+
+def test_cleanup_accepts_zero_one_one_zero_zero_rebound(tmp_path: Path) -> None:
+    fake, run, _now = harness(
+        tmp_path,
+        successful_responses(
+            cleanup_states=(False, True, True, False, False),
+        ),
+    )
+    result = run(args(tmp_path))  # type: ignore[operator]
+
+    assert result.final_output_off is True
+    assert fake.writes.count(b"OP1 0\n") == 1
+    assert fake.writes.count(b"*OPC?\n") == 2
+    assert fake.close_calls == 1
+
+
+def test_cleanup_permanent_on_times_out_without_second_off(tmp_path: Path) -> None:
+    fake, run, now = harness(
+        tmp_path,
+        successful_responses(cleanup_states=(True,) * 25),
+    )
+    with pytest.raises(diagnostic.DirectDiagnosticError, match="within 1.0 s"):
+        run(args(tmp_path))  # type: ignore[operator]
+
+    assert now[0] == pytest.approx(111.05)
+    assert fake.writes.count(b"OP1 0\n") == 1
+    assert fake.close_calls == 1
+
+
+def test_cleanup_malformed_output_response_fails_without_second_off(
+    tmp_path: Path,
+) -> None:
+    responses = successful_responses()
+    responses[40] = b"invalid\r\n"
+    fake, run, _now = harness(tmp_path, responses)
+    with pytest.raises(diagnostic.DirectDiagnosticError, match="Malformed output-state"):
+        run(args(tmp_path))  # type: ignore[operator]
+
+    assert fake.writes.count(b"OP1 0\n") == 1
+    assert fake.close_calls == 1
+
+
+def test_authoritative_readback_rebound_fails_without_second_off(
+    tmp_path: Path,
+) -> None:
+    fake, run, _now = harness(
+        tmp_path,
+        successful_responses(authoritative_on=True),
+    )
+    with pytest.raises(
+        diagnostic.DirectDiagnosticError,
+        match="authoritative final readback",
+    ):
+        run(args(tmp_path))  # type: ignore[operator]
+
+    assert fake.writes.count(b"OP1 0\n") == 1
     assert fake.close_calls == 1
 
 
