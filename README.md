@@ -9,7 +9,8 @@ asynchronous command queue, Milestone 7 dual-channel manual controls with a
 guarded explicit-port hardware connection, Milestone 8 independent CSV logging,
 Milestone 9 independent Constant Current protocols with an offline-tested,
 guarded Real Hardware follow-up, Milestone 10 bounded real-time plots, and
-Milestone 11 independent Simulation Mode Constant Voltage protocols.
+Milestone 11 independent Constant Voltage protocols with supervised two-channel
+resistor-load acceptance.
 
 Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
@@ -255,7 +256,8 @@ and authoritative read-back.
 
 Constant Voltage was introduced and manually accepted in Simulation Mode. Its
 guarded Real Hardware follow-up reuses the Milestone 9 confirmation and preflight
-architecture and has been validated offline with injected fake serial only. Both
+architecture and has now passed supervised resistor-load acceptance on both
+channels after offline fake-serial validation. Both
 channels may run independently or simultaneously through the one shared command queue. Constant
 Current and Constant Voltage cannot own the same channel at the same time. An
 already-active Milestone 8 logger is reused as the single CSV writer, with
@@ -267,7 +269,10 @@ extra polling or duplicate writer. See
 Windows Simulation Mode manual acceptance confirmed independent and simultaneous
 CH1/CH2 operation, automatic per-run CSV creation when no logger was active,
 reuse of one active same-channel CSV through Pause/Resume, and a new CSV for a
-new protocol run. Physical Real Hardware Constant Voltage acceptance remains pending.
+new protocol run. Supervised Real Hardware acceptance subsequently passed for
+CH1 and CH2 separately with a verified 100-ohm load at 4.000 V / 0.080 A and a
+1.0-second sample interval. Each channel completed a 30-second run containing
+multiple Pause/Resume cycles and a separate uninterrupted 10-second run.
 
 Real Hardware Start and Resume each use a distinct, detailed, default-cancel
 authorization showing the channel, target voltage, current limit, duration,
@@ -277,13 +282,19 @@ output OFF and voltage range, writes voltage/current limit, verifies both
 readbacks, repeats the OFF/settings preflight, and permits exactly one Output-On
 attempt. Real Hardware Constant Current and Constant Voltage intervals must be at
 least 1.0 second; Simulation Mode retains its 0.1-second minimum. The one ON write
-is followed by `*OPC?`, two ON confirmations about 50 ms apart within one second,
-and a full authoritative ON readback. Resume then rebases its monotonic schedule,
+is followed by `*OPC?`, a non-blocking 1.0-second silent hardware-settling period,
+two ON confirmations about 100 ms apart and a full authoritative ON readback.
+Resume then rebases its monotonic schedule,
 excludes paused wall time and schedules the first ordinary sample one interval
 later. Pause, Stop, completion, failure, coordinated disconnect and shutdown use
 safety-priority Output Off with authoritative readback. Failure to confirm OFF
-raises a prominent warning; there is no automatic ON retry or reconnect. Physical
-Constant Voltage acceptance remains pending.
+raises a prominent warning; there is no automatic ON retry or reconnect. During
+acceptance, Resume became available only after settling and confirmation, Pause
+physically switched the selected output OFF, resumed CV operation was stable at
+approximately 4 V / 0.04 A, paused time was excluded, and CSV/plot continuity
+remained correct. Both outputs were physically and authoritatively OFF at the end.
+This approves supervised resistor-load operation only; electrolyser use and
+unattended operation remain unapproved.
 
 ## Milestone 5 offline physical backend
 
@@ -461,7 +472,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent continuous CSV data logging | Implemented for both channels through the shared queue; Simulation and read-only hardware acceptance passed |
 | Independent Constant Current protocols | Simulation/fake-serial validated; supervised CH1/CH2 resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Independent live voltage/current plots | Implemented for both channels with bounded display memory and unchanged full CSV data |
-| Independent Constant Voltage protocols | Simulation accepted; guarded Real Hardware path fake-serial validated, physical acceptance pending |
+| Independent Constant Voltage protocols | Simulation and guarded fake-serial validation passed; supervised CH1/CH2 100-ohm resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Later sweep/polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |

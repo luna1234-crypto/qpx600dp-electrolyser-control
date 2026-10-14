@@ -7,8 +7,8 @@ Date: 2026-10-08
 CH1 and CH2 each have a Constant Voltage panel with target voltage, current
 limit, active duration, measurement interval, Start, Pause, Resume and Stop.
 The initial implementation and manual acceptance used Simulation Mode. The later
-guarded Real Hardware follow-up was developed with injected fake serial only. No
-COM port or physical instrument was enumerated, opened, probed or commanded.
+guarded Real Hardware follow-up was first developed with injected fake serial,
+then accepted under direct operator supervision with a resistor load.
 
 `ConstantVoltageController` specializes the Milestone 9 state machine rather
 than creating another scheduler. It uses the same `IDLE`, `STARTING`, `RUNNING`,
@@ -112,8 +112,9 @@ missing token, invalid values, initially-ON refusal, readback mismatch, ambiguou
 Output-On failure without retry, cleanup/readback failure warnings, priority OFF,
 Pause/Resume confirmation and CSV reuse, natural completion, early Stop,
 coordinated disconnect, logger failure, stale start cancellation, duplicate-click
-protection, simultaneous channels and CH1/CH2 mutation isolation. Physical
-Constant Voltage acceptance remains pending.
+protection, simultaneous channels and CH1/CH2 mutation isolation. At that
+stage, physical Constant Voltage acceptance remained pending; the completed
+supervised acceptance is recorded below.
 
 ## Real-hardware transaction diagnostics follow-up
 
@@ -437,3 +438,29 @@ mismatches, exactly-once writes, Stop cancellation of an outstanding timer,
 early/repeated actions, session and terminal cancellation, two-channel
 serialization, and logging-file continuity. This follow-up was implemented and
 validated offline; COM3 and the physical instrument were not accessed.
+
+## Final supervised Real Hardware acceptance
+
+Final supervised acceptance passed independently on CH1 and CH2. No instrument
+serial number is recorded in this document.
+
+- Each channel was tested separately with a verified 100-ohm load.
+- Programmed settings were 4.000 V / 0.080 A with a 1.0-second sampling
+  interval.
+- Each channel passed one 30-second run containing multiple supervised
+  Pause/Resume cycles.
+- Resume became available only after the internal output-settling and
+  confirmation stage completed.
+- Every Pause physically switched the selected output OFF. Resume restored
+  stable CV operation at approximately 4 V / 0.04 A.
+- Paused wall time was excluded from active protocol duration.
+- The same CSV remained continuous through Pause/Resume and the real-time plots
+  continued correctly.
+- The unselected channel remained OFF and unchanged throughout each test.
+- Each channel separately passed an uninterrupted 10-second natural-completion
+  run.
+- CH1 and CH2 were both physically and authoritatively confirmed OFF at the end.
+
+This completes supervised resistor-load functional acceptance for Milestone 11.
+It does not approve electrolyser operation or unattended operation; both remain
+outside this acceptance scope pending later safety work.

@@ -367,14 +367,27 @@ Start/Resume confirmation, exact QPX identity/session checks, fresh selected-OFF
 and range/settings preflight, exactly-one Output-On attempt, safety-priority OFF
 cleanup, authoritative OFF readback, stale-request rejection and single-writer
 CSV ownership. Injected fake-serial tests passed for both channels, simultaneous
-queue use and failure paths. Physical Constant Voltage acceptance remains pending;
-Milestone 12 is not started.
+queue use and failure paths. Milestone 12 is not started.
 
 A subsequent offline stabilization follow-up sets a 1.0-second minimum interval
 for both Real Hardware Constant Current and Constant Voltage while preserving the
-Simulation Mode 0.1-second minimum. Start and Resume now issue Output On once,
-require `*OPC? = 1`, two ON responses about 50 ms apart within one second, and a
-final authoritative ON readback. Resume rebases its monotonic sample grid at the
-preserved active elapsed time; it performs no zero-delay ordinary sample and the
-first scheduled sample occurs one full interval later. Failure retains the
+Simulation Mode 0.1-second minimum. Start and Resume issue Output On once,
+require `*OPC? = 1`, wait through a non-blocking 1.0-second silent settling
+period, require two matching ON responses approximately 100 ms apart, and finish
+with an authoritative ON readback. Resume rebases its monotonic sample grid at
+the preserved active elapsed time; it performs no zero-delay ordinary sample and
+the first scheduled sample occurs one full interval later. Failure retains the
 existing exactly-once stable OFF cleanup and never retries Output On.
+
+Supervised Real Hardware resistor-load acceptance was subsequently completed on
+CH1 and CH2 separately. Each channel used a verified 100-ohm load, 4.000 V /
+0.080 A settings and a 1.0-second sample interval. Each passed one 30-second run
+with multiple supervised Pause/Resume cycles plus a separate uninterrupted
+10-second natural-completion run. Resume became available only after the
+internal settling/confirmation stage; every Pause physically switched the
+selected output OFF; Resume restored stable CV operation at approximately 4 V /
+0.04 A; and paused time was excluded from active duration. CSV continuity and
+real-time plots remained correct, while the unselected channel stayed OFF and
+unchanged. Both channels were physically and authoritatively confirmed OFF at
+the end. This is supervised resistor-load acceptance only: electrolyser use and
+unattended operation remain unapproved.
