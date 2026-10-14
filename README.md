@@ -340,6 +340,21 @@ redacted. A serial timeout invalidates framing; cleanup is still attempted once,
 but the tool reports physical OFF as unconfirmed when the invalidated transport
 cannot safely transmit or query.
 
+The same isolated CLI also provides a separate, explicitly guarded Pause/Resume
+diagnostic. It preserves the basic ten-second mode above unchanged and requires
+two mode-specific tokens in addition to the existing write token:
+
+```powershell
+.\.venv\Scripts\python.exe -m qpx_electrolyser.instrument.remote_output_diagnostic --port COM3 --pause-resume-diagnostic PAUSE-RESUME-QPX600DP --confirm-write WRITE-QPX600DP --confirm-pause-resume-output-on PAUSE-RESUME-QPX600DP-OUTPUT
+```
+
+One authorized invocation performs one fixed CH1 sequence: three one-second
+loaded samples, one stable-OFF Pause, two one-second OFF checks, setpoint and OFF
+revalidation, one stable-ON Resume, five one-second loaded samples, and one final
+stable-OFF cleanup. Each output lifetime permits exactly one `OP1 1` and one
+`OP1 0`; no Start, Pause, Resume or cleanup action is retried. Separate raw
+reports use the `qpx600dp_pause_resume_*.log` filename prefix.
+
 For supervised loaded validation, the separate monitored-output mode requires
 explicit expected setpoints, maximum measured current, minimum/maximum measured
 voltage, polling interval, voltage-settling time, the write token, and the strong

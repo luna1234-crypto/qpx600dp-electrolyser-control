@@ -35,6 +35,11 @@ RUN_DURATION_S = 10.0
 POLL_INTERVAL_S = 1.0
 CONFIRMATION_WINDOW_S = 1.0
 CONFIRMATION_POLL_INTERVAL_S = 0.05
+PAUSE_RESUME_MODE_CONFIRMATION = "PAUSE-RESUME-QPX600DP"
+PAUSE_RESUME_OUTPUT_CONFIRMATION = "PAUSE-RESUME-QPX600DP-OUTPUT"
+INITIAL_PHASE_DURATION_S = 3.0
+PAUSE_DURATION_S = 2.0
+RESUMED_PHASE_DURATION_S = 5.0
 
 
 class RemoteOutputDiagnosticError(RuntimeError):
@@ -67,10 +72,16 @@ class DiagnosticResult:
 class _RawDiagnosticReport:
     """Append timestamped notes and the transport's exact framed TX/RX records."""
 
-    def __init__(self, directory: Path, now: datetime) -> None:
+    def __init__(
+        self,
+        directory: Path,
+        now: datetime,
+        *,
+        filename_prefix: str = "qpx600dp_remote_output",
+    ) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         stamp = now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        self.path = directory / f"qpx600dp_remote_output_{stamp}.log"
+        self.path = directory / f"{filename_prefix}_{stamp}.log"
         self._stream = self.path.open("x", encoding="utf-8", newline="\n")
         self._handler = logging.StreamHandler(self._stream)
         formatter = logging.Formatter(
@@ -126,8 +137,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--confirm-output-on",
         metavar=MONITORED_OUTPUT_CONFIRMATION,
-        required=True,
         help="Exact existing strong token authorizing the single Output-On attempt",
+    )
+    parser.add_argument(
+        "--pause-resume-diagnostic",
+        metavar=PAUSE_RESUME_MODE_CONFIRMATION,
+        help="Exact token selecting the separate one-shot Pause/Resume diagnostic",
+    )
+    parser.add_argument(
+        "--confirm-pause-resume-output-on",
+        metavar=PAUSE_RESUME_OUTPUT_CONFIRMATION,
+        help="Separate strong token authorizing Start and Resume Output-On attempts",
     )
     parser.add_argument(
         "--report-dir",
@@ -147,10 +167,54 @@ def validate_authorization(args: argparse.Namespace) -> None:
         raise RemoteOutputAuthorizationError(
             f"Setting writes require --confirm-write {WRITE_CONFIRMATION}."
         )
-    if args.confirm_output_on != MONITORED_OUTPUT_CONFIRMATION:
+    if getattr(args, "pause_resume_diagnostic", None) is not None:
+        raise RemoteOutputAuthorizationError(
+            "Pause/Resume mode must use its separate authorization validation."
+        )
+    if getattr(args, "confirm_pause_resume_output_on", None) is not None:
+        raise RemoteOutputAuthorizationError(
+            "--confirm-pause-resume-output-on is only valid with "
+            "--pause-resume-diagnostic."
+        )
+    if getattr(args, "confirm_output_on", None) != MONITORED_OUTPUT_CONFIRMATION:
         raise RemoteOutputAuthorizationError(
             "Output On requires --confirm-output-on "
             f"{MONITORED_OUTPUT_CONFIRMATION}."
+        )
+    if not isinstance(args.report_dir, Path):
+        raise RemoteOutputAuthorizationError("--report-dir must be a filesystem path.")
+
+
+def validate_pause_resume_authorization(args: argparse.Namespace) -> None:
+    """Reject an unauthorized Pause/Resume run before constructing a backend."""
+    if not isinstance(args.port, str) or not args.port.strip():
+        raise RemoteOutputAuthorizationError("--port must be an explicit nonempty name.")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        raise RemoteOutputAuthorizationError("--timeout must be finite and positive.")
+    if args.confirm_write != WRITE_CONFIRMATION:
+        raise RemoteOutputAuthorizationError(
+            f"Setting writes require --confirm-write {WRITE_CONFIRMATION}."
+        )
+    if (
+        getattr(args, "pause_resume_diagnostic", None)
+        != PAUSE_RESUME_MODE_CONFIRMATION
+    ):
+        raise RemoteOutputAuthorizationError(
+            "Pause/Resume mode requires --pause-resume-diagnostic "
+            f"{PAUSE_RESUME_MODE_CONFIRMATION}."
+        )
+    if (
+        getattr(args, "confirm_pause_resume_output_on", None)
+        != PAUSE_RESUME_OUTPUT_CONFIRMATION
+    ):
+        raise RemoteOutputAuthorizationError(
+            "Pause/Resume Output On requires "
+            "--confirm-pause-resume-output-on "
+            f"{PAUSE_RESUME_OUTPUT_CONFIRMATION}."
+        )
+    if getattr(args, "confirm_output_on", None) is not None:
+        raise RemoteOutputAuthorizationError(
+            "--confirm-output-on conflicts with Pause/Resume diagnostic mode."
         )
     if not isinstance(args.report_dir, Path):
         raise RemoteOutputAuthorizationError("--report-dir must be a filesystem path.")
@@ -296,6 +360,230 @@ def _monitor_once_per_second(
     return tuple(samples)
 
 
+def _monitor_phase_once_per_second(
+    driver: QPX600DPDriver,
+    report: _RawDiagnosticReport,
+    *,
+    phase: str,
+    duration_s: float,
+    monotonic: Callable[[], float],
+    sleep: Callable[[float], None],
+    emit: Callable[[str], None],
+) -> tuple[DiagnosticSample, ...]:
+    started_at = monotonic()
+    samples: list[DiagnosticSample] = []
+    for index in range(1, int(duration_s / POLL_INTERVAL_S) + 1):
+        due_at = started_at + index * POLL_INTERVAL_S
+        delay = due_at - monotonic()
+        if delay > 0:
+            sleep(delay)
+        elapsed = monotonic() - started_at
+        output_enabled = driver.read_output_state(CHANNEL)
+        if not output_enabled:
+            raise RemoteOutputDiagnosticError(
+                f"CH1 unexpectedly reported OFF during {phase} at {elapsed:.3f} s."
+            )
+        voltage = driver.read_voltage(CHANNEL)
+        current = driver.read_current(CHANNEL)
+        sample = DiagnosticSample(elapsed, True, voltage, current)
+        samples.append(sample)
+        line = (
+            f"{phase} sample {index:02d}: elapsed={elapsed:.3f} s; OP1=ON; "
+            f"V1O={voltage:.6g} V; I1O={current:.6g} A"
+        )
+        report.note(line)
+        emit(line)
+    return tuple(samples)
+
+
+def _verify_resume_preflight(
+    driver: QPX600DPDriver, report: _RawDiagnosticReport
+) -> None:
+    if driver.read_output_state(CHANNEL):
+        raise RemoteOutputDiagnosticError("CH1 must remain OFF before Resume.")
+    voltage = driver.read_set_voltage(CHANNEL)
+    current = driver.read_set_current(CHANNEL)
+    voltage_resolution = QPX600DP_CAPABILITIES.voltage_range(
+        REQUIRED_RANGE_NAME
+    ).programming_resolution_v
+    if not _settings_match(voltage, VOLTAGE_V, voltage_resolution):
+        raise RemoteOutputDiagnosticError("CH1 voltage setpoint changed before Resume.")
+    if not _settings_match(
+        current,
+        CURRENT_A,
+        QPX600DP_CAPABILITIES.current_programming_resolution_a,
+    ):
+        raise RemoteOutputDiagnosticError(
+            "CH1 current-limit setpoint changed before Resume."
+        )
+    report.note("Resume preflight verified OP1=0 and CH1 setpoints unchanged")
+
+
+def run_pause_resume_diagnostic(
+    args: argparse.Namespace,
+    *,
+    driver_factory: Callable[[str, float], QPX600DPDriver] = _make_driver,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    utc_now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    emit: Callable[[str], None] = print,
+) -> DiagnosticResult:
+    """Perform one synchronous guarded Start/Pause/Resume diagnostic run."""
+    validate_pause_resume_authorization(args)
+    report = _RawDiagnosticReport(
+        args.report_dir,
+        utc_now(),
+        filename_prefix="qpx600dp_pause_resume",
+    )
+    driver: QPX600DPDriver | None = None
+    connected = False
+    lifetime_on_attempted = False
+    lifetime_off_attempted = False
+    samples: list[DiagnosticSample] = []
+    final_readback: ChannelReadback | None = None
+    primary_error: BaseException | None = None
+    cleanup_error: BaseException | None = None
+
+    def start_lifetime(reason: str) -> None:
+        nonlocal lifetime_on_attempted, lifetime_off_attempted
+        if driver is None:
+            raise AssertionError("driver is unavailable")
+        lifetime_on_attempted = True
+        lifetime_off_attempted = False
+        driver.output_on(CHANNEL)
+        report.note(f"OP1 1 transmitted exactly once for {reason}")
+        _confirm_stable_on(driver, monotonic=monotonic, sleep=sleep)
+        report.note(
+            f"CH1 stable ON confirmed for {reason} by *OPC? and two OP1? responses"
+        )
+
+    def stop_lifetime(reason: str) -> ChannelReadback:
+        nonlocal lifetime_on_attempted, lifetime_off_attempted
+        if driver is None:
+            raise AssertionError("driver is unavailable")
+        if not lifetime_on_attempted or lifetime_off_attempted:
+            raise RemoteOutputDiagnosticError(
+                f"Refused duplicate or unpaired Output Off for {reason}."
+            )
+        lifetime_off_attempted = True
+        driver.output_off(CHANNEL)
+        report.note(f"OP1 0 transmitted exactly once for {reason}")
+        readback = _confirm_stable_off(driver, monotonic=monotonic, sleep=sleep)
+        lifetime_on_attempted = False
+        report.note(f"CH1 stable OFF confirmed for {reason}")
+        return readback
+
+    try:
+        report.note(
+            "one-shot Pause/Resume diagnostic started; identity serial is redacted"
+        )
+        driver = driver_factory(args.port.strip(), float(args.timeout))
+        driver.connect()
+        connected = True
+        driver.identify()
+        report.note("QPX600DP identity accepted; identity details redacted")
+
+        op1 = driver.read_output_state(1)
+        op2 = driver.read_output_state(2)
+        if op1 or op2:
+            raise RemoteOutputDiagnosticError(
+                f"Both outputs must be OFF; observed OP1={int(op1)}, OP2={int(op2)}."
+            )
+        report.note("preflight confirmed OP1=0 and OP2=0")
+        _verify_initial_ch1(driver, report)
+        _apply_and_verify_fixed_settings(driver, report)
+
+        start_lifetime("initial Start")
+        samples.extend(_monitor_phase_once_per_second(
+            driver,
+            report,
+            phase="initial",
+            duration_s=INITIAL_PHASE_DURATION_S,
+            monotonic=monotonic,
+            sleep=sleep,
+            emit=emit,
+        ))
+
+        final_readback = stop_lifetime("Pause")
+        pause_started_at = monotonic()
+        for second in range(1, int(PAUSE_DURATION_S) + 1):
+            delay = pause_started_at + second * POLL_INTERVAL_S - monotonic()
+            if delay > 0:
+                sleep(delay)
+            if driver.read_output_state(CHANNEL):
+                raise RemoteOutputDiagnosticError(
+                    f"CH1 unexpectedly reported ON during Pause at {second:.3f} s."
+                )
+            report.note(f"Pause hold {second}: OP1=OFF")
+
+        _verify_resume_preflight(driver, report)
+        start_lifetime("Resume")
+        samples.extend(_monitor_phase_once_per_second(
+            driver,
+            report,
+            phase="resumed",
+            duration_s=RESUMED_PHASE_DURATION_S,
+            monotonic=monotonic,
+            sleep=sleep,
+            emit=emit,
+        ))
+        final_readback = stop_lifetime("final cleanup")
+    except BaseException as error:
+        primary_error = error
+        report.note(f"run stopped: {str(error) or type(error).__name__}")
+    finally:
+        if driver is not None and lifetime_on_attempted and not lifetime_off_attempted:
+            try:
+                final_readback = stop_lifetime("failure cleanup")
+            except BaseException as error:
+                cleanup_error = error
+                report.note(
+                    "cleanup failed; physical OFF is unconfirmed: "
+                    f"{str(error) or type(error).__name__}"
+                )
+        elif lifetime_on_attempted and lifetime_off_attempted:
+            cleanup_error = RemoteOutputDiagnosticError(
+                "Output-Off was already attempted for the active lifetime; "
+                "physical OFF is unconfirmed and the write was not repeated."
+            )
+            report.note(str(cleanup_error))
+        if driver is not None and connected:
+            try:
+                driver.disconnect()
+                report.note("serial connection closed")
+            except BaseException as error:
+                if cleanup_error is None:
+                    cleanup_error = error
+                report.note(f"disconnect failed: {str(error) or type(error).__name__}")
+        report.note("one-shot Pause/Resume diagnostic finished; no action was retried")
+        report_path = report.path
+        report.close()
+
+    if cleanup_error is not None:
+        prefix = (
+            f"{str(primary_error) or type(primary_error).__name__}; "
+            if primary_error is not None
+            else ""
+        )
+        raise RemoteOutputDiagnosticError(
+            prefix
+            + "Output-Off cleanup failed; physical OFF is unconfirmed: "
+            + (str(cleanup_error) or type(cleanup_error).__name__),
+            report_path,
+        ) from cleanup_error
+    if primary_error is not None:
+        raise RemoteOutputDiagnosticError(
+            str(primary_error) or type(primary_error).__name__, report_path
+        ) from primary_error
+    if final_readback is None or final_readback.output_enabled:
+        raise RemoteOutputDiagnosticError(
+            "Pause/Resume diagnostic ended without authoritative final OFF readback.",
+            report_path,
+        )
+    emit(f"Report: {report_path}")
+    return DiagnosticResult(report_path, tuple(samples), final_readback)
+
+
 def run_diagnostic(
     args: argparse.Namespace,
     *,
@@ -405,15 +693,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        result = run_diagnostic(args)
+        if args.pause_resume_diagnostic is not None:
+            result = run_pause_resume_diagnostic(args)
+        else:
+            result = run_diagnostic(args)
     except (RemoteOutputAuthorizationError, RemoteOutputDiagnosticError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         report_path = getattr(error, "report_path", None)
         if report_path is not None:
             print(f"Report: {report_path}", file=sys.stderr)
         return 2
+    mode = "Pause/Resume diagnostic" if args.pause_resume_diagnostic else "diagnostic"
     print(
-        f"Completed {len(result.samples)} samples; final OP1=0; "
+        f"Completed {mode} with {len(result.samples)} samples; final OP1=0; "
         f"report={result.report_path}"
     )
     return 0

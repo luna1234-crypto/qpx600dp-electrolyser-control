@@ -312,3 +312,37 @@ Output-On/Output-Off counts. A timeout deliberately invalidates framing, so the
 one cleanup attempt can be rejected before transmission and is reported as
 physical OFF unconfirmed rather than reopening or writing through an unaligned
 session. This tool was not run against COM3 or any physical instrument.
+
+## Isolated Pause/Resume diagnostic follow-up
+
+The standalone CLI now has a separate guarded Pause/Resume mode. The original
+basic diagnostic command and sequence remain unchanged. Authorization is rejected
+before backend construction unless both mode-specific exact tokens and the
+existing write token are present:
+
+```powershell
+.\.venv\Scripts\python.exe -m qpx_electrolyser.instrument.remote_output_diagnostic --port COM3 --pause-resume-diagnostic PAUSE-RESUME-QPX600DP --confirm-write WRITE-QPX600DP --confirm-pause-resume-output-on PAUSE-RESUME-QPX600DP-OUTPUT
+```
+
+The new path remains synchronous and uses only `SerialTransport` and
+`QPX600DPDriver`. It has no Qt, GUI, controller, shared queue, CSV, plot,
+background-thread or port-enumeration dependency. After identity, both-output-OFF,
+80 V range and fixed 4.000 V / 0.080 A checks, it performs exactly one initial
+`OP1 1`, `*OPC?`, stable-ON confirmation and three one-second samples. Pause
+sends one `OP1 0`, confirms stable OFF with the authoritative readback, and
+requires two further one-second `OP1? = 0` checks. Resume rechecks OP1 and both
+setpoints before its single `OP1 1`, `*OPC?`, stable-ON confirmation and five
+one-second samples. Final cleanup sends one `OP1 0` for the resumed lifetime and
+requires stable OFF plus authoritative readback.
+
+Output-lifetime state records each attempted ON and OFF write before transmission.
+Consequently, an exception after a partial write cannot cause an automatic retry,
+and a failed Pause confirmation cannot cause a second OFF write. Failures during
+an active lifetime receive the one remaining cleanup attempt; failures after a
+confirmed Pause remain OFF without an unpaired write. Raw diagnostics use the
+separate `qpx600dp_pause_resume_*.log` prefix and redact identity details.
+
+Offline fake-serial coverage verifies full success, Pause OFF failure, Resume
+ON-to-OFF failure, pre-Resume setpoint mismatch, exact one ON/OFF write per
+output lifetime, failure cleanup, token rejection, serial closure and absence of
+automatic retry. This mode has not been run against COM3 or physical hardware.
