@@ -375,3 +375,26 @@ and command order, success, spontaneous OFF, ON-confirmation failure, timeout,
 identity mismatch, initially-ON rejection, authorization-before-open, guaranteed
 single cleanup and prohibited-import isolation. This implementation and its
 tests were completed offline; COM3 and physical hardware were not accessed.
+
+## Pause-to-Resume quiescence safety gate
+
+Real Hardware protocols now keep Resume disabled throughout Pause and stable
+Output-Off confirmation, then for a further fixed 1.0-second monotonic
+quiescence period after authoritative OFF readback succeeds. During that period
+the protocol remains `PAUSED` and reports `Output OFF confirmed; waiting before
+Resume.` The Qt timer is single-shot and does not block the GUI thread.
+
+Resume becomes available only if the original connection session is still
+current, the protocol remains `PAUSED`, authoritative output state is OFF, no
+command is pending, and the complete quiescence interval has elapsed. Early or
+repeated Resume requests return without changing state, logging ownership or
+submitting a command. Stop, disconnect, failure, shutdown, session replacement
+and protocol replacement cancel the pending timer, preventing a late callback
+from enabling Resume.
+
+After the gate opens, the existing Resume transaction is unchanged: fresh
+OFF/setpoint preflight, explicit operator confirmation, one Output-On write,
+stable-ON confirmation, and continuation in the same CSV. Simulation Mode keeps
+its existing immediate post-Pause Resume behavior. This change was developed
+and tested with fake serial only; no COM port or physical instrument was
+accessed.

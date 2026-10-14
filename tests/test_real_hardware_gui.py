@@ -14,10 +14,16 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 import pytest
 
 from qpx_electrolyser.app.channel_controller import ChannelSnapshot, ManualChannelController
-from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
+from qpx_electrolyser.app.connection_controller import (
+    ConnectionController,
+    ConnectionSnapshot,
+    ConnectionState,
+)
 from qpx_electrolyser.data.csv_logging import ChannelLoggingController, CsvLogFile
 from qpx_electrolyser.engine.constant_current import (
+    ConstantCurrentConfig,
     ConstantCurrentController,
+    ProtocolSnapshot,
     ProtocolState,
     REAL_HARDWARE_PROTOCOL_CONFIRMATION,
 )
@@ -26,6 +32,7 @@ from qpx_electrolyser.engine.constant_voltage import (
     REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
 )
 from qpx_electrolyser.gui.channel_panel import ChannelPanel
+from qpx_electrolyser.gui.constant_current_panel import ConstantCurrentPanel
 from qpx_electrolyser.gui.main_window import MainWindow
 from qpx_electrolyser.instrument.qpx600dp import QPX600DPDriver
 from qpx_electrolyser.instrument.connection_worker import CommandPriority
@@ -572,6 +579,7 @@ def test_real_protocol_resume_requires_fresh_confirmation_and_reuses_csv(
 
         assert not protocol.resume()
         assert fake.writes == before_cancelled_resume
+        wait_until(qapp, lambda: protocol.snapshot.resume_ready, timeout_s=1.5)
         assert protocol.resume(REAL_HARDWARE_PROTOCOL_CONFIRMATION)
         wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
         protocol.stop("fake-serial resume test cleanup")
@@ -587,6 +595,122 @@ def test_real_protocol_resume_requires_fresh_confirmation_and_reuses_csv(
     finally:
         logger.shutdown()
         assert connection.shutdown(timeout_s=1)
+
+
+def test_real_resume_waits_for_confirmed_off_quiescence_without_side_effects(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    now = [100.0]
+
+    def advance(delay_s: float) -> None:
+        now[0] += delay_s
+
+    fake = FakeSerial([
+        *initial_responses(),
+        *protocol_start_responses(1),
+        *output_off_responses(1),
+        *protocol_resume_responses(1),
+        *output_off_responses(1),
+    ])
+    connection = ConnectionController(real_backend_factory=FakeRealBackendFactory(fake))
+    protocol = ConstantCurrentController(
+        1, connection, monotonic=lambda: now[0], sleep=advance,
+    )
+    panel = ConstantCurrentPanel(1)
+    panel.set_context(available=True)
+    protocol.snapshot_changed.connect(panel.apply_snapshot)
+    try:
+        arm_real(connection)
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        assert protocol.start(
+            "0.1", "2", "5", "1", "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_PROTOCOL_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        csv_path = protocol.snapshot.file_path
+
+        protocol.pause()
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.PAUSED)
+        writes_at_pause = list(fake.writes)
+        assert protocol.snapshot.output_enabled is False
+        assert not protocol.snapshot.resume_ready
+        assert not panel.resume_button.isEnabled()
+        assert protocol.snapshot.message == "Output OFF confirmed; waiting before Resume."
+
+        assert not protocol.resume(REAL_HARDWARE_PROTOCOL_CONFIRMATION)
+        assert not protocol.resume(REAL_HARDWARE_PROTOCOL_CONFIRMATION)
+        assert fake.writes == writes_at_pause
+        assert protocol.snapshot.file_path == csv_path
+
+        now[0] += 0.999
+        protocol._complete_resume_quiescence()
+        assert not protocol.snapshot.resume_ready
+        assert not panel.resume_button.isEnabled()
+        now[0] += 0.002
+        protocol._complete_resume_quiescence()
+        assert protocol.snapshot.resume_ready
+        assert panel.resume_button.isEnabled()
+
+        assert protocol.resume(REAL_HARDWARE_PROTOCOL_CONFIRMATION)
+        assert not protocol.resume(REAL_HARDWARE_PROTOCOL_CONFIRMATION)
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        assert fake.writes.count(b"OP1 1\n") == 2
+        assert protocol.snapshot.file_path == csv_path
+        assert len(list(tmp_path.glob("qpx600dp_ch1_*.csv"))) == 1
+        assert not any(command.startswith((b"V2 ", b"I2 ", b"OP2 ")) for command in fake.writes)
+
+        protocol.stop("resume gate regression cleanup")
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.COMPLETED)
+    finally:
+        panel.deleteLater()
+        assert connection.shutdown(timeout_s=1)
+
+
+@pytest.mark.parametrize("event", ["stop", "disconnect", "failure", "session-change"])
+def test_real_resume_quiescence_is_cancelled_by_terminal_or_session_event(
+    qapp: QApplication, event: str,
+) -> None:
+    now = [100.0]
+    connection = ConnectionController()
+    protocol = ConstantCurrentController(1, connection, monotonic=lambda: now[0])
+    protocol._real_hardware_run = True
+    protocol._session_id = 7
+    protocol._snapshot = ProtocolSnapshot(
+        channel=1,
+        state=ProtocolState.PAUSED,
+        config=ConstantCurrentConfig(0.1, 2.0, 5.0, 1.0, "60 V"),
+        remaining_active_s=5.0,
+        output_enabled=False,
+    )
+    protocol._start_resume_quiescence()
+    assert protocol._resume_enable_timer.isActive()
+
+    if event == "stop":
+        protocol.stop()
+    elif event == "failure":
+        protocol.force_shutdown("test failure")
+    else:
+        protocol._connection_changed(ConnectionSnapshot(
+            state=(
+                ConnectionState.DISCONNECTED
+                if event == "disconnect"
+                else ConnectionState.CONNECTED
+            ),
+            simulation_mode=False,
+            port_name="REDACTED",
+            instrument_id=None,
+            initial_readbacks=(),
+            message="test event",
+            session_id=7 if event == "disconnect" else 8,
+        ))
+
+    now[0] += 2.0
+    protocol._complete_resume_quiescence()
+    qapp.processEvents()
+    assert not protocol._resume_enable_timer.isActive()
+    assert not protocol.snapshot.resume_ready
+    assert protocol.snapshot.state is not ProtocolState.PAUSED
 
 
 def test_ambiguous_real_output_on_never_retries_and_requests_priority_off(
@@ -924,6 +1048,7 @@ def test_real_cv_pause_resume_reconfirms_and_reuses_existing_csv(
         before_cancel = list(fake.writes)
         assert not protocol.resume()
         assert fake.writes == before_cancel
+        wait_until(qapp, lambda: protocol.snapshot.resume_ready, timeout_s=1.5)
         assert protocol.resume(REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION)
         wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
         protocol.stop("CV resume test cleanup")
@@ -1663,6 +1788,8 @@ def test_real_cv_resume_rebases_first_sample_without_skipping_active_slot(
         wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.PAUSED)
         paused_elapsed = protocol.snapshot.elapsed_active_s
         now[0] += 10.0
+        protocol._complete_resume_quiescence()
+        assert protocol.snapshot.resume_ready
         writes_before_resume = len(fake.writes)
 
         assert protocol.resume(REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION)

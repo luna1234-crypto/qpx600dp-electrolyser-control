@@ -71,6 +71,7 @@ OUTPUT_ON_STABILIZATION_WINDOW_S = 1.0
 OUTPUT_ON_POLL_INTERVAL_S = 0.05
 OUTPUT_OFF_CONFIRMATION_WINDOW_S = 1.0
 OUTPUT_OFF_POLL_INTERVAL_S = 0.05
+REAL_HARDWARE_RESUME_QUIESCENCE_S = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +99,7 @@ class ProtocolSnapshot:
     message: str = "Constant Current protocol idle"
     error: bool = False
     operator_warning: bool = False
+    resume_ready: bool = False
 
     @property
     def owns_channel(self) -> bool:
@@ -198,6 +200,8 @@ class ConstantCurrentController(QObject):
         self._terminal_message = ""
         self._output_off_attempted = False
         self._real_hardware_run = False
+        self._resume_quiescence_started_at: float | None = None
+        self._resume_quiescence_session_id = 0
 
         self._sample_timer = QTimer(self)
         self._sample_timer.setSingleShot(True)
@@ -207,6 +211,10 @@ class ConstantCurrentController(QObject):
         self._clock_timer.setInterval(100)
         self._clock_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._clock_timer.timeout.connect(self._update_clock)
+        self._resume_enable_timer = QTimer(self)
+        self._resume_enable_timer.setSingleShot(True)
+        self._resume_enable_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._resume_enable_timer.timeout.connect(self._complete_resume_quiescence)
 
         connection.snapshot_changed.connect(self._connection_changed)
         connection.command_completed.connect(self._command_completed)
@@ -278,6 +286,7 @@ class ConstantCurrentController(QObject):
     ) -> bool:
         if self._snapshot.owns_channel:
             return False
+        self._cancel_resume_quiescence()
         validation_error = self._validate_controller_inputs(
             target_current,
             voltage_compliance,
@@ -345,6 +354,7 @@ class ConstantCurrentController(QObject):
         self._publish(replace(
             self._snapshot,
             state=ProtocolState.PAUSING,
+            resume_ready=False,
             message="Turning the selected output OFF and confirming readback...",
         ))
         self._submit_output_off_action("pause", "Protocol pause requested")
@@ -352,6 +362,12 @@ class ConstantCurrentController(QObject):
     @Slot()
     def resume(self, real_hardware_confirmation: str | None = None) -> bool:
         if self._snapshot.state is not ProtocolState.PAUSED or self._snapshot.config is None:
+            return False
+        if (
+            self._pending_request_id is not None
+            or self._snapshot.output_enabled is not False
+            or not self._snapshot.resume_ready
+        ):
             return False
         if self._remaining_active() <= 0:
             self._finish_terminal(ProtocolState.COMPLETED, "Protocol duration completed")
@@ -374,9 +390,11 @@ class ConstantCurrentController(QObject):
             ))
             return False
         config = self._snapshot.config
+        self._cancel_resume_quiescence()
         self._publish(replace(
             self._snapshot,
             state=ProtocolState.RESUMING,
+            resume_ready=False,
             message="Revalidating settings before guarded Output On...",
         ))
         return self._submit_action(
@@ -834,9 +852,16 @@ class ConstantCurrentController(QObject):
                 state=ProtocolState.PAUSED,
                 elapsed_active_s=self._active_before_run_s,
                 remaining_active_s=self._remaining_active(),
-                message="Protocol paused; selected output confirmed OFF",
+                resume_ready=not self._real_hardware_run,
+                message=(
+                    "Output OFF confirmed; waiting before Resume."
+                    if self._real_hardware_run
+                    else "Protocol paused; selected output confirmed OFF"
+                ),
             ))
             self._append_event_best_effort("paused", ProtocolState.PAUSED)
+            if self._real_hardware_run:
+                self._start_resume_quiescence()
             return
         if action == "stop":
             if (
@@ -879,6 +904,7 @@ class ConstantCurrentController(QObject):
     def _begin_cleanup(self, terminal: ProtocolState, message: str) -> None:
         if self._snapshot.state is ProtocolState.STOPPING:
             return
+        self._cancel_resume_quiescence()
         self._sample_timer.stop()
         self._clock_timer.stop()
         self._connection.cancel_commands(self._sample_key)
@@ -889,6 +915,7 @@ class ConstantCurrentController(QObject):
         self._publish(replace(
             self._snapshot,
             state=ProtocolState.STOPPING,
+            resume_ready=False,
             elapsed_active_s=self._active_before_run_s,
             remaining_active_s=self._remaining_active(),
             message="Attempting selected-channel Output Off...",
@@ -922,6 +949,7 @@ class ConstantCurrentController(QObject):
         *,
         warning: bool = False,
     ) -> None:
+        self._cancel_resume_quiescence()
         self._sample_timer.stop()
         self._clock_timer.stop()
         self._connection.cancel_commands(self._sample_key)
@@ -943,6 +971,7 @@ class ConstantCurrentController(QObject):
         self._publish(replace(
             self._snapshot,
             state=state,
+            resume_ready=False,
             elapsed_active_s=self._active_before_run_s,
             remaining_active_s=self._remaining_active(),
             message=message,
@@ -977,6 +1006,46 @@ class ConstantCurrentController(QObject):
         """Start a fresh interval grid without consuming an immediate sample slot."""
         self._sample_epoch_active_s = self._elapsed_active()
         self._next_sample_slot = 1
+
+    def _start_resume_quiescence(self) -> None:
+        """Gate Real Hardware Resume for a full monotonic second after confirmed OFF."""
+        self._cancel_resume_quiescence()
+        self._resume_quiescence_started_at = self._monotonic()
+        self._resume_quiescence_session_id = self._session_id
+        self._resume_enable_timer.start(math.ceil(REAL_HARDWARE_RESUME_QUIESCENCE_S * 1000))
+
+    def _cancel_resume_quiescence(self) -> None:
+        self._resume_enable_timer.stop()
+        self._resume_quiescence_started_at = None
+        self._resume_quiescence_session_id = 0
+
+    @Slot()
+    def _complete_resume_quiescence(self) -> None:
+        started_at = self._resume_quiescence_started_at
+        if started_at is None:
+            return
+        elapsed = max(0.0, self._monotonic() - started_at)
+        remaining = REAL_HARDWARE_RESUME_QUIESCENCE_S - elapsed
+        if remaining > 0:
+            self._resume_enable_timer.start(max(1, math.ceil(remaining * 1000)))
+            return
+        expected_session_id = self._resume_quiescence_session_id
+        self._cancel_resume_quiescence()
+        if (
+            not self._real_hardware_run
+            or self._snapshot.state is not ProtocolState.PAUSED
+            or self._snapshot.output_enabled is not False
+            or self._pending_request_id is not None
+            or expected_session_id != self._session_id
+            or not self._session_is_current()
+        ):
+            return
+        self._publish(replace(
+            self._snapshot,
+            resume_ready=True,
+            message="Protocol paused; Output OFF confirmed; Resume available.",
+            error=False,
+        ))
 
     @Slot()
     def _update_clock(self) -> None:

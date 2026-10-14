@@ -173,7 +173,11 @@ class ConstantCurrentPanel(QGroupBox):
             widget.setEnabled(start_ready)
         self.start_button.setEnabled(start_ready)
         self.pause_button.setEnabled(state is ProtocolState.RUNNING)
-        self.resume_button.setEnabled(state is ProtocolState.PAUSED and self._available)
+        self.resume_button.setEnabled(
+            state is ProtocolState.PAUSED
+            and self._snapshot.resume_ready
+            and self._available
+        )
         self.stop_button.setEnabled(state not in {
             ProtocolState.IDLE,
             ProtocolState.COMPLETED,
