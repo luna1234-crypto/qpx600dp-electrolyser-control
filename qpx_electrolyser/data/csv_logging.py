@@ -37,6 +37,10 @@ CSV_COLUMNS = (
     "error",
     "protocol_name",
     "protocol_state",
+    "scan_name",
+    "scan_step_index",
+    "scan_total_steps",
+    "scan_commanded_setpoint",
 )
 
 
@@ -56,6 +60,10 @@ class CsvWriter(Protocol):
         error: str = "",
         protocol_name: str = "",
         protocol_state: str = "",
+        scan_name: str = "",
+        scan_step_index: int | None = None,
+        scan_total_steps: int | None = None,
+        scan_commanded_setpoint: float | None = None,
     ) -> None: ...
 
     def close(self) -> None: ...
@@ -78,6 +86,10 @@ class ProtocolLogSink(Protocol):
         protocol_state: str,
         error: str = "",
         protocol_name: str = "constant_current",
+        scan_name: str = "",
+        scan_step_index: int | None = None,
+        scan_total_steps: int | None = None,
+        scan_commanded_setpoint: float | None = None,
     ) -> None: ...
 
     def suspend_sampling(self) -> None: ...
@@ -120,6 +132,10 @@ class CsvLogFile:
         error: str = "",
         protocol_name: str = "",
         protocol_state: str = "",
+        scan_name: str = "",
+        scan_step_index: int | None = None,
+        scan_total_steps: int | None = None,
+        scan_commanded_setpoint: float | None = None,
     ) -> None:
         stream = self._stream
         if stream is None:
@@ -138,6 +154,13 @@ class CsvLogFile:
             "session_id": str(session_id),
             "protocol_name": protocol_name,
             "protocol_state": protocol_state,
+            "scan_name": scan_name,
+            "scan_step_index": "" if scan_step_index is None else str(scan_step_index),
+            "scan_total_steps": "" if scan_total_steps is None else str(scan_total_steps),
+            "scan_commanded_setpoint": (
+                "" if scan_commanded_setpoint is None
+                else f"{scan_commanded_setpoint:.12g}"
+            ),
             "sample_status": status,
             "error": error,
         }
@@ -278,6 +301,10 @@ class ChannelLoggingController(QObject):
         protocol_state: str,
         error: str = "",
         protocol_name: str = "constant_current",
+        scan_name: str = "",
+        scan_step_index: int | None = None,
+        scan_total_steps: int | None = None,
+        scan_commanded_setpoint: float | None = None,
     ) -> None:
         """Append a protocol row through this logger's one open writer.
 
@@ -301,6 +328,10 @@ class ChannelLoggingController(QObject):
                 error=error,
                 protocol_name=protocol_name,
                 protocol_state=protocol_state,
+                scan_name=scan_name,
+                scan_step_index=scan_step_index,
+                scan_total_steps=scan_total_steps,
+                scan_commanded_setpoint=scan_commanded_setpoint,
             )
         except (OSError, ValueError) as append_error:
             self._fail_file(append_error)

@@ -1,1 +1,1 @@
-"""Reserved for independent channel engines and state machines from milestone 9."""
+"""Independent protocol and reusable stepped-scan state machines."""

@@ -1,4 +1,4 @@
-# Windows visual smoke test (milestone 11)
+# Windows visual smoke test (milestone 12)
 
 This procedure checks the simulation connection GUI. Do not connect a power supply.
 
@@ -80,7 +80,35 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
    disconnection, worker cleanup and shutdown records
    from both runs. The first run's records must remain.
 
+## Milestone 12 Voltage Scan checks
+
+With Simulation Mode connected, complete these checks before the final
+disconnect/shutdown steps above:
+
+1. In CH1 Voltage Scan enter start `1`, stop `2`, step `0.5`, current limit
+   `0.1`, dwell `1` and interval `0.25`. Start and confirm steps `1/3`, `2/3`
+   and `3/3` appear in order, the commanded voltage reaches 2 V exactly once,
+   plot/measurements update, one CSV closes and the output ends OFF.
+2. On CH2 enter start `2`, stop `1`, step `-0.4`, current limit `0.1`, dwell
+   `1` and interval `0.25`. Confirm the non-divisible inclusive sequence is
+   2.0, 1.6, 1.2 and 1.0 V, without an overshoot or duplicate endpoint.
+3. Start both channels together with short scans. Confirm both progress while
+   the GUI remains responsive, their files and plots remain independent, and
+   the shared queue never corrupts a readback.
+4. Pause CH1 during a dwell. Confirm selected output OFF and active elapsed time
+   freezes. Resume and confirm the same step continues before the next step;
+   neither the current nor following step may be duplicated or skipped.
+5. Stop CH1 early while CH2 continues. Confirm CH1 ends OFF and closes/detaches
+   its scan file without changing CH2.
+6. Start same-channel standalone logging, then a scan. Confirm the scan reuses
+   that one CSV, logging remains active after scan completion, scan rows contain
+   `scan_name`, step index/total and commanded setpoint, and plots use those
+   samples without visible extra polling.
+7. Keep Simulation Mode selected. The Real Hardware disabled-state and pending
+   message are covered by automated widget tests; do not select Real Hardware
+   during this manual procedure.
+
 Record the Windows edition, Python/PySide6 versions, date and observed result.
 The historical Milestone 4 visual check used the earlier CPX model identity.
-This Milestone 11 procedure is Simulation Mode only: do not select Real Hardware,
-enter a port, invoke the hardware checker or connect the GUI to a physical supply.
+This Milestone 12 procedure is Simulation Mode only: do not select Real Hardware,
+enter a port, invoke a hardware tool or access a physical supply.

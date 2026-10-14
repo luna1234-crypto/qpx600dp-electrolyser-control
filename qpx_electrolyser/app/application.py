@@ -1,4 +1,4 @@
-"""Compose the Milestone 9 guarded Constant Current protocol GUI."""
+"""Compose the Milestone 12 protocol and Simulation Mode voltage-scan GUI."""
 
 import argparse
 from collections.abc import Sequence
@@ -21,7 +21,7 @@ from qpx_electrolyser.gui.main_window import MainWindow
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a normal window, or briefly exercise its event loop for validation."""
-    parser = argparse.ArgumentParser(description="QPX600DP milestone 9 Constant Current protocols")
+    parser = argparse.ArgumentParser(description="QPX600DP Milestone 12 voltage scans")
     parser.add_argument("--log-dir", type=Path, help="Override the project's logs directory")
     parser.add_argument(
         "--smoke-test", action="store_true", help="Show the window, process events, then close"
@@ -173,6 +173,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                         fail_smoke_test(
                             "Constant Voltage did not reuse the active channel CSV file."
                         )
+                for panel in window.voltage_scan_panels.values():
+                    panel.start_voltage_input.setText("1")
+                    panel.stop_voltage_input.setText("1.5")
+                    panel.step_input.setText("0.5")
+                    panel.current_limit_input.setText("0.1")
+                    panel.dwell_input.setText("0.2")
+                    panel.interval_input.setText("0.1")
+                    panel.start_button.click()
+                QTimer.singleShot(25, verify_voltage_scan_smoke_test)
+
+            def verify_voltage_scan_smoke_test() -> None:
+                snapshots = [
+                    item.snapshot for item in window.voltage_scan_controllers.values()
+                ]
+                if any(item.state is ProtocolState.FAILED for item in snapshots):
+                    fail_smoke_test("Simulation Mode Voltage Scan smoke test failed.")
+                if any(item.state is not ProtocolState.COMPLETED for item in snapshots):
+                    if time.monotonic() >= smoke_deadline:
+                        fail_smoke_test("Voltage scans did not complete in time.")
+                    QTimer.singleShot(25, verify_voltage_scan_smoke_test)
+                    return
+                for channel in (1, 2):
+                    logger_snapshot = window.logging_controllers[channel].snapshot
+                    scan_snapshot = window.voltage_scan_controllers[channel].snapshot
+                    if not logger_snapshot.active:
+                        fail_smoke_test("Voltage Scan completion stopped an active logger.")
+                    if scan_snapshot.file_path != logger_snapshot.file_path:
+                        fail_smoke_test("Voltage Scan did not reuse the active channel CSV.")
+                    if scan_snapshot.scan_step_index != scan_snapshot.scan_total_steps:
+                        fail_smoke_test("Voltage Scan did not reach its inclusive endpoint.")
                 QTimer.singleShot(25, verify_logging_smoke_test)
 
             def verify_logging_smoke_test() -> None:
@@ -202,8 +232,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         raise OSError("Could not write the requested window screenshot.")
                 logger.info(
                     "Smoke test: window visible=%s; Qt event loop processed events; "
-                    "simulator connected, both Constant Current and Constant Voltage "
-                    "protocols completed and "
+                    "simulator connected, both Constant Current, Constant Voltage and "
+                    "Voltage Scan protocols completed and "
                     "shared their independently active channel CSV logs while updating "
                     "bounded live plots",
                     window.isVisible(),

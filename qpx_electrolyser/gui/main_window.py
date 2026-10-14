@@ -33,11 +33,13 @@ from qpx_electrolyser.engine.constant_voltage import (
     ConstantVoltageController,
     REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
 )
+from qpx_electrolyser.engine.stepped_scan import VoltageScanController
 from qpx_electrolyser.gui.channel_panel import ChannelPanel
 from qpx_electrolyser.gui.connection_panel import ConnectionPanel
 from qpx_electrolyser.gui.constant_current_panel import ConstantCurrentPanel
 from qpx_electrolyser.gui.constant_voltage_panel import ConstantVoltagePanel
 from qpx_electrolyser.gui.plots.realtime import ChannelPlotController, ChannelPlotPanel
+from qpx_electrolyser.gui.voltage_scan_panel import VoltageScanPanel
 
 
 class MainWindow(QMainWindow):
@@ -52,7 +54,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self._connection_controller = connection_controller
-        self.setWindowTitle("QPX600DP Electrolyser - Constant Voltage")
+        self.setWindowTitle("QPX600DP Electrolyser - Voltage Scan")
         self.resize(1280, 960)
         self.setMinimumSize(760, 540)
 
@@ -105,10 +107,12 @@ class MainWindow(QMainWindow):
         self.logging_controllers: dict[int, ChannelLoggingController] = {}
         self.protocol_controllers: dict[int, ConstantCurrentController] = {}
         self.voltage_protocol_controllers: dict[int, ConstantVoltageController] = {}
+        self.voltage_scan_controllers: dict[int, VoltageScanController] = {}
         self.plot_controllers: dict[int, ChannelPlotController] = {}
         self.channel_panels: dict[int, ChannelPanel] = {}
         self.protocol_panels: dict[int, ConstantCurrentPanel] = {}
         self.voltage_protocol_panels: dict[int, ConstantVoltagePanel] = {}
+        self.voltage_scan_panels: dict[int, VoltageScanPanel] = {}
         self.plot_panels: dict[int, ChannelPlotPanel] = {}
         for channel in (1, 2):
             controller = ManualChannelController(channel, connection_controller, self)
@@ -117,10 +121,14 @@ class MainWindow(QMainWindow):
             voltage_protocol_controller = ConstantVoltageController(
                 channel, connection_controller, self
             )
+            voltage_scan_controller = VoltageScanController(
+                channel, connection_controller, self
+            )
             plot_controller = ChannelPlotController(channel, connection_controller, self)
             panel = ChannelPanel(channel)
             protocol_panel = ConstantCurrentPanel(channel)
             voltage_protocol_panel = ConstantVoltagePanel(channel)
+            voltage_scan_panel = VoltageScanPanel(channel)
             plot_panel = ChannelPlotPanel(channel)
             panel.refresh_requested.connect(controller.request_refresh)
             panel.voltage_requested.connect(controller.request_set_voltage)
@@ -143,6 +151,9 @@ class MainWindow(QMainWindow):
             logging_controller.snapshot_changed.connect(
                 voltage_protocol_controller.logging_snapshot_changed
             )
+            logging_controller.snapshot_changed.connect(
+                voltage_scan_controller.logging_snapshot_changed
+            )
             logging_controller.sample_received.connect(controller.accept_logging_readback)
             logging_controller.sample_received.connect(plot_controller.accept_sample)
             protocol_controller.snapshot_changed.connect(protocol_panel.apply_snapshot)
@@ -163,6 +174,17 @@ class MainWindow(QMainWindow):
                 controller.accept_logging_readback
             )
             voltage_protocol_controller.sample_received.connect(plot_controller.accept_sample)
+            voltage_scan_controller.snapshot_changed.connect(
+                voltage_scan_panel.apply_snapshot
+            )
+            voltage_scan_controller.snapshot_changed.connect(
+                lambda snapshot, selected_channel=channel:
+                self._apply_protocol_snapshot(selected_channel, snapshot)
+            )
+            voltage_scan_controller.sample_received.connect(
+                controller.accept_logging_readback
+            )
+            voltage_scan_controller.sample_received.connect(plot_controller.accept_sample)
             plot_controller.snapshot_changed.connect(plot_panel.apply_snapshot)
             plot_panel.clear_requested.connect(plot_controller.reset)
             panel.start_logging_requested.connect(
@@ -196,16 +218,27 @@ class MainWindow(QMainWindow):
             voltage_protocol_panel.stop_requested.connect(
                 voltage_protocol_controller.stop
             )
+            voltage_scan_panel.start_requested.connect(
+                lambda start, stop, step, current, dwell, interval,
+                selected_channel=channel: self._start_voltage_scan(
+                    selected_channel, start, stop, step, current, dwell, interval
+                )
+            )
+            voltage_scan_panel.pause_requested.connect(voltage_scan_controller.pause)
+            voltage_scan_panel.resume_requested.connect(voltage_scan_controller.resume)
+            voltage_scan_panel.stop_requested.connect(voltage_scan_controller.stop)
             panel.apply_snapshot(controller.snapshot)
             plot_panel.apply_snapshot(plot_controller.snapshot)
             self.channel_controllers[channel] = controller
             self.logging_controllers[channel] = logging_controller
             self.protocol_controllers[channel] = protocol_controller
             self.voltage_protocol_controllers[channel] = voltage_protocol_controller
+            self.voltage_scan_controllers[channel] = voltage_scan_controller
             self.plot_controllers[channel] = plot_controller
             self.channel_panels[channel] = panel
             self.protocol_panels[channel] = protocol_panel
             self.voltage_protocol_panels[channel] = voltage_protocol_panel
+            self.voltage_scan_panels[channel] = voltage_scan_panel
             self.plot_panels[channel] = plot_panel
             panels.addWidget(panel, 1)
         layout.addLayout(panels)
@@ -223,6 +256,13 @@ class MainWindow(QMainWindow):
             voltage_protocol_panels.addWidget(self.voltage_protocol_panels[channel], 1)
             self._update_protocol_context(channel)
         layout.addLayout(voltage_protocol_panels)
+
+        voltage_scan_panels = QHBoxLayout()
+        voltage_scan_panels.setSpacing(18)
+        for channel in (1, 2):
+            voltage_scan_panels.addWidget(self.voltage_scan_panels[channel], 1)
+            self._update_protocol_context(channel)
+        layout.addLayout(voltage_scan_panels)
 
         plot_panels = QHBoxLayout()
         plot_panels.setSpacing(18)
@@ -270,14 +310,13 @@ class MainWindow(QMainWindow):
             self,
             "About QPX600DP Electrolyser",
             f"QPX600DP Electrolyser {__version__}\n\n"
-            "Milestone 11 Constant Voltage protocol build.\n\n"
+            "Milestone 12 automatic stepped voltage scan build.\n\n"
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
             "Simulation is the default. Real Hardware uses only a manually entered COM port. "
             "Independent CSV logging and guarded Constant Current/Constant Voltage "
-            "protocols are available. "
-            "Real Hardware protocols require explicit confirmation and remain acceptance-"
-            "pending. Live voltage/current plotting uses existing queued samples; sweeps and "
-            "emergency-all-off remain future work.",
+            "protocols are available. Voltage Scan is Simulation Mode only; its Real Hardware "
+            "path is visibly disabled pending acceptance. Live plotting uses existing queued "
+            "samples; current scans and emergency-all-off remain future work.",
         )
 
     def _choose_logging_directory(self) -> None:
@@ -307,7 +346,10 @@ class MainWindow(QMainWindow):
         duration: str,
         interval: str,
     ) -> None:
-        if self.voltage_protocol_controllers[channel].snapshot.owns_channel:
+        if (
+            self.voltage_protocol_controllers[channel].snapshot.owns_channel
+            or self.voltage_scan_controllers[channel].snapshot.owns_channel
+        ):
             self.statusBar().showMessage(
                 f"Stop the CH{channel} Constant Voltage protocol first."
             )
@@ -399,7 +441,10 @@ class MainWindow(QMainWindow):
         duration: str,
         interval: str,
     ) -> None:
-        if self.protocol_controllers[channel].snapshot.owns_channel:
+        if (
+            self.protocol_controllers[channel].snapshot.owns_channel
+            or self.voltage_scan_controllers[channel].snapshot.owns_channel
+        ):
             self.statusBar().showMessage(
                 f"Stop the CH{channel} Constant Current protocol first."
             )
@@ -484,6 +529,52 @@ class MainWindow(QMainWindow):
         if not protocol.resume(confirmation):
             self.statusBar().showMessage(protocol.snapshot.message)
 
+    def _start_voltage_scan(
+        self,
+        channel: int,
+        start_voltage: str,
+        stop_voltage: str,
+        voltage_step: str,
+        current_limit: str,
+        dwell: str,
+        interval: str,
+    ) -> None:
+        if (
+            self.protocol_controllers[channel].snapshot.owns_channel
+            or self.voltage_protocol_controllers[channel].snapshot.owns_channel
+        ):
+            self.statusBar().showMessage(
+                f"Stop the active CH{channel} protocol before starting a Voltage Scan."
+            )
+            return
+        manual = self.channel_controllers[channel].snapshot
+        scan = self.voltage_scan_controllers[channel]
+        logger = self.logging_controllers[channel]
+        validation_error = scan.validate_inputs(
+            start_voltage,
+            stop_voltage,
+            voltage_step,
+            current_limit,
+            dwell,
+            interval,
+            manual.voltage_range_name,
+        )
+        if validation_error is not None:
+            self.statusBar().showMessage(validation_error)
+            return
+        if not scan.start(
+            start_voltage,
+            stop_voltage,
+            voltage_step,
+            current_limit,
+            dwell,
+            interval,
+            manual.voltage_range_name,
+            self._data_directory,
+            logging_sink=logger if logger.snapshot.active else None,
+        ):
+            self.statusBar().showMessage(scan.snapshot.message)
+
     def _apply_protocol_snapshot(self, channel: int, snapshot: ProtocolSnapshot) -> None:
         self.channel_panels[channel].set_protocol_owned(
             self._channel_protocol_owned(channel)
@@ -500,6 +591,7 @@ class MainWindow(QMainWindow):
         if (
             channel not in self.protocol_panels
             or channel not in self.voltage_protocol_panels
+            or channel not in self.voltage_scan_panels
         ):
             return
         connection = self._connection_controller.snapshot
@@ -515,25 +607,38 @@ class MainWindow(QMainWindow):
             available=(
                 common_available
                 and not self.voltage_protocol_controllers[channel].snapshot.owns_channel
+                and not self.voltage_scan_controllers[channel].snapshot.owns_channel
             )
         )
         self.voltage_protocol_panels[channel].set_context(
             available=(
                 common_available
                 and not self.protocol_controllers[channel].snapshot.owns_channel
+                and not self.voltage_scan_controllers[channel].snapshot.owns_channel
             )
+        )
+        self.voltage_scan_panels[channel].set_context(
+            available=(
+                common_available
+                and connection.simulation_mode
+                and not self.protocol_controllers[channel].snapshot.owns_channel
+                and not self.voltage_protocol_controllers[channel].snapshot.owns_channel
+            ),
+            simulation_mode=connection.simulation_mode,
         )
 
     def _channel_protocol_owned(self, channel: int) -> bool:
         return (
             self.protocol_controllers[channel].snapshot.owns_channel
             or self.voltage_protocol_controllers[channel].snapshot.owns_channel
+            or self.voltage_scan_controllers[channel].snapshot.owns_channel
         )
 
     def _all_protocol_controllers(self):
         return (
             *self.protocol_controllers.values(),
             *self.voltage_protocol_controllers.values(),
+            *self.voltage_scan_controllers.values(),
         )
 
     def _request_disconnect(self) -> None:

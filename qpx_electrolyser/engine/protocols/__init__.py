@@ -1,1 +1,1 @@
-"""Namespace reserved for later sweep and polarization protocols."""
+"""Namespace reserved for later polarization protocol families."""

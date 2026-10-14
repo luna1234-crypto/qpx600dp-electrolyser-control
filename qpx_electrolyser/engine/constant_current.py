@@ -98,6 +98,9 @@ class ProtocolSnapshot:
     error: bool = False
     operator_warning: bool = False
     resume_ready: bool = False
+    scan_step_index: int | None = None
+    scan_total_steps: int | None = None
+    scan_commanded_setpoint: float | None = None
 
     @property
     def owns_channel(self) -> bool:
@@ -326,6 +329,16 @@ class ConstantCurrentController(QObject):
             )
         except (ValueError, InstrumentValueError) as error:
             return self._reject(str(error))
+        return self._begin_validated_start(config, directory, logging_sink=logging_sink)
+
+    def _begin_validated_start(
+        self,
+        config: ConstantCurrentConfig,
+        directory: Path,
+        *,
+        logging_sink: ProtocolLogSink | None = None,
+    ) -> bool:
+        """Acquire logging and submit the common guarded start sequence."""
         writer: CsvWriter | None = None
         if logging_sink is not None:
             if not logging_sink.active or logging_sink.file_path is None:
@@ -356,6 +369,7 @@ class ConstantCurrentController(QObject):
             message=(
                 f"Checking OFF state and applying {self._display_name.lower()} settings..."
             ),
+            **self._initial_snapshot_fields(config),
         ))
         return self._submit_action(
             "start-prepare", lambda supply: self._start_prepare_operation(supply, config)
@@ -497,8 +511,8 @@ class ConstantCurrentController(QObject):
                     "Selected output is already ON; protocol start refused.",
                     cleanup_required=False,
                 )
-            supply.set_voltage(self._channel, config.voltage_compliance_v)
-            supply.set_current(self._channel, config.target_current_a)
+            supply.set_voltage(self._channel, self._requested_voltage(config))
+            supply.set_current(self._channel, self._requested_current(config))
             voltage = supply.read_set_voltage(self._channel)
             current = supply.read_set_current(self._channel)
             self._verify_settings(voltage, current, config)
@@ -560,14 +574,32 @@ class ConstantCurrentController(QObject):
         voltage_resolution = QPX600DP_CAPABILITIES.voltage_range(
             config.voltage_range_name
         ).programming_resolution_v
-        if not _matches(voltage, config.voltage_compliance_v, voltage_resolution):
+        if not _matches(voltage, self._requested_voltage(config), voltage_resolution):
             raise SettingsMismatchError(f"{self._voltage_label} read-back mismatch.")
         if not _matches(
             current,
-            config.target_current_a,
+            self._requested_current(config),
             QPX600DP_CAPABILITIES.current_programming_resolution_a,
         ):
             raise SettingsMismatchError(f"{self._current_label} read-back mismatch.")
+
+    def _requested_voltage(self, config: ConstantCurrentConfig) -> float:
+        """Return the voltage required at the current protocol position."""
+        return config.voltage_compliance_v
+
+    def _requested_current(self, config: ConstantCurrentConfig) -> float:
+        """Return the current required at the current protocol position."""
+        return config.target_current_a
+
+    def _protocol_csv_metadata(self) -> dict[str, object]:
+        """Optional protocol-specific columns supplied to the shared CSV writer."""
+        return {}
+
+    def _initial_snapshot_fields(
+        self, config: ConstantCurrentConfig
+    ) -> dict[str, object]:
+        """Optional snapshot fields supplied by specialized protocol controllers."""
+        return {}
 
     def _output_off_operation(
         self, supply: PowerSupplyInterface
@@ -1196,6 +1228,7 @@ class ConstantCurrentController(QObject):
                 protocol_state=state.value,
                 error=error,
                 protocol_name=self._protocol_name,
+                **self._protocol_csv_metadata(),
             )
             return
         writer = self._writer
@@ -1212,6 +1245,7 @@ class ConstantCurrentController(QObject):
             error=error,
             protocol_name=self._protocol_name,
             protocol_state=state.value,
+            **self._protocol_csv_metadata(),
         )
 
     def _append_event_best_effort(

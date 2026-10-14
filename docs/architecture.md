@@ -7,7 +7,8 @@ code implements the entrypoints, dual-channel manual-control GUI, diagnostic log
 the Milestone 5 `SerialTransport` / `QPX600DPDriver`, the Milestone 6 shared
 priority command worker, Milestone 7 per-channel controllers, Milestone 8
 independent CSV loggers, Milestone 9 Constant Current state machines, Milestone
-10 bounded live-plot models and Milestone 11 Constant Voltage state machines.
+10 bounded live-plot models, Milestone 11 Constant Voltage state machines and
+the Milestone 12 reusable stepped-scan engine with Voltage Scan controllers.
 The guarded follow-up connects the physical backend
 through that same worker only after an explicit mode, port and Connect action.
 See [simulator behaviour](simulator.md).
@@ -29,6 +30,8 @@ flowchart TD
     GUI --> E2["ConstantCurrentController 2"]
     GUI --> V1["ConstantVoltageController 1"]
     GUI --> V2["ConstantVoltageController 2"]
+    GUI --> S1["VoltageScanController 1"]
+    GUI --> S2["VoltageScanController 2"]
     GUI --> P1["ChannelPlotController 1"]
     GUI --> P2["ChannelPlotController 2"]
     GUI --> IC["InstrumentController"]
@@ -36,10 +39,14 @@ flowchart TD
     E2 --> IC
     V1 --> IC
     V2 --> IC
+    S1 --> IC
+    S2 --> IC
     L1 -. existing sample signal .-> P1
     E1 -. existing sample signal .-> P1
     L2 -. existing sample signal .-> P2
     E2 -. existing sample signal .-> P2
+    S1 -. existing sample signal .-> P1
+    S2 -. existing sample signal .-> P2
     IC --> Q["Bounded priority command queue"]
     Q --> W["Single communication worker"]
     W --> API["PowerSupplyInterface"]
@@ -78,6 +85,7 @@ independent of the selected transport.
 | ChannelLoggingController / CsvLogFile, one per channel | Monotonic scheduling through the shared queue; exclusive creation, CSV rows, flush/close and file errors | No direct backend, plot buffer or software diagnostic logging |
 | ChannelPlotController / ChannelPlotPanel, one per channel | Consume existing measurement signals, retain bounded/downsampled display points, coalesce repaints and render voltage/current | No queue submission, backend access, CSV ownership or output control |
 | ConstantVoltageController / panel, one per channel | Specialize the Milestone 9 state machine for target voltage/current limit operation, including guarded real confirmation | No direct backend, extra polling, duplicate CSV writer, automatic retry or reconnect |
+| SteppedScanController / VoltageScanController / panel | Reuse protocol ownership and cleanup while scheduling deterministic per-step dwell, verification and samples | No Real Hardware scan path, direct backend, extra plot polling, duplicate writer or copied output-transition state machine |
 
 Milestone 7 instantiates two `ManualChannelController` objects in the Qt thread.
 They share the same `ConnectionController` and therefore the same worker/backend.
@@ -144,9 +152,28 @@ Real Hardware CV Start/Resume additionally require the distinct
 confirmation. The controller independently enforces the identified session,
 fresh OFF/range/settings preflight and authoritative cleanup. Constant Current
 and Constant Voltage Real Hardware starts share an atomic stable-ON transaction:
-one `OP<N> 1`, one `*OPC?`, two ON reads about 50 ms apart within one second,
-then one full authoritative ON readback. Simulation behavior is unchanged. This
-path is fake-serial validated; physical acceptance remains pending.
+one `OP<N> 1`, one `*OPC?`, a silent 1.0-second settling period, two ON reads
+about 100 ms apart, then one full authoritative ON readback. Simulation behavior
+is unchanged. This path was fake-serial validated and subsequently passed
+supervised CH1/CH2 resistor-load acceptance; electrolyser and unattended
+operation remain unapproved.
+
+Milestone 12 adds an axis-neutral `SteppedScanController` on top of that same
+state machine. `VoltageScanController` supplies voltage-axis validation and
+setpoint application; a later current scan can provide a current-axis adapter
+without copying ownership, Pause/Resume, cleanup, queue, CSV or timing logic.
+Exact `Decimal` arithmetic plans an inclusive tuple before ownership. Every
+planned voltage and the fixed current limit is validated against the active
+range, programming grids, conservative envelope and existing project policy.
+
+One scan holds one channel. Its initial settings and Output On use the existing
+atomic preflight path. Dwell is measured in active monotonic time. At a boundary,
+the controller freezes the dwell clock, submits one atomic set/read-back action,
+records the new step and restarts the clock, so queue latency is not mistaken for
+dwell. Samples and step readbacks use the existing signal path to the one CSV
+owner and plot. CH1 and CH2 submit independently to the shared serialized queue.
+Real Hardware context explicitly disables Voltage Scan Start and displays
+`Milestone 12 real-hardware acceptance pending`.
 
 The connection controller defaults to Simulation Mode. Real Hardware selection
 requires a warning acknowledgement and a manually typed `COM<N>` name; neither
@@ -170,8 +197,9 @@ real command failure closes the shared session and requires manual recovery.
 ## Threads and scheduling
 
 Milestone 6 uses one Python communication thread with `queue.PriorityQueue`.
-Milestone 9/11 protocol state machines and single-shot timers remain in the Qt main
-thread and submit only bounded backend operations; they do not add engine threads.
+Milestone 9/11 protocol and Milestone 12 scan state machines and single-shot
+timers remain in the Qt main thread and submit only bounded backend operations;
+they do not add engine threads.
 Milestone 10 plot buffers, coalescing timers and canvases also stay in the Qt main
 thread and add no worker. The Qt GUI stays on the main thread;
 typed Qt signals deliver immutable snapshots back to its slots. Signal delivery
@@ -288,8 +316,9 @@ protocol fault should stop only its own output if the transport is still healthy
 
 ## Protocols, safety, data and plotting
 
-Constant Current, Constant Voltage and bounded time plots are implemented. Later
-milestones add staircase voltage sweep, current sweep, polarisation and custom sequence. Use explicit V, A, s, cm2
+Constant Current, Constant Voltage, stepped Voltage Scan and bounded time plots
+are implemented. Later milestones add current scan, polarisation and custom
+sequence. Use explicit V, A, s, cm2
 and A/cm2 fields internally. Convert `I = j * area` at the boundary, reject
 non-finite values, and validate every step before arming. Scheduling and final
 polarisation-window averaging must be testable with a fake monotonic clock.
@@ -352,9 +381,10 @@ functional acceptance later passed on both channels. Electrolyser and unattended
 use remain unapproved pending transient assessment and later safety milestones.
 Milestone 7 real-hardware GUI acceptance and Milestone 8 read-only hardware
 logging acceptance are complete. Milestones 10/11 add live plots and Constant
-Voltage without extra polling or another worker. The guarded CV hardware path is
-fake-serial validated but not physically accepted. Later protocol types remain
-out of scope.
+Voltage without extra polling or another worker. Milestone 12 adds Simulation
+Mode Voltage Scan through the reusable stepped-scan core, with its Real Hardware
+controls disabled pending a later guarded implementation and acceptance. Later
+protocol types remain out of scope.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Logging tests cover unwritable files, interruption and bounded in-flight work.

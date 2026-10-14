@@ -81,6 +81,10 @@ def test_csv_schema_values_flush_exclusive_creation_and_close(tmp_path: Path) ->
         "session_id": "3",
         "protocol_name": "",
         "protocol_state": "",
+        "scan_name": "",
+        "scan_step_index": "",
+        "scan_total_steps": "",
+        "scan_commanded_setpoint": "",
         "sample_status": "ok",
         "error": "",
     }

@@ -367,7 +367,7 @@ Start/Resume confirmation, exact QPX identity/session checks, fresh selected-OFF
 and range/settings preflight, exactly-one Output-On attempt, safety-priority OFF
 cleanup, authoritative OFF readback, stale-request rejection and single-writer
 CSV ownership. Injected fake-serial tests passed for both channels, simultaneous
-queue use and failure paths. Milestone 12 is not started.
+queue use and failure paths. Milestone 12 is recorded below.
 
 A subsequent offline stabilization follow-up sets a 1.0-second minimum interval
 for both Real Hardware Constant Current and Constant Voltage while preserving the
@@ -391,3 +391,48 @@ real-time plots remained correct, while the unselected channel stayed OFF and
 unchanged. Both channels were physically and authoritatively confirmed OFF at
 the end. This is supervised resistor-load acceptance only: electrolyser use and
 unattended operation remain unapproved.
+
+## Milestone 12 - Automatic stepped Voltage Scan
+
+Implemented independent CH1 and CH2 Voltage Scan panels for Simulation Mode.
+Each accepts start/stop voltage, a signed voltage step, current limit, dwell time
+per step and sample interval. Exact decimal planning supports ascending and
+descending scans and includes a non-divisible endpoint exactly once without
+drift, duplication or overshoot. Every point is validated against the active
+QPX600DP range and programming grid, conservative hardware envelope and the
+existing Simulation Mode project limits before channel ownership, file creation
+or queue submission.
+
+The axis-neutral `SteppedScanController` extends the Milestone 9–11 protocol
+state machine rather than copying it. It owns dwell/step scheduling and accepts
+an axis adapter; Milestone 12 supplies the voltage adapter, while Milestone 13
+can supply a current adapter. Initial setpoint/current application, one Output-On
+lifetime, Pause/Resume, safety cleanup, disconnect and shutdown all remain on the
+existing shared paths. Each later voltage is set and read back as one atomic
+worker operation. Queue latency is excluded from the following dwell, while
+late sample slots are counted rather than replayed.
+
+Pause confirms Output Off and freezes active time. Resume revalidates the current
+step and continues its remaining dwell without skipping or duplicating a step.
+Stop, completion, logging failure, connection loss and shutdown use the existing
+bounded selected-channel cleanup. CH1 and CH2 can scan simultaneously; the one
+shared worker serializes all operations, and only the selected channel's manual
+controls and other protocols are disabled.
+
+One scan either creates one channel CSV or reuses the active same-channel logger.
+The backward-readable schema appends only `scan_name`, `scan_step_index`,
+`scan_total_steps` and `scan_commanded_setpoint`; non-scan rows leave them blank.
+Existing sample signals update the Milestone 10 plots without another poll,
+writer or thread.
+
+Focused Simulation/fake-backend tests cover exact sequence generation, range and
+policy validation, command order, step timing, missed slots, Pause/Resume,
+completion and failure cleanup, duplicate/stale actions, logging ownership,
+plot reuse, two-channel isolation and simultaneous scans. The automated Windows
+Simulation Mode smoke test completes simultaneous CH1/CH2 scans and verifies
+clean disconnect and worker shutdown.
+
+Milestone 12 Real Hardware Voltage Scan is not implemented or enabled. Its panel
+is visibly disabled outside Simulation Mode and reports that real-hardware
+acceptance is pending. No COM port or physical instrument was accessed during
+implementation or validation. See [verification details](verification/milestone12.md).

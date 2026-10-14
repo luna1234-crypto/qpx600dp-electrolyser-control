@@ -2,7 +2,7 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.11.0 preserves those historical records, the Milestone 5
+assumption. Version 0.12.0 preserves those historical records, the Milestone 5
 QPX600DP serial backend and completed two-channel standard-load Windows
 validation, the Milestone 6 shared
 asynchronous command queue, Milestone 7 dual-channel manual controls with a
@@ -10,7 +10,8 @@ guarded explicit-port hardware connection, Milestone 8 independent CSV logging,
 Milestone 9 independent Constant Current protocols with an offline-tested,
 guarded Real Hardware follow-up, Milestone 10 bounded real-time plots, and
 Milestone 11 independent Constant Voltage protocols with supervised two-channel
-resistor-load acceptance.
+resistor-load acceptance, and Milestone 12 independent Simulation Mode stepped
+voltage scans.
 
 Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
@@ -296,6 +297,37 @@ remained correct. Both outputs were physically and authoritatively OFF at the en
 This approves supervised resistor-load operation only; electrolyser use and
 unattended operation remain unapproved.
 
+## Milestone 12 automatic stepped voltage scan
+
+CH1 and CH2 each provide an independent Voltage Scan panel with start voltage,
+stop voltage, signed voltage step, current limit, dwell per step and sampling
+interval. Ascending and descending sequences are generated with exact decimal
+arithmetic. The endpoint is included once even when the step does not divide the
+span, without accumulated floating-point drift or endpoint overshoot.
+
+The reusable `SteppedScanController` layers step scheduling on the Milestone
+9–11 state machine. A scan validates every planned point against the selected
+QPX600DP voltage range, programming grids, conservative power envelope and
+existing project limits before taking channel ownership or creating a CSV. It
+then applies and verifies the first point, enables the simulated output once,
+samples through each monotonic dwell, atomically applies and verifies subsequent
+points, and finishes through the existing confirmed Output-Off cleanup. Pause
+confirms OFF and freezes active time; Resume verifies the current point and
+continues it without skipping or duplicating a step.
+
+Scans create one channel CSV or reuse an already-active same-channel logger.
+Four optional columns were appended after the existing schema:
+`scan_name`, `scan_step_index`, `scan_total_steps` and
+`scan_commanded_setpoint`. Existing columns and standalone/Milestone 8–11 rows
+remain readable, with the new fields blank when not applicable. Scan readbacks
+feed the existing plots and manual display; plotting submits no additional
+instrument request.
+
+Milestone 12 is accepted in Simulation Mode only. Real Hardware Voltage Scan
+controls are visibly disabled with an acceptance-pending message; no physical
+scan path, confirmation or hardware command sequence is enabled. See
+[Milestone 12 verification](docs/verification/milestone12.md).
+
 ## Milestone 5 offline physical backend
 
 `SerialTransport` opens only an explicitly supplied port. It never enumerates
@@ -473,7 +505,8 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent Constant Current protocols | Simulation/fake-serial validated; supervised CH1/CH2 resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Independent live voltage/current plots | Implemented for both channels with bounded display memory and unchanged full CSV data |
 | Independent Constant Voltage protocols | Simulation and guarded fake-serial validation passed; supervised CH1/CH2 100-ohm resistor-load acceptance passed, electrolyser and unattended use unapproved |
-| Later sweep/polarization protocols | Not implemented |
+| Independent stepped Voltage Scan | Implemented and automated-smoke validated for CH1/CH2 in Simulation Mode only; Real Hardware acceptance pending and controls disabled |
+| Current scan and later polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
 
@@ -494,6 +527,7 @@ control potential against a reference electrode.
 - [Milestone 9 Constant Current verification](docs/verification/milestone9.md)
 - [Milestone 10 real-time plotting verification](docs/verification/milestone10.md)
 - [Milestone 11 Constant Voltage verification](docs/verification/milestone11.md)
+- [Milestone 12 Voltage Scan verification](docs/verification/milestone12.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 
@@ -502,5 +536,5 @@ The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption; the model-correction and Milestones 5-11 work record the
+CPX400DP assumption; the model-correction and Milestones 5-12 work record the
 current QPX600DP basis.
