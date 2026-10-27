@@ -649,6 +649,7 @@ class MainWindow(QMainWindow):
             manual.voltage_range_name,
         )
         if validation_error is not None:
+            self.current_scan_panels[channel].show_validation_error(validation_error)
             self.statusBar().showMessage(validation_error)
             return
         if not scan.start(
@@ -662,6 +663,7 @@ class MainWindow(QMainWindow):
             self._data_directory,
             logging_sink=logger if logger.snapshot.active else None,
         ):
+            self.current_scan_panels[channel].show_validation_error(scan.snapshot.message)
             self.statusBar().showMessage(scan.snapshot.message)
 
     def _apply_protocol_snapshot(self, channel: int, snapshot: ProtocolSnapshot) -> None:

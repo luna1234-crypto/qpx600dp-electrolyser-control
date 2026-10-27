@@ -330,6 +330,105 @@ def test_gui_reuses_logger_and_plot_flow_and_disables_real_hardware(
         assert connection.shutdown(1)
 
 
+@pytest.mark.parametrize("channel", [1, 2])
+def test_gui_start_click_launches_the_selected_channel_only(
+    qapp: QApplication, tmp_path: Path, channel: int,
+) -> None:
+    backend = RecordingSimulator()
+    connection = ConnectionController(lambda: backend)
+    window = MainWindow(tmp_path / "application.log", connection, data_directory=tmp_path)
+    try:
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        backend.calls.clear()
+        panel = window.current_scan_panels[channel]
+        panel.start_current_input.setText("0.1")
+        panel.stop_current_input.setText("0.2")
+        panel.step_input.setText("0.1")
+        panel.voltage_compliance_input.setText("2")
+        panel.dwell_input.setText("0.5")
+        panel.interval_input.setText("0.1")
+        assert panel.start_button.isEnabled()
+        panel.start_button.click()
+        scan = window.current_scan_controllers[channel]
+        other = window.current_scan_controllers[3 - channel]
+        wait_until(qapp, lambda: scan.snapshot.state is ProtocolState.RUNNING)
+        assert scan.snapshot.owns_channel
+        assert other.snapshot.state is ProtocolState.IDLE
+        assert {call[1] for call in backend.calls} == {channel}
+        scan.stop("selected-channel routing test complete")
+        wait_until(qapp, lambda: scan.snapshot.state is ProtocolState.COMPLETED)
+    finally:
+        window.close()
+        qapp.processEvents()
+        assert connection.shutdown(1)
+
+
+def test_gui_simultaneous_starts_and_descending_negative_step_route_correctly(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    backend = RecordingSimulator()
+    connection = ConnectionController(lambda: backend)
+    window = MainWindow(tmp_path / "application.log", connection, data_directory=tmp_path)
+    try:
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        backend.calls.clear()
+        ch1 = window.current_scan_panels[1]
+        ch1.start_current_input.setText("0.1")
+        ch1.stop_current_input.setText("0.2")
+        ch1.step_input.setText("0.1")
+        ch1.voltage_compliance_input.setText("2")
+        ch1.dwell_input.setText("0.2")
+        ch1.interval_input.setText("0.1")
+        ch2 = window.current_scan_panels[2]
+        ch2.start_current_input.setText("0.3")
+        ch2.stop_current_input.setText("0.1")
+        ch2.step_input.setText("-0.08")
+        ch2.voltage_compliance_input.setText("2")
+        ch2.dwell_input.setText("0.2")
+        ch2.interval_input.setText("0.1")
+        ch1.start_button.click()
+        ch2.start_button.click()
+        wait_until(qapp, lambda: all(
+            scan.snapshot.state is ProtocolState.COMPLETED
+            for scan in window.current_scan_controllers.values()
+        ))
+        assert [call[2] for call in backend.calls
+                if call[0] == "set_current" and call[1] == 1] == [0.1, 0.2]
+        assert [call[2] for call in backend.calls
+                if call[0] == "set_current" and call[1] == 2] == [0.3, 0.22, 0.14, 0.1]
+        assert {call[3] for call in backend.calls} == {"InstrumentCommandWorker"}
+    finally:
+        window.close()
+        qapp.processEvents()
+        assert connection.shutdown(1)
+
+
+def test_gui_invalid_start_is_visible_in_current_scan_panel(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    backend = RecordingSimulator()
+    connection = ConnectionController(lambda: backend)
+    window = MainWindow(tmp_path / "application.log", connection, data_directory=tmp_path)
+    try:
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        backend.calls.clear()
+        panel = window.current_scan_panels[1]
+        panel.step_input.setText("0")
+        panel.start_button.click()
+        qapp.processEvents()
+        assert window.current_scan_controllers[1].snapshot.state is ProtocolState.IDLE
+        assert "must not be zero" in panel.message_label.text()
+        assert window.statusBar().currentMessage() == panel.message_label.text()
+        assert backend.calls == []
+    finally:
+        window.close()
+        qapp.processEvents()
+        assert connection.shutdown(1)
+
+
 def test_current_scan_ownership_disables_only_same_channel_controls(
     qapp: QApplication, tmp_path: Path,
 ) -> None:

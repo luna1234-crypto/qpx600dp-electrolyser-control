@@ -81,8 +81,8 @@ simulated Output Off, clean disconnect and no residual worker/QThread warning.
 
 Validation results:
 
-- focused Milestone 13 tests: **22 passed**;
-- complete regression suite: **425 passed**;
+- focused Milestone 13 tests: **26 passed**;
+- complete regression suite: **429 passed**;
 - `compileall`: **passed**;
 - `pip check`: **no broken requirements**;
 - simultaneous CH1/CH2 Simulation Mode smoke: **passed**;
@@ -92,3 +92,20 @@ Validation results:
 Manual Windows Simulation Mode acceptance follows the procedure in
 [`tests/manual_smoke_test.md`](../../tests/manual_smoke_test.md). Real Hardware
 Current Scan implementation and acceptance remain pending.
+
+## Simulation Mode Start feedback follow-up
+
+Manual testing exposed an integration-only feedback defect: `MainWindow`
+validated Current Scan input before calling the controller, but a rejected Start
+was written only to the status bar. Because the controller correctly remained
+`IDLE`, the Current Scan panel itself showed no state or message change and the
+click appeared to do nothing. Button signal emission, CH1/CH2 mapping and signed
+negative-step handling were otherwise correct.
+
+Rejected Current Scan Start requests now display the validation message directly
+beside that channel's scan controls as well as in the status bar. No controller,
+queue, simulator or scan-state behavior changed. Qt regressions prove CH1 and
+CH2 Start route only to their matching controllers, simultaneous starts work,
+`-0.08 A` produces the inclusive descending sequence, invalid input performs no
+backend operation and displays a clear error, and cross-channel ownership is
+unchanged.

@@ -173,6 +173,11 @@ class CurrentScanPanel(QGroupBox):
             self.message_label.setText("Milestone 13 real-hardware acceptance pending")
         self._update_enabled()
 
+    def show_validation_error(self, message: str) -> None:
+        """Keep a rejected Start visible beside the controls that caused it."""
+        self.message_label.setText(message)
+        self.message_label.setStyleSheet("color: #a61b1b;")
+
     def _update_enabled(self) -> None:
         state = self._snapshot.state
         start_ready = (
