@@ -328,6 +328,14 @@ controls are visibly disabled with an acceptance-pending message; no physical
 scan path, confirmation or hardware command sequence is enabled. See
 [Milestone 12 verification](docs/verification/milestone12.md).
 
+Manual Simulation Mode acceptance passed with simultaneous isolated scans: CH1
+ascended `1.0 -> 1.5 -> 2.0 V`, while CH2 descended through the non-divisible
+sequence `2.0 -> 1.6 -> 1.2 -> 1.0 V`. Independent 3-second dwells, 0.25-second
+sampling, Pause/Resume without skipped or duplicated steps, CSV metadata,
+plots, completion and final simulated Output Off all passed. The 3.50 A limit
+used to keep the documented simulated load in voltage regulation is strictly a
+Simulation Mode test value and is not approved for physical hardware.
+
 ## Milestone 5 offline physical backend
 
 `SerialTransport` opens only an explicitly supplied port. It never enumerates

@@ -432,6 +432,15 @@ plot reuse, two-channel isolation and simultaneous scans. The automated Windows
 Simulation Mode smoke test completes simultaneous CH1/CH2 scans and verifies
 clean disconnect and worker shutdown.
 
+Manual Windows Simulation Mode acceptance subsequently passed. CH1 completed
+an ascending `1.0 -> 1.5 -> 2.0 V` scan while CH2 simultaneously completed the
+descending non-divisible sequence `2.0 -> 1.6 -> 1.2 -> 1.0 V`; the channels
+remained isolated. Independent 3-second dwell timing and 0.25-second sampling,
+Pause/Resume without skipped or duplicated steps, CSV scan metadata, live plots,
+completion and final simulated Output Off all passed. A 3.50 A limit allowed
+the documented simulator load model to reach each commanded voltage. That value
+is Simulation Mode-only and is not approved for physical hardware.
+
 Milestone 12 Real Hardware Voltage Scan is not implemented or enabled. Its panel
 is visibly disabled outside Simulation Mode and reports that real-hardware
 acceptance is pending. No COM port or physical instrument was accessed during

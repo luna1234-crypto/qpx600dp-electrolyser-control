@@ -111,5 +111,23 @@ Validation results:
 
 The Windows manual procedure is documented in
 [`tests/manual_smoke_test.md`](../../tests/manual_smoke_test.md). Final operator
-acceptance is intentionally performed after the committed GUI is launched in
-Simulation Mode. Real-hardware voltage scanning remains pending and unapproved.
+acceptance was performed after the committed GUI was launched in Simulation
+Mode.
+
+## Manual Windows Simulation Mode acceptance
+
+Manual operator acceptance passed on 2026-10-14. CH1 completed an ascending
+`1.0 -> 1.5 -> 2.0 V` scan while CH2 simultaneously completed a descending,
+non-divisible `2.0 -> 1.6 -> 1.2 -> 1.0 V` scan. The channels remained isolated.
+Each used an independent 3-second dwell and 0.25-second sampling interval.
+
+For this Simulation Mode acceptance only, the current limit was 3.50 A. Under
+the documented simulator load curve, that limit permits the simulated load to
+reach 2.0 V without entering current-limit operation, so measured voltage
+matched every commanded scan setpoint. This 3.50 A value is not approved or
+recommended for physical hardware.
+
+Pause/Resume completed without a skipped or duplicated step, and paused time
+was excluded from active timing. CSV step metadata, real-time plots, normal
+completion and final simulated Output Off all passed. Real Hardware Voltage
+Scan implementation and acceptance remain pending and unapproved.
