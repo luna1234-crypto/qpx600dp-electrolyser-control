@@ -92,7 +92,7 @@ independent of the selected transport.
 | ChannelLoggingController / CsvLogFile, one per channel | Monotonic scheduling through the shared queue; exclusive creation, CSV rows, flush/close and file errors | No direct backend, plot buffer or software diagnostic logging |
 | ChannelPlotController / ChannelPlotPanel, one per channel | Consume existing measurement signals, retain bounded/downsampled display points, coalesce repaints and render voltage/current | No queue submission, backend access, CSV ownership or output control |
 | ConstantVoltageController / panel, one per channel | Specialize the Milestone 9 state machine for target voltage/current limit operation, including guarded real confirmation | No direct backend, extra polling, duplicate CSV writer, automatic retry or reconnect |
-| SteppedScanController / VoltageScanController / CurrentScanController / panels | Reuse protocol ownership and cleanup while scheduling deterministic per-step dwell, verification and samples | No Real Hardware scan path, direct backend, extra plot polling, duplicate writer or copied output-transition state machine |
+| SteppedScanController / VoltageScanController / CurrentScanController / panels | Reuse protocol ownership and guarded M11 transitions while scheduling deterministic per-step dwell, verification and samples | No direct backend, extra plot polling, duplicate writer, copied output-transition state machine or unconfirmed Real Hardware action |
 
 Milestone 7 instantiates two `ManualChannelController` objects in the Qt thread.
 They share the same `ConnectionController` and therefore the same worker/backend.
@@ -180,8 +180,14 @@ the controller freezes the dwell clock, submits one atomic set/read-back action,
 records the new step and restarts the clock, so queue latency is not mistaken for
 dwell. Samples and step readbacks use the existing signal path to the one CSV
 owner and plot. CH1 and CH2 submit independently to the shared serialized queue.
-Real Hardware context explicitly disables both scan Start controls and displays
-their Milestone 12/13 real-hardware acceptance-pending messages.
+For Real Hardware, both scan adapters use the same M11 transition machinery:
+one output write and one `*OPC?`, a non-blocking query-free 1.0-second settling
+period, two state confirmations about 100 ms apart and an authoritative channel
+readback. Start and Resume are default-cancel and include scan parameters, step
+count and CSV target. Initial and resumed preflight verifies the identified
+session, selected output OFF, actual voltage range and programmed settings.
+Each new step remains one serialized set/readback operation. Physical M12/M13
+scan acceptance remains pending even though the guarded controls are enabled.
 
 The connection controller defaults to Simulation Mode. Real Hardware selection
 requires a warning acknowledgement and a manually typed `COM<N>` name; neither
@@ -390,9 +396,9 @@ use remain unapproved pending transient assessment and later safety milestones.
 Milestone 7 real-hardware GUI acceptance and Milestone 8 read-only hardware
 logging acceptance are complete. Milestones 10/11 add live plots and Constant
 Voltage without extra polling or another worker. Milestones 12 and 13 add
-Simulation Mode Voltage Scan and Current Scan through the same reusable
-stepped-scan core, with both Real Hardware paths disabled pending later guarded
-implementation and acceptance. Later protocol types remain out of scope.
+Voltage Scan and Current Scan through the same reusable stepped-scan core. Their
+shared guarded Real Hardware follow-up is fake-serial tested, while physical
+scan acceptance remains pending. Later protocol types remain out of scope.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Logging tests cover unwritable files, interruption and bounded in-flight work.

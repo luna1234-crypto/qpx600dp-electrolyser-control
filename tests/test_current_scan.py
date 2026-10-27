@@ -294,7 +294,7 @@ def test_simultaneous_scans_are_isolated_serialized_and_count_missed_slots(
         assert connection.shutdown(1)
 
 
-def test_gui_reuses_logger_and_plot_flow_and_disables_real_hardware(
+def test_gui_reuses_logger_and_plot_flow_and_enables_guarded_real_hardware(
     qapp: QApplication, tmp_path: Path,
 ) -> None:
     connection = ConnectionController(lambda: RecordingSimulator())
@@ -322,8 +322,8 @@ def test_gui_reuses_logger_and_plot_flow_and_disables_real_hardware(
 
         isolated_panel = CurrentScanPanel(1)
         isolated_panel.set_context(available=True, simulation_mode=False)
-        assert not isolated_panel.start_button.isEnabled()
-        assert "Milestone 13" in isolated_panel.message_label.text()
+        assert isolated_panel.start_button.isEnabled()
+        assert "physical acceptance pending" in isolated_panel.message_label.text()
     finally:
         window.close()
         qapp.processEvents()

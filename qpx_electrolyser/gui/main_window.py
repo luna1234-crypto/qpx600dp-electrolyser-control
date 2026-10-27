@@ -33,7 +33,12 @@ from qpx_electrolyser.engine.constant_voltage import (
     ConstantVoltageController,
     REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
 )
-from qpx_electrolyser.engine.stepped_scan import CurrentScanController, VoltageScanController
+from qpx_electrolyser.engine.stepped_scan import (
+    CurrentScanController,
+    REAL_HARDWARE_SCAN_CONFIRMATION,
+    VoltageScanController,
+    generate_inclusive_setpoints,
+)
 from qpx_electrolyser.gui.channel_panel import ChannelPanel
 from qpx_electrolyser.gui.connection_panel import ConnectionPanel
 from qpx_electrolyser.gui.constant_current_panel import ConstantCurrentPanel
@@ -246,7 +251,11 @@ class MainWindow(QMainWindow):
                 )
             )
             voltage_scan_panel.pause_requested.connect(voltage_scan_controller.pause)
-            voltage_scan_panel.resume_requested.connect(voltage_scan_controller.resume)
+            voltage_scan_panel.resume_requested.connect(
+                lambda selected_channel=channel: self._resume_scan(
+                    selected_channel, "voltage"
+                )
+            )
             voltage_scan_panel.stop_requested.connect(voltage_scan_controller.stop)
             current_scan_panel.start_requested.connect(
                 lambda start, stop, step, voltage, dwell, interval,
@@ -255,7 +264,11 @@ class MainWindow(QMainWindow):
                 )
             )
             current_scan_panel.pause_requested.connect(current_scan_controller.pause)
-            current_scan_panel.resume_requested.connect(current_scan_controller.resume)
+            current_scan_panel.resume_requested.connect(
+                lambda selected_channel=channel: self._resume_scan(
+                    selected_channel, "current"
+                )
+            )
             current_scan_panel.stop_requested.connect(current_scan_controller.stop)
             panel.apply_snapshot(controller.snapshot)
             plot_panel.apply_snapshot(plot_controller.snapshot)
@@ -353,8 +366,8 @@ class MainWindow(QMainWindow):
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
             "Simulation is the default. Real Hardware uses only a manually entered COM port. "
             "Independent CSV logging and guarded Constant Current/Constant Voltage "
-            "protocols are available. Voltage and Current Scan are Simulation Mode only; their "
-            "Real Hardware paths are visibly disabled pending acceptance. Live plotting uses "
+            "protocols are available. Voltage and Current Scan have guarded Real Hardware "
+            "paths, but supervised physical scan acceptance remains pending. Live plotting uses "
             "existing queued samples; emergency-all-off remains future work.",
         )
 
@@ -602,8 +615,46 @@ class MainWindow(QMainWindow):
             manual.voltage_range_name,
         )
         if validation_error is not None:
+            self.voltage_scan_panels[channel].show_validation_error(validation_error)
             self.statusBar().showMessage(validation_error)
             return
+        confirmation = None
+        if not self._connection_controller.snapshot.simulation_mode:
+            logger_path = (
+                str(logger.snapshot.file_path)
+                if logger.snapshot.active and logger.snapshot.file_path is not None
+                else f"new channel {channel} CSV in {self._data_directory}"
+            )
+            step_count = len(generate_inclusive_setpoints(
+                start_voltage, stop_voltage, voltage_step
+            ))
+            answer = QMessageBox.warning(
+                self,
+                f"Confirm REAL HARDWARE Voltage Scan - CH{channel}",
+                "REAL HARDWARE STEPPED-SCAN OUTPUT-ON AUTHORIZATION\n\n"
+                f"Channel: CH{channel}\n"
+                "Scan type: Voltage Scan\n"
+                f"Start / stop / step: {start_voltage} / {stop_voltage} / "
+                f"{voltage_step} V\n"
+                f"Current limit: {current_limit} A\n"
+                f"Dwell / interval: {dwell} / {interval} s\n"
+                f"Total scan steps: {step_count}\n"
+                "Output-On writes for this Start: exactly one\n"
+                f"Current displayed output state: "
+                f"{'OFF' if manual.output_enabled is False else 'NOT CONFIRMED OFF'}\n"
+                f"CSV destination: {logger_path}\n\n"
+                "Confirm the intended 100-ohm load and wiring are safe. The other channel "
+                "will not be modified. A fresh identity/OFF/range/settings preflight will "
+                "precede one guarded Output-On attempt.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage(
+                    f"CH{channel} Real Hardware Voltage Scan cancelled; no command submitted."
+                )
+                return
+            confirmation = REAL_HARDWARE_SCAN_CONFIRMATION
         if not scan.start(
             start_voltage,
             stop_voltage,
@@ -614,7 +665,9 @@ class MainWindow(QMainWindow):
             manual.voltage_range_name,
             self._data_directory,
             logging_sink=logger if logger.snapshot.active else None,
+            real_hardware_confirmation=confirmation,
         ):
+            self.voltage_scan_panels[channel].show_validation_error(scan.snapshot.message)
             self.statusBar().showMessage(scan.snapshot.message)
 
     def _start_current_scan(
@@ -652,6 +705,43 @@ class MainWindow(QMainWindow):
             self.current_scan_panels[channel].show_validation_error(validation_error)
             self.statusBar().showMessage(validation_error)
             return
+        confirmation = None
+        if not self._connection_controller.snapshot.simulation_mode:
+            logger_path = (
+                str(logger.snapshot.file_path)
+                if logger.snapshot.active and logger.snapshot.file_path is not None
+                else f"new channel {channel} CSV in {self._data_directory}"
+            )
+            step_count = len(generate_inclusive_setpoints(
+                start_current, stop_current, current_step, axis_label="Current"
+            ))
+            answer = QMessageBox.warning(
+                self,
+                f"Confirm REAL HARDWARE Current Scan - CH{channel}",
+                "REAL HARDWARE STEPPED-SCAN OUTPUT-ON AUTHORIZATION\n\n"
+                f"Channel: CH{channel}\n"
+                "Scan type: Current Scan\n"
+                f"Start / stop / step: {start_current} / {stop_current} / "
+                f"{current_step} A\n"
+                f"Voltage compliance: {voltage_compliance} V\n"
+                f"Dwell / interval: {dwell} / {interval} s\n"
+                f"Total scan steps: {step_count}\n"
+                "Output-On writes for this Start: exactly one\n"
+                f"Current displayed output state: "
+                f"{'OFF' if manual.output_enabled is False else 'NOT CONFIRMED OFF'}\n"
+                f"CSV destination: {logger_path}\n\n"
+                "Confirm the intended 100-ohm load and wiring are safe. The other channel "
+                "will not be modified. A fresh identity/OFF/range/settings preflight will "
+                "precede one guarded Output-On attempt.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage(
+                    f"CH{channel} Real Hardware Current Scan cancelled; no command submitted."
+                )
+                return
+            confirmation = REAL_HARDWARE_SCAN_CONFIRMATION
         if not scan.start(
             start_current,
             stop_current,
@@ -662,8 +752,57 @@ class MainWindow(QMainWindow):
             manual.voltage_range_name,
             self._data_directory,
             logging_sink=logger if logger.snapshot.active else None,
+            real_hardware_confirmation=confirmation,
         ):
             self.current_scan_panels[channel].show_validation_error(scan.snapshot.message)
+            self.statusBar().showMessage(scan.snapshot.message)
+
+    def _resume_scan(self, channel: int, scan_type: str) -> None:
+        scan = (
+            self.voltage_scan_controllers[channel]
+            if scan_type == "voltage"
+            else self.current_scan_controllers[channel]
+        )
+        confirmation = None
+        if not self._connection_controller.snapshot.simulation_mode:
+            config = scan.snapshot.config
+            if config is None:
+                return
+            commanded = config.setpoints[
+                max(0, (scan.snapshot.scan_step_index or 1) - 1)
+            ]
+            fixed_label = "Current limit" if scan_type == "voltage" else "Voltage compliance"
+            fixed_value = (
+                f"{config.fixed_current_a:g} A"
+                if scan_type == "voltage"
+                else f"{config.fixed_voltage_v:g} V"
+            )
+            answer = QMessageBox.warning(
+                self,
+                f"Confirm REAL HARDWARE {scan_type.title()} Scan resume - CH{channel}",
+                "REAL HARDWARE STEPPED-SCAN OUTPUT-ON AUTHORIZATION\n\n"
+                f"Channel: CH{channel}\n"
+                f"Scan type: {scan_type.title()} Scan\n"
+                f"Resume step: {scan.snapshot.scan_step_index}/{scan.snapshot.scan_total_steps}\n"
+                f"Commanded scan setpoint: {commanded:g} "
+                f"{'V' if scan_type == 'voltage' else 'A'}\n"
+                f"{fixed_label}: {fixed_value}\n"
+                f"Dwell / interval: {config.dwell_s:g} / {config.interval_s:g} s\n"
+                "Output-On writes for this Resume: exactly one\n"
+                f"CSV path: {scan.snapshot.file_path}\n\n"
+                "Confirm the same load and wiring remain safe. A fresh OFF/range/settings "
+                "preflight will precede one guarded Output-On attempt.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage(
+                    f"CH{channel} Real Hardware {scan_type.title()} Scan resume cancelled; "
+                    "no command submitted."
+                )
+                return
+            confirmation = REAL_HARDWARE_SCAN_CONFIRMATION
+        if not scan.resume(confirmation):
             self.statusBar().showMessage(scan.snapshot.message)
 
     def _apply_protocol_snapshot(self, channel: int, snapshot: ProtocolSnapshot) -> None:
@@ -714,7 +853,6 @@ class MainWindow(QMainWindow):
         self.voltage_scan_panels[channel].set_context(
             available=(
                 common_available
-                and connection.simulation_mode
                 and not self.protocol_controllers[channel].snapshot.owns_channel
                 and not self.voltage_protocol_controllers[channel].snapshot.owns_channel
                 and not self.current_scan_controllers[channel].snapshot.owns_channel
@@ -724,7 +862,6 @@ class MainWindow(QMainWindow):
         self.current_scan_panels[channel].set_context(
             available=(
                 common_available
-                and connection.simulation_mode
                 and not self.protocol_controllers[channel].snapshot.owns_channel
                 and not self.voltage_protocol_controllers[channel].snapshot.owns_channel
                 and not self.voltage_scan_controllers[channel].snapshot.owns_channel

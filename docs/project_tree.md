@@ -120,6 +120,7 @@ QPX 600 DP/
         test_pyserial_output_diagnostic.py
         test_qpx600dp_driver.py
         test_real_hardware_gui.py
+        test_real_hardware_scans.py
         test_remote_output_diagnostic.py
         test_realtime_plot.py
         test_serial_transport.py

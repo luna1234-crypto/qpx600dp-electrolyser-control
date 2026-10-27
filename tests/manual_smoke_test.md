@@ -104,9 +104,9 @@ disconnect/shutdown steps above:
    that one CSV, logging remains active after scan completion, scan rows contain
    `scan_name`, step index/total and commanded setpoint, and plots use those
    samples without visible extra polling.
-7. Keep Simulation Mode selected. The Real Hardware disabled-state and pending
-   message are covered by automated widget tests; do not select Real Hardware
-   during this manual procedure.
+7. Keep Simulation Mode selected. Guarded Real Hardware scan controls and their
+   physical-acceptance-pending message are covered by fake-serial/widget tests;
+   do not select Real Hardware during this manual procedure.
 
 Record the Windows edition, Python/PySide6 versions, date and observed result.
 The historical Milestone 4 visual check used the earlier CPX model identity.
@@ -133,9 +133,9 @@ Keep Simulation Mode connected and use only simulator-safe values:
    writer is reused, `scan_name` is `current_scan`, commanded current is stored
    in `scan_commanded_setpoint`, and protocol completion leaves the manual logger
    active.
-6. Confirm both Current Scan Start controls are disabled with the Milestone 13
-   acceptance-pending message whenever Real Hardware mode is selected. Do not
-   enter or connect a port during this Simulation Mode procedure.
+6. Keep Simulation Mode selected. The guarded Real Hardware Current Scan path is
+   covered by fake serial and remains pending supervised physical acceptance.
+   Do not enter or connect a port during this Simulation Mode procedure.
 
 Record the Windows/Python/PySide6 versions and outcome. Real Hardware Current
-Scan implementation and acceptance remain pending.
+Scan physical acceptance remains pending.

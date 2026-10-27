@@ -4,10 +4,11 @@ Date: 2026-10-27
 
 ## Accepted scope
 
-Milestone 13 implements independent CH1 and CH2 automatic stepped Current Scan
-in Simulation Mode. Real Hardware Current Scan remains disabled and visibly
-marked `Milestone 13 real-hardware acceptance pending`. No COM port, Test Bridge,
-`hardware_check`, diagnostic tool or physical instrument was accessed.
+Milestone 13 implements independent CH1 and CH2 automatic stepped Current Scan.
+Simulation Mode is accepted. A guarded Real Hardware follow-up is implemented
+and fake-serial tested, but supervised physical acceptance remains pending. No
+COM port, Test Bridge, `hardware_check`, diagnostic tool or physical instrument
+was accessed.
 
 Each panel accepts start current, stop current, signed current step, voltage
 compliance, dwell per step and sampling interval. It displays state, step/total,
@@ -72,7 +73,7 @@ Focused simulator/fake-backend and Qt tests cover:
 - duplicate/stale action rejection;
 - simultaneous CH1/CH2 serialization;
 - one-writer CSV continuity, `current_scan` metadata and existing plot flow;
-- disabled Real Hardware Start and acceptance-pending presentation.
+- guarded Real Hardware confirmation, command ordering, failure and cleanup.
 
 The automated Simulation Mode application smoke runs simultaneous CH1/CH2
 Current Scans after the existing Constant Current, Constant Voltage and Voltage
@@ -81,8 +82,8 @@ simulated Output Off, clean disconnect and no residual worker/QThread warning.
 
 Validation results:
 
-- focused Milestone 13 tests: **26 passed**;
-- complete regression suite: **429 passed**;
+- focused Milestone 12/13 and guarded fake-serial scan suite: **57 passed**;
+- complete regression suite: **437 passed**;
 - `compileall`: **passed**;
 - `pip check`: **no broken requirements**;
 - simultaneous CH1/CH2 Simulation Mode smoke: **passed**;
@@ -103,7 +104,7 @@ Manual operator acceptance passed on 2026-10-27 using the procedure in
 - invalid input produced a visible validation error in the affected channel panel.
 
 This acceptance applies to Simulation Mode only. Real Hardware Current Scan
-implementation and acceptance remain pending.
+physical acceptance remains pending.
 
 ## Simulation Mode Start feedback follow-up
 
@@ -121,3 +122,22 @@ CH2 Start route only to their matching controllers, simultaneous starts work,
 `-0.08 A` produces the inclusive descending sequence, invalid input performs no
 backend operation and displays a clear error, and cross-channel ownership is
 unchanged.
+
+## Guarded Real Hardware follow-up
+
+Current Scan shares the same guarded implementation as Voltage Scan and does not
+copy the scan or transition state machine. Start and Resume use detailed,
+default-cancel confirmation, require an identified QPX600DP session, selected
+output OFF, the expected voltage range and verified voltage-compliance/current
+readbacks. Output transitions are the accepted Milestone 11 sequence: one
+`OP<N>` write, one `*OPC?`, a query-free non-blocking 1.0-second settle, two
+state confirmations about 100 ms apart and an authoritative channel readback.
+
+Each new current is set and fully read back in one serialized queue operation
+before dwell. Pause freezes active time and reuses the CSV on Resume. Stop,
+completion, failure, disconnect, logging failure and shutdown use the inherited
+single safety-priority Output-Off attempt with no retry or reconnect. Fake serial
+tests cover exact order, default cancellation, mismatch and malformed-response
+cleanup, stale/double Resume rejection, CSV continuity, both channels and
+simultaneous scans. The controls remain labelled as physically unaccepted;
+supervised 100-ohm validation is still pending.

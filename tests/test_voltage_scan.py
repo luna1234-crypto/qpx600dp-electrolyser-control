@@ -294,7 +294,7 @@ def test_step_failure_uses_existing_cleanup_once_and_never_mutates_other_channel
         assert connection.shutdown(1)
 
 
-def test_gui_reuses_one_logger_plot_flow_and_disables_real_hardware_panel(
+def test_gui_reuses_one_logger_plot_flow_and_enables_guarded_real_hardware_panel(
     qapp: QApplication, tmp_path: Path,
 ) -> None:
     connection = ConnectionController(lambda: RecordingSimulator())
@@ -323,8 +323,8 @@ def test_gui_reuses_one_logger_plot_flow_and_disables_real_hardware_panel(
 
         isolated_panel = VoltageScanPanel(1)
         isolated_panel.set_context(available=True, simulation_mode=False)
-        assert not isolated_panel.start_button.isEnabled()
-        assert "acceptance pending" in isolated_panel.message_label.text()
+        assert isolated_panel.start_button.isEnabled()
+        assert "physical acceptance pending" in isolated_panel.message_label.text()
     finally:
         window.close()
         qapp.processEvents()

@@ -19,6 +19,9 @@ from qpx_electrolyser.engine.constant_current import (
     ProtocolSnapshot,
     ProtocolState,
     _GuardFailure,
+    _OutputTransitionArmed,
+    _PreparedResult,
+    _StartResult,
     _matches,
 )
 from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
@@ -26,6 +29,9 @@ from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback, read_channel
 from qpx_electrolyser.instrument.connection_worker import CommandPriority
 from qpx_electrolyser.instrument.exceptions import InstrumentValueError
+
+
+REAL_HARDWARE_SCAN_CONFIRMATION = "RUN-QPX600DP-STEPPED-SCAN"
 
 
 def _decimal(text: str, label: str) -> Decimal:
@@ -133,6 +139,7 @@ class SteppedScanController(ConstantCurrentController):
             "command_slug": f"{axis_name}-scan",
             "current_label": "Current limit" if axis_name == "voltage" else "Scan current",
             "voltage_label": "Scan voltage" if axis_name == "voltage" else "Voltage compliance",
+            "real_hardware_confirmation_token": REAL_HARDWARE_SCAN_CONFIRMATION,
         }
         if monotonic is not None:
             kwargs["monotonic"] = monotonic
@@ -142,6 +149,95 @@ class SteppedScanController(ConstantCurrentController):
         self._axis_name = axis_name
         self._scan_step_index = 0
         self._pending_step_index: int | None = None
+
+    def _validate_scan_session(self, voltage_range_name: str | None) -> str | None:
+        if self._connection.snapshot.state is not ConnectionState.CONNECTED:
+            return "Connect and initialize the selected instrument before starting."
+        if voltage_range_name is None:
+            return f"Refresh the channel before starting a {self._axis_name} scan."
+        if not self._connection.snapshot.simulation_mode:
+            parts = [
+                part.strip()
+                for part in (self._connection.snapshot.instrument_id or "").split(",")
+            ]
+            if len(parts) != 4 or parts[1].upper() != "QPX600DP":
+                return "Real Hardware scan requires an identified QPX600DP session."
+        return None
+
+    def _require_selected_range(
+        self, supply: PowerSupplyInterface, config: SteppedScanConfig
+    ) -> None:
+        actual = supply.read_voltage_range(self._channel)
+        if actual.name != config.voltage_range_name:
+            raise RuntimeError(
+                f"Voltage range changed: expected {config.voltage_range_name}, "
+                f"read back {actual.name}."
+            )
+
+    def _start_prepare_operation(
+        self, supply: PowerSupplyInterface, config: ConstantCurrentConfig
+    ) -> _PreparedResult | _GuardFailure:
+        if not self._real_hardware_run:
+            return super()._start_prepare_operation(supply, config)
+        scan = config
+        assert isinstance(scan, SteppedScanConfig)
+        writes_started = False
+        try:
+            if supply.read_output_state(self._channel):
+                return _GuardFailure(
+                    "Selected output is already ON; scan start refused.",
+                    cleanup_required=False,
+                )
+            self._require_selected_range(supply, scan)
+            writes_started = True
+            supply.set_voltage(self._channel, self._requested_voltage(scan))
+            supply.set_current(self._channel, self._requested_current(scan))
+            voltage = supply.read_set_voltage(self._channel)
+            current = supply.read_set_current(self._channel)
+            self._require_selected_range(supply, scan)
+            self._verify_settings(voltage, current, scan)
+            return _PreparedResult(voltage, current)
+        except Exception as error:
+            return _GuardFailure(
+                str(error) or type(error).__name__, cleanup_required=writes_started
+            )
+
+    def _resume_prepare_operation(
+        self, supply: PowerSupplyInterface, config: ConstantCurrentConfig
+    ) -> _PreparedResult | _GuardFailure:
+        if not self._real_hardware_run:
+            return super()._resume_prepare_operation(supply, config)
+        scan = config
+        assert isinstance(scan, SteppedScanConfig)
+        try:
+            if supply.read_output_state(self._channel):
+                return _GuardFailure(
+                    "Selected output was not OFF before scan resume.",
+                    cleanup_required=True,
+                )
+            self._require_selected_range(supply, scan)
+            voltage = supply.read_set_voltage(self._channel)
+            current = supply.read_set_current(self._channel)
+            self._verify_settings(voltage, current, scan)
+            return _PreparedResult(voltage, current)
+        except Exception as error:
+            return _GuardFailure(
+                str(error) or type(error).__name__, cleanup_required=True
+            )
+
+    def _output_on_operation(
+        self, supply: PowerSupplyInterface, config: ConstantCurrentConfig
+    ) -> _StartResult | _OutputTransitionArmed | _GuardFailure:
+        if self._real_hardware_run:
+            try:
+                scan = config
+                assert isinstance(scan, SteppedScanConfig)
+                self._require_selected_range(supply, scan)
+            except Exception as error:
+                return _GuardFailure(
+                    str(error) or type(error).__name__, cleanup_required=True
+                )
+        return super()._output_on_operation(supply, config)
 
     def _requested_voltage(self, config: ConstantCurrentConfig) -> float:
         scan = config
@@ -209,6 +305,8 @@ class SteppedScanController(ConstantCurrentController):
                 QPX600DP_CAPABILITIES.current_programming_resolution_a,
             ):
                 raise RuntimeError("Scan step setpoint read-back mismatch.")
+            if readback.voltage_range_name != config.voltage_range_name:
+                raise RuntimeError("Scan step voltage-range read-back mismatch.")
             if not readback.output_enabled:
                 raise RuntimeError("Output unexpectedly reported OFF during scan step change.")
             return readback
@@ -225,8 +323,6 @@ class SteppedScanController(ConstantCurrentController):
         super().pause()
 
     def resume(self, real_hardware_confirmation: str | None = None) -> bool:
-        if not self._connection.snapshot.simulation_mode:
-            return self._reject("Milestone 12 real-hardware acceptance pending.")
         return super().resume(real_hardware_confirmation)
 
     @Slot()
@@ -422,12 +518,9 @@ class VoltageScanController(SteppedScanController):
         interval: str,
         voltage_range_name: str | None,
     ) -> str | None:
-        if self._connection.snapshot.state is not ConnectionState.CONNECTED:
-            return "Connect and initialize Simulation Mode before starting."
-        if not self._connection.snapshot.simulation_mode:
-            return "Milestone 12 real-hardware acceptance pending."
-        if voltage_range_name is None:
-            return "Refresh the channel before starting a voltage scan."
+        session_error = self._validate_scan_session(voltage_range_name)
+        if session_error is not None:
+            return session_error
         try:
             self._validate_scan_config(
                 start_voltage,
@@ -454,6 +547,7 @@ class VoltageScanController(SteppedScanController):
         directory: Path,
         *,
         logging_sink: ProtocolLogSink | None = None,
+        real_hardware_confirmation: str | None = None,
     ) -> bool:
         if self._snapshot.owns_channel:
             return False
@@ -468,6 +562,11 @@ class VoltageScanController(SteppedScanController):
         )
         if validation_error is not None:
             return self._reject(validation_error)
+        if (
+            not self._connection.snapshot.simulation_mode
+            and real_hardware_confirmation != REAL_HARDWARE_SCAN_CONFIRMATION
+        ):
+            return self._reject("Real Hardware Voltage Scan start was not confirmed.")
         assert voltage_range_name is not None
         config = self._validate_scan_config(
             start_voltage,
@@ -509,19 +608,24 @@ class VoltageScanController(SteppedScanController):
         )
         dwell_s = self._number(dwell, "Dwell time")
         interval_s = self._number(interval, "Sampling interval")
-        if current > self._limits.max_current_a:
+        limits = (
+            self._limits
+            if self._connection.snapshot.simulation_mode
+            else self._real_hardware_limits
+        )
+        if current > limits.max_current_a:
             raise ValueError(
-                f"Current limit exceeds the {self._limits.max_current_a:g} A project limit."
+                f"Current limit exceeds the {limits.max_current_a:g} A project limit."
             )
-        if not 0 < dwell_s <= self._limits.max_duration_s:
+        if not 0 < dwell_s <= limits.max_duration_s:
             raise ValueError(
                 f"Dwell time must be positive and no greater than "
-                f"{self._limits.max_duration_s:g} seconds."
+                f"{limits.max_duration_s:g} seconds."
             )
-        if not self._limits.min_interval_s <= interval_s <= self._limits.max_interval_s:
+        if not limits.min_interval_s <= interval_s <= limits.max_interval_s:
             raise ValueError(
-                f"Sampling interval must be between {self._limits.min_interval_s:g} and "
-                f"{self._limits.max_interval_s:g} seconds."
+                f"Sampling interval must be between {limits.min_interval_s:g} and "
+                f"{limits.max_interval_s:g} seconds."
             )
         if interval_s > dwell_s:
             raise ValueError("Sampling interval cannot be longer than dwell time.")
@@ -532,13 +636,13 @@ class VoltageScanController(SteppedScanController):
             # Validate the exact decimal against the hardware grid, but retain
             # the decimal-derived float instead of accumulating binary steps.
             QPX600DP_CAPABILITIES.validate_voltage(voltage, voltage_range_name)
-            if voltage > self._limits.max_voltage_v:
+            if voltage > limits.max_voltage_v:
                 raise ValueError(
-                    f"Scan voltage exceeds the {self._limits.max_voltage_v:g} V project limit."
+                    f"Scan voltage exceeds the {limits.max_voltage_v:g} V project limit."
                 )
-            if voltage * current > self._limits.max_power_w:
+            if voltage * current > limits.max_power_w:
                 raise ValueError(
-                    f"Requested V*I exceeds the {self._limits.max_power_w:g} W project limit."
+                    f"Requested V*I exceeds the {limits.max_power_w:g} W project limit."
                 )
             if not QPX600DP_CAPABILITIES.power_envelope.contains(voltage, current):
                 raise ValueError(
@@ -546,9 +650,9 @@ class VoltageScanController(SteppedScanController):
                 )
             setpoints.append(voltage)
         duration_s = len(setpoints) * dwell_s
-        if duration_s > self._limits.max_duration_s:
+        if duration_s > limits.max_duration_s:
             raise ValueError(
-                f"Total scan duration exceeds the {self._limits.max_duration_s:g} second "
+                f"Total scan duration exceeds the {limits.max_duration_s:g} second "
                 "project limit."
             )
         return SteppedScanConfig(
@@ -597,12 +701,9 @@ class CurrentScanController(SteppedScanController):
         interval: str,
         voltage_range_name: str | None,
     ) -> str | None:
-        if self._connection.snapshot.state is not ConnectionState.CONNECTED:
-            return "Connect and initialize Simulation Mode before starting."
-        if not self._connection.snapshot.simulation_mode:
-            return "Milestone 13 real-hardware acceptance pending."
-        if voltage_range_name is None:
-            return "Refresh the channel before starting a current scan."
+        session_error = self._validate_scan_session(voltage_range_name)
+        if session_error is not None:
+            return session_error
         try:
             self._validate_scan_config(
                 start_current,
@@ -629,6 +730,7 @@ class CurrentScanController(SteppedScanController):
         directory: Path,
         *,
         logging_sink: ProtocolLogSink | None = None,
+        real_hardware_confirmation: str | None = None,
     ) -> bool:
         if self._snapshot.owns_channel:
             return False
@@ -643,6 +745,11 @@ class CurrentScanController(SteppedScanController):
         )
         if validation_error is not None:
             return self._reject(validation_error)
+        if (
+            not self._connection.snapshot.simulation_mode
+            and real_hardware_confirmation != REAL_HARDWARE_SCAN_CONFIRMATION
+        ):
+            return self._reject("Real Hardware Current Scan start was not confirmed.")
         assert voltage_range_name is not None
         config = self._validate_scan_config(
             start_current,
@@ -655,11 +762,6 @@ class CurrentScanController(SteppedScanController):
         )
         self._scan_step_index = 0
         return self._begin_validated_start(config, directory, logging_sink=logging_sink)
-
-    def resume(self, real_hardware_confirmation: str | None = None) -> bool:
-        if not self._connection.snapshot.simulation_mode:
-            return self._reject("Milestone 13 real-hardware acceptance pending.")
-        return super().resume(real_hardware_confirmation)
 
     def _validate_scan_config(
         self,
@@ -691,19 +793,24 @@ class CurrentScanController(SteppedScanController):
         )
         dwell_s = self._number(dwell, "Dwell time")
         interval_s = self._number(interval, "Sampling interval")
-        if voltage > self._limits.max_voltage_v:
+        limits = (
+            self._limits
+            if self._connection.snapshot.simulation_mode
+            else self._real_hardware_limits
+        )
+        if voltage > limits.max_voltage_v:
             raise ValueError(
-                f"Voltage compliance exceeds the {self._limits.max_voltage_v:g} V project limit."
+                f"Voltage compliance exceeds the {limits.max_voltage_v:g} V project limit."
             )
-        if not 0 < dwell_s <= self._limits.max_duration_s:
+        if not 0 < dwell_s <= limits.max_duration_s:
             raise ValueError(
                 f"Dwell time must be positive and no greater than "
-                f"{self._limits.max_duration_s:g} seconds."
+                f"{limits.max_duration_s:g} seconds."
             )
-        if not self._limits.min_interval_s <= interval_s <= self._limits.max_interval_s:
+        if not limits.min_interval_s <= interval_s <= limits.max_interval_s:
             raise ValueError(
-                f"Sampling interval must be between {self._limits.min_interval_s:g} and "
-                f"{self._limits.max_interval_s:g} seconds."
+                f"Sampling interval must be between {limits.min_interval_s:g} and "
+                f"{limits.max_interval_s:g} seconds."
             )
         if interval_s > dwell_s:
             raise ValueError("Sampling interval cannot be longer than dwell time.")
@@ -711,13 +818,13 @@ class CurrentScanController(SteppedScanController):
         setpoints: list[float] = []
         for exact in exact_setpoints:
             current = QPX600DP_CAPABILITIES.validate_current(float(exact))
-            if current > self._limits.max_current_a:
+            if current > limits.max_current_a:
                 raise ValueError(
-                    f"Scan current exceeds the {self._limits.max_current_a:g} A project limit."
+                    f"Scan current exceeds the {limits.max_current_a:g} A project limit."
                 )
-            if voltage * current > self._limits.max_power_w:
+            if voltage * current > limits.max_power_w:
                 raise ValueError(
-                    f"Requested V*I exceeds the {self._limits.max_power_w:g} W project limit."
+                    f"Requested V*I exceeds the {limits.max_power_w:g} W project limit."
                 )
             if not QPX600DP_CAPABILITIES.power_envelope.contains(voltage, current):
                 raise ValueError(
@@ -725,9 +832,9 @@ class CurrentScanController(SteppedScanController):
                 )
             setpoints.append(current)
         duration_s = len(setpoints) * dwell_s
-        if duration_s > self._limits.max_duration_s:
+        if duration_s > limits.max_duration_s:
             raise ValueError(
-                f"Total scan duration exceeds the {self._limits.max_duration_s:g} second "
+                f"Total scan duration exceeds the {limits.max_duration_s:g} second "
                 "project limit."
             )
         return SteppedScanConfig(

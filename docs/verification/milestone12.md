@@ -4,12 +4,11 @@ Date: 2026-10-14
 
 ## Accepted scope
 
-Milestone 12 implements independent CH1 and CH2 automatic stepped Voltage Scan
-in Simulation Mode. No COM port was enumerated, opened or probed; Test Bridge,
-`hardware_check`, diagnostic tools and the physical QPX600DP were not used.
-There is no enabled Real Hardware scan path. The GUI disables Voltage Scan in
-Real Hardware context and displays `Milestone 12 real-hardware acceptance
-pending`.
+Milestone 12 implements independent CH1 and CH2 automatic stepped Voltage Scan.
+Simulation Mode is accepted. A guarded Real Hardware follow-up is implemented
+and fake-serial tested, but supervised physical acceptance remains pending. No
+COM port was enumerated, opened or probed; Test Bridge, `hardware_check`,
+diagnostic tools and the physical QPX600DP were not used for the follow-up.
 
 Each panel accepts start voltage, stop voltage, signed voltage step, current
 limit, dwell time per step and sample interval. It displays protocol state,
@@ -91,7 +90,7 @@ Focused simulator/fake-backend and regression tests cover:
 - CH1/CH2 isolation and simultaneous queue serialization;
 - one writer per channel, active-logger reuse, CSV continuity and scan columns;
 - plot reuse without a separate polling path;
-- visibly disabled Real Hardware scan controls.
+- guarded Real Hardware confirmation, command ordering, failure and cleanup.
 
 The automated Simulation Mode application smoke connects the simulator, keeps
 both standalone loggers active, completes simultaneous CH1/CH2 Constant Current,
@@ -101,8 +100,8 @@ or QThread warnings.
 
 Validation results:
 
-- focused Milestone 12 and M8–M11 regression suite: **78 passed**;
-- full pytest suite: **403 passed**;
+- focused Milestone 12/13 and guarded fake-serial scan suite: **57 passed**;
+- full pytest suite: **437 passed**;
 - `compileall`: **passed**;
 - `pip check`: **no broken requirements**;
 - automated Simulation Mode smoke including simultaneous CH1/CH2 scans:
@@ -130,4 +129,24 @@ recommended for physical hardware.
 Pause/Resume completed without a skipped or duplicated step, and paused time
 was excluded from active timing. CSV step metadata, real-time plots, normal
 completion and final simulated Output Off all passed. Real Hardware Voltage
-Scan implementation and acceptance remain pending and unapproved.
+Scan physical acceptance remains pending and unapproved.
+
+## Guarded Real Hardware follow-up
+
+Voltage Scan Start and Resume now require a detailed default-cancel operator
+confirmation naming the channel, scan limits and step, current limit, dwell,
+interval, step count, one Output-On attempt and CSV destination. The controller
+requires the active session to identify as QPX600DP, confirms the selected output
+OFF, verifies the actual voltage range, applies and reads back initial settings,
+then uses the accepted Milestone 11 transition unchanged: one `OP<N> 1`, one
+`*OPC?`, a query-free non-blocking 1.0-second settle, two `OP<N>?` confirmations
+about 100 ms apart and one authoritative channel readback.
+
+Every later voltage is applied and fully read back as one shared-queue action
+before its dwell starts. Pause, Resume, Stop, completion, failure, disconnect,
+logging failure and shutdown retain the inherited exactly-once priority
+Output-Off cleanup, session-generation guards and CSV continuity. There is no
+automatic retry or reconnect and no command targets the other channel. Fake
+serial tests cover cancellation without commands, exact order, readback and
+communication failures, Pause/Resume, duplicate-action rejection, cleanup and
+simultaneous CH1/CH2 operation. Physical 100-ohm acceptance is still required.

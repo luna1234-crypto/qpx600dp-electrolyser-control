@@ -1,4 +1,4 @@
-"""Per-channel Milestone 12 Simulation Mode voltage-scan controls."""
+"""Per-channel Milestone 12 guarded voltage-scan controls."""
 
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QDoubleValidator
@@ -153,7 +153,9 @@ class VoltageScanPanel(QGroupBox):
             )
         self.missed_value.setText(str(snapshot.missed_samples))
         if not self._simulation_mode and not snapshot.owns_channel:
-            self.message_label.setText("Milestone 12 real-hardware acceptance pending")
+            self.message_label.setText(
+                "Guarded Real Hardware Voltage Scan available; physical acceptance pending"
+            )
         else:
             self.message_label.setText(snapshot.message)
         self.message_label.setStyleSheet(
@@ -166,14 +168,19 @@ class VoltageScanPanel(QGroupBox):
         self._available = available
         self._simulation_mode = simulation_mode
         if not simulation_mode and not self._snapshot.owns_channel:
-            self.message_label.setText("Milestone 12 real-hardware acceptance pending")
+            self.message_label.setText(
+                "Guarded Real Hardware Voltage Scan available; physical acceptance pending"
+            )
         self._update_enabled()
+
+    def show_validation_error(self, message: str) -> None:
+        self.message_label.setText(message)
+        self.message_label.setStyleSheet("color: #a61b1b;")
 
     def _update_enabled(self) -> None:
         state = self._snapshot.state
         start_ready = (
             self._available
-            and self._simulation_mode
             and state in {ProtocolState.IDLE, ProtocolState.COMPLETED, ProtocolState.FAILED}
         )
         for widget in (
@@ -191,7 +198,6 @@ class VoltageScanPanel(QGroupBox):
             state is ProtocolState.PAUSED
             and self._snapshot.resume_ready
             and self._available
-            and self._simulation_mode
         )
         self.stop_button.setEnabled(state not in {
             ProtocolState.IDLE,

@@ -323,9 +323,12 @@ remain readable, with the new fields blank when not applicable. Scan readbacks
 feed the existing plots and manual display; plotting submits no additional
 instrument request.
 
-Milestone 12 is accepted in Simulation Mode only. Real Hardware Voltage Scan
-controls are visibly disabled with an acceptance-pending message; no physical
-scan path, confirmation or hardware command sequence is enabled. See
+Milestone 12 now has a guarded Real Hardware follow-up built on the accepted
+Milestone 11 transition mechanism. Start and Resume require detailed,
+default-cancel authorization; the controller then verifies the identified
+QPX600DP session, selected output OFF, voltage range and setpoint readbacks before
+one Output-On attempt. Every later voltage is queued and verified before dwell.
+Physical Voltage Scan acceptance remains pending. See
 [Milestone 12 verification](docs/verification/milestone12.md).
 
 Manual Simulation Mode acceptance passed with simultaneous isolated scans: CH1
@@ -354,9 +357,11 @@ unchanged. Current-scan rows use the existing optional scan columns with
 `scan_name=current_scan` and the current setpoint in
 `scan_commanded_setpoint`.
 
-Milestone 13 is accepted in Simulation Mode only. Current Scan Start remains
-disabled in Real Hardware mode with an acceptance-pending message; no physical
-current-scan path is implemented. See
+Milestone 13 uses the same guarded Real Hardware follow-up: default-cancel
+authorization, fresh OFF/range/settings checks, exactly-once settled output
+transitions, queued verified current steps and authoritative cleanup. Physical
+Current Scan acceptance remains pending; enabling the guarded controls does not
+constitute hardware approval. See
 [Milestone 13 verification](docs/verification/milestone13.md).
 
 ## Milestone 5 offline physical backend
@@ -536,8 +541,8 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent Constant Current protocols | Simulation/fake-serial validated; supervised CH1/CH2 resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Independent live voltage/current plots | Implemented for both channels with bounded display memory and unchanged full CSV data |
 | Independent Constant Voltage protocols | Simulation and guarded fake-serial validation passed; supervised CH1/CH2 100-ohm resistor-load acceptance passed, electrolyser and unattended use unapproved |
-| Independent stepped Voltage Scan | Implemented and automated-smoke validated for CH1/CH2 in Simulation Mode only; Real Hardware acceptance pending and controls disabled |
-| Independent stepped Current Scan | Implemented and automated-smoke validated for CH1/CH2 in Simulation Mode only; Real Hardware acceptance pending and controls disabled |
+| Independent stepped Voltage Scan | Simulation accepted; guarded Real Hardware path fake-serial validated, physical acceptance pending |
+| Independent stepped Current Scan | Simulation accepted; guarded Real Hardware path fake-serial validated, physical acceptance pending |
 | Later polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |

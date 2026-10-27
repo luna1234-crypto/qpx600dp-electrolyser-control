@@ -441,10 +441,12 @@ completion and final simulated Output Off all passed. A 3.50 A limit allowed
 the documented simulator load model to reach each commanded voltage. That value
 is Simulation Mode-only and is not approved for physical hardware.
 
-Milestone 12 Real Hardware Voltage Scan is not implemented or enabled. Its panel
-is visibly disabled outside Simulation Mode and reports that real-hardware
-acceptance is pending. No COM port or physical instrument was accessed during
-implementation or validation. See [verification details](verification/milestone12.md).
+The guarded Real Hardware Voltage Scan follow-up reuses the accepted Milestone
+11 transition and cleanup mechanism, adds detailed default-cancel Start/Resume
+authorization, verifies session/OFF/range/setpoints, and applies every step as
+one serialized set/readback operation. It is fake-serial tested only; supervised
+physical acceptance remains pending. No COM port or physical instrument was
+accessed during implementation. See [verification details](verification/milestone12.md).
 
 ## Milestone 13 - Automatic stepped Current Scan
 
@@ -485,7 +487,9 @@ The observed step sequences, plots and CSV scan metadata were correct, both
 simulated outputs finished OFF, and invalid input produced a visible validation
 error in the affected channel panel.
 
-Milestone 13 Real Hardware Current Scan is not implemented or enabled. Its Start
-control is visibly disabled outside Simulation Mode with an acceptance-pending
-message. No COM port or physical instrument was accessed. See
-[verification details](verification/milestone13.md).
+The same guarded Real Hardware follow-up applies to Current Scan without a
+second state machine. It preserves exact planning, per-channel ownership, one
+CSV writer and simultaneous shared-queue operation while using the accepted
+exactly-once settled output transitions and priority cleanup. It is fake-serial
+tested only; supervised physical acceptance remains pending. No COM port or
+physical instrument was accessed. See [verification details](verification/milestone13.md).
