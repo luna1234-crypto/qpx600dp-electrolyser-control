@@ -89,9 +89,21 @@ Validation results:
 - clean disconnect/worker shutdown with no QThread-destroyed warning: **passed**;
 - `git diff --check`: **passed**.
 
-Manual Windows Simulation Mode acceptance follows the procedure in
-[`tests/manual_smoke_test.md`](../../tests/manual_smoke_test.md). Real Hardware
-Current Scan implementation and acceptance remain pending.
+## Manual Windows Simulation Mode acceptance
+
+Manual operator acceptance passed on 2026-10-27 using the procedure in
+[`tests/manual_smoke_test.md`](../../tests/manual_smoke_test.md):
+
+- CH1 completed an ascending Current Scan;
+- CH2 completed a descending Current Scan;
+- independent and simultaneous CH1/CH2 operation passed with channel isolation;
+- Pause/Resume and early Stop passed;
+- the step sequences, real-time plots and CSV scan metadata were correct;
+- both simulated outputs finished OFF; and
+- invalid input produced a visible validation error in the affected channel panel.
+
+This acceptance applies to Simulation Mode only. Real Hardware Current Scan
+implementation and acceptance remain pending.
 
 ## Simulation Mode Start feedback follow-up
 

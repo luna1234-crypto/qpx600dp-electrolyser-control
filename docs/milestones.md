@@ -478,6 +478,13 @@ channel isolation and simultaneous scans. The automated Simulation Mode smoke
 completes simultaneous CH1/CH2 Current Scans after the existing protocol and
 Voltage Scan checks, then verifies clean disconnect and worker shutdown.
 
+Windows Simulation Mode manual acceptance passed on 2026-10-27. CH1 completed
+an ascending Current Scan and CH2 completed a descending Current Scan;
+independent and simultaneous operation, Pause/Resume and early Stop all passed.
+The observed step sequences, plots and CSV scan metadata were correct, both
+simulated outputs finished OFF, and invalid input produced a visible validation
+error in the affected channel panel.
+
 Milestone 13 Real Hardware Current Scan is not implemented or enabled. Its Start
 control is visibly disabled outside Simulation Mode with an acceptance-pending
 message. No COM port or physical instrument was accessed. See
