@@ -2,7 +2,7 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.12.0 preserves those historical records, the Milestone 5
+assumption. Version 0.13.0 preserves those historical records, the Milestone 5
 QPX600DP serial backend and completed two-channel standard-load Windows
 validation, the Milestone 6 shared
 asynchronous command queue, Milestone 7 dual-channel manual controls with a
@@ -10,8 +10,8 @@ guarded explicit-port hardware connection, Milestone 8 independent CSV logging,
 Milestone 9 independent Constant Current protocols with an offline-tested,
 guarded Real Hardware follow-up, Milestone 10 bounded real-time plots, and
 Milestone 11 independent Constant Voltage protocols with supervised two-channel
-resistor-load acceptance, and Milestone 12 independent Simulation Mode stepped
-voltage scans.
+resistor-load acceptance, Milestone 12 independent Simulation Mode stepped
+voltage scans, and Milestone 13 independent Simulation Mode stepped current scans.
 
 Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
@@ -336,6 +336,29 @@ plots, completion and final simulated Output Off all passed. The 3.50 A limit
 used to keep the documented simulated load in voltage regulation is strictly a
 Simulation Mode test value and is not approved for physical hardware.
 
+## Milestone 13 automatic stepped current scan
+
+CH1 and CH2 now also provide independent Current Scan panels with start current,
+stop current, signed current step, voltage compliance, dwell per step and sample
+interval. The current-axis adapter reuses the Milestone 12
+`SteppedScanController`; there is no second scan state machine. Exact decimal
+planning provides ascending, descending and non-divisible inclusive sequences
+without drift, duplicate endpoints or overshoot.
+
+The complete plan is validated against the selected voltage range, current grid,
+power envelope and project limits before ownership, logging or output mutation.
+Initial voltage compliance/current and every later current are applied and read
+back through the one shared queue. The existing Pause/Resume active-time rules,
+bounded Output-Off cleanup, one-writer CSV ownership and plot sample flow are
+unchanged. Current-scan rows use the existing optional scan columns with
+`scan_name=current_scan` and the current setpoint in
+`scan_commanded_setpoint`.
+
+Milestone 13 is accepted in Simulation Mode only. Current Scan Start remains
+disabled in Real Hardware mode with an acceptance-pending message; no physical
+current-scan path is implemented. See
+[Milestone 13 verification](docs/verification/milestone13.md).
+
 ## Milestone 5 offline physical backend
 
 `SerialTransport` opens only an explicitly supplied port. It never enumerates
@@ -514,7 +537,8 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent live voltage/current plots | Implemented for both channels with bounded display memory and unchanged full CSV data |
 | Independent Constant Voltage protocols | Simulation and guarded fake-serial validation passed; supervised CH1/CH2 100-ohm resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Independent stepped Voltage Scan | Implemented and automated-smoke validated for CH1/CH2 in Simulation Mode only; Real Hardware acceptance pending and controls disabled |
-| Current scan and later polarization protocols | Not implemented |
+| Independent stepped Current Scan | Implemented and automated-smoke validated for CH1/CH2 in Simulation Mode only; Real Hardware acceptance pending and controls disabled |
+| Later polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
 
@@ -536,6 +560,7 @@ control potential against a reference electrode.
 - [Milestone 10 real-time plotting verification](docs/verification/milestone10.md)
 - [Milestone 11 Constant Voltage verification](docs/verification/milestone11.md)
 - [Milestone 12 Voltage Scan verification](docs/verification/milestone12.md)
+- [Milestone 13 Current Scan verification](docs/verification/milestone13.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 

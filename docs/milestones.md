@@ -445,3 +445,40 @@ Milestone 12 Real Hardware Voltage Scan is not implemented or enabled. Its panel
 is visibly disabled outside Simulation Mode and reports that real-hardware
 acceptance is pending. No COM port or physical instrument was accessed during
 implementation or validation. See [verification details](verification/milestone12.md).
+
+## Milestone 13 - Automatic stepped Current Scan
+
+Implemented independent CH1 and CH2 Current Scan panels for Simulation Mode.
+Each accepts start/stop current, a signed current step, voltage compliance,
+dwell time per step and sample interval. Exact `Decimal` planning supports
+ascending, descending and non-divisible inclusive sequences without binary
+drift, duplicate endpoints or overshoot.
+
+`CurrentScanController` is a current-axis adapter over the existing
+`SteppedScanController`; no second scan state machine was created. It validates
+the complete current plan and fixed voltage compliance against capability grids,
+the selected voltage range, conservative power envelope and existing project
+limits before channel ownership, CSV creation or queue submission. The shared
+engine applies and verifies initial settings, performs one output lifetime,
+atomically sets/verifies each later current, schedules monotonic dwell samples,
+and uses the established Pause/Resume and bounded cleanup paths.
+
+CH1 and CH2 may scan independently or simultaneously through the one serialized
+worker. Ownership disables manual controls and other protocols only on the owned
+channel. A scan creates one channel CSV or reuses an active same-channel logger;
+the existing optional columns record `scan_name=current_scan`, step index/total
+and the commanded current in `scan_commanded_setpoint`. Existing sample signals
+feed plots without another backend request, writer or thread.
+
+Simulation/fake-backend tests cover current capability and voltage-compliance
+validation, command order/readback mismatch, ascending/descending/non-divisible
+plans, dwell and missed-slot timing, Pause/Resume, cleanup/failure/disconnect/
+shutdown behavior, stale and duplicate actions, logging continuity, plotting,
+channel isolation and simultaneous scans. The automated Simulation Mode smoke
+completes simultaneous CH1/CH2 Current Scans after the existing protocol and
+Voltage Scan checks, then verifies clean disconnect and worker shutdown.
+
+Milestone 13 Real Hardware Current Scan is not implemented or enabled. Its Start
+control is visibly disabled outside Simulation Mode with an acceptance-pending
+message. No COM port or physical instrument was accessed. See
+[verification details](verification/milestone13.md).

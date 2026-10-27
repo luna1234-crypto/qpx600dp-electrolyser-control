@@ -1,4 +1,4 @@
-"""Reusable queued stepped-scan state machine and Milestone 12 voltage scan."""
+"""Reusable queued stepped-scan state machine for voltage and current scans."""
 
 from __future__ import annotations
 
@@ -44,17 +44,23 @@ def generate_inclusive_setpoints(
     start: str | Decimal,
     stop: str | Decimal,
     step: str | Decimal,
+    *,
+    axis_label: str = "Voltage",
 ) -> tuple[Decimal, ...]:
     """Return exact inclusive steps, adding a non-divisible endpoint once."""
-    first = start if isinstance(start, Decimal) else _decimal(start, "Start voltage")
-    last = stop if isinstance(stop, Decimal) else _decimal(stop, "Stop voltage")
-    increment = step if isinstance(step, Decimal) else _decimal(step, "Voltage step")
+    first = (
+        start if isinstance(start, Decimal) else _decimal(start, f"Start {axis_label.lower()}")
+    )
+    last = stop if isinstance(stop, Decimal) else _decimal(
+        stop, f"Stop {axis_label.lower()}"
+    )
+    increment = step if isinstance(step, Decimal) else _decimal(step, f"{axis_label} step")
     if increment == 0:
-        raise ValueError("Voltage step must not be zero.")
+        raise ValueError(f"{axis_label} step must not be zero.")
     if first < last and increment < 0:
-        raise ValueError("Voltage step must be positive for an ascending scan.")
+        raise ValueError(f"{axis_label} step must be positive for an ascending scan.")
     if first > last and increment > 0:
-        raise ValueError("Voltage step must be negative for a descending scan.")
+        raise ValueError(f"{axis_label} step must be negative for a descending scan.")
     if first == last:
         return (first,)
 
@@ -275,7 +281,7 @@ class SteppedScanController(ConstantCurrentController):
         if self._scan_step_index + 1 >= len(config.setpoints):
             self._active_before_run_s = config.duration_s
             self._run_started_at = 0.0
-            self._begin_cleanup(ProtocolState.COMPLETED, "Voltage scan completed")
+            self._begin_cleanup(ProtocolState.COMPLETED, f"{self._display_name} completed")
             return
         self._active_before_run_s = (self._scan_step_index + 1) * config.dwell_s
         self._run_started_at = 0.0
@@ -333,7 +339,7 @@ class SteppedScanController(ConstantCurrentController):
                 measured_current_a=result.measured_current_a,
                 output_enabled=True,
                 sample_count=self._snapshot.sample_count + 1,
-                message=f"Voltage scan step {self._scan_step_index + 1}/"
+                message=f"{self._display_name} step {self._scan_step_index + 1}/"
                 f"{len(config.setpoints)} running",
             ))
             self._schedule_next_sample()
@@ -553,4 +559,183 @@ class VoltageScanController(SteppedScanController):
             interval_s=interval_s,
             voltage_range_name=voltage_range_name,
             scan_name="voltage_scan",
+        )
+
+
+class CurrentScanController(SteppedScanController):
+    """Milestone 13 Simulation Mode stepped-current scan."""
+
+    def __init__(
+        self,
+        channel: int,
+        connection: ConnectionController,
+        parent: QObject | None = None,
+        *,
+        safety_limits: ConstantCurrentSafetyLimits = DEFAULT_CONSTANT_CURRENT_LIMITS,
+        monotonic=None,
+        utc_now=None,
+        writer_factory=CsvLogFile,
+    ) -> None:
+        super().__init__(
+            channel,
+            connection,
+            parent,
+            axis_name="current",
+            safety_limits=safety_limits,
+            monotonic=monotonic,
+            utc_now=utc_now,
+            writer_factory=writer_factory,
+        )
+
+    def validate_inputs(
+        self,
+        start_current: str,
+        stop_current: str,
+        current_step: str,
+        voltage_compliance: str,
+        dwell: str,
+        interval: str,
+        voltage_range_name: str | None,
+    ) -> str | None:
+        if self._connection.snapshot.state is not ConnectionState.CONNECTED:
+            return "Connect and initialize Simulation Mode before starting."
+        if not self._connection.snapshot.simulation_mode:
+            return "Milestone 13 real-hardware acceptance pending."
+        if voltage_range_name is None:
+            return "Refresh the channel before starting a current scan."
+        try:
+            self._validate_scan_config(
+                start_current,
+                stop_current,
+                current_step,
+                voltage_compliance,
+                dwell,
+                interval,
+                voltage_range_name,
+            )
+        except (ValueError, InstrumentValueError) as error:
+            return str(error)
+        return None
+
+    def start(
+        self,
+        start_current: str,
+        stop_current: str,
+        current_step: str,
+        voltage_compliance: str,
+        dwell: str,
+        interval: str,
+        voltage_range_name: str | None,
+        directory: Path,
+        *,
+        logging_sink: ProtocolLogSink | None = None,
+    ) -> bool:
+        if self._snapshot.owns_channel:
+            return False
+        validation_error = self.validate_inputs(
+            start_current,
+            stop_current,
+            current_step,
+            voltage_compliance,
+            dwell,
+            interval,
+            voltage_range_name,
+        )
+        if validation_error is not None:
+            return self._reject(validation_error)
+        assert voltage_range_name is not None
+        config = self._validate_scan_config(
+            start_current,
+            stop_current,
+            current_step,
+            voltage_compliance,
+            dwell,
+            interval,
+            voltage_range_name,
+        )
+        self._scan_step_index = 0
+        return self._begin_validated_start(config, directory, logging_sink=logging_sink)
+
+    def resume(self, real_hardware_confirmation: str | None = None) -> bool:
+        if not self._connection.snapshot.simulation_mode:
+            return self._reject("Milestone 13 real-hardware acceptance pending.")
+        return super().resume(real_hardware_confirmation)
+
+    def _validate_scan_config(
+        self,
+        start_current: str,
+        stop_current: str,
+        current_step: str,
+        voltage_compliance: str,
+        dwell: str,
+        interval: str,
+        voltage_range_name: str,
+    ) -> SteppedScanConfig:
+        exact_start = _decimal(start_current, "Start current")
+        exact_stop = _decimal(stop_current, "Stop current")
+        exact_step = _decimal(current_step, "Current step")
+        QPX600DP_CAPABILITIES.validate_current(float(exact_start))
+        QPX600DP_CAPABILITIES.validate_current(float(exact_stop))
+        if exact_step == 0:
+            raise ValueError("Current step must not be zero.")
+        QPX600DP_CAPABILITIES.validate_current(abs(float(exact_step)))
+        exact_setpoints = generate_inclusive_setpoints(
+            exact_start,
+            exact_stop,
+            exact_step,
+            axis_label="Current",
+        )
+        voltage = QPX600DP_CAPABILITIES.validate_voltage(
+            self._number(voltage_compliance, "Voltage compliance"),
+            voltage_range_name,
+        )
+        dwell_s = self._number(dwell, "Dwell time")
+        interval_s = self._number(interval, "Sampling interval")
+        if voltage > self._limits.max_voltage_v:
+            raise ValueError(
+                f"Voltage compliance exceeds the {self._limits.max_voltage_v:g} V project limit."
+            )
+        if not 0 < dwell_s <= self._limits.max_duration_s:
+            raise ValueError(
+                f"Dwell time must be positive and no greater than "
+                f"{self._limits.max_duration_s:g} seconds."
+            )
+        if not self._limits.min_interval_s <= interval_s <= self._limits.max_interval_s:
+            raise ValueError(
+                f"Sampling interval must be between {self._limits.min_interval_s:g} and "
+                f"{self._limits.max_interval_s:g} seconds."
+            )
+        if interval_s > dwell_s:
+            raise ValueError("Sampling interval cannot be longer than dwell time.")
+
+        setpoints: list[float] = []
+        for exact in exact_setpoints:
+            current = QPX600DP_CAPABILITIES.validate_current(float(exact))
+            if current > self._limits.max_current_a:
+                raise ValueError(
+                    f"Scan current exceeds the {self._limits.max_current_a:g} A project limit."
+                )
+            if voltage * current > self._limits.max_power_w:
+                raise ValueError(
+                    f"Requested V*I exceeds the {self._limits.max_power_w:g} W project limit."
+                )
+            if not QPX600DP_CAPABILITIES.power_envelope.contains(voltage, current):
+                raise ValueError(
+                    "Requested scan point is outside the conservative power envelope."
+                )
+            setpoints.append(current)
+        duration_s = len(setpoints) * dwell_s
+        if duration_s > self._limits.max_duration_s:
+            raise ValueError(
+                f"Total scan duration exceeds the {self._limits.max_duration_s:g} second "
+                "project limit."
+            )
+        return SteppedScanConfig(
+            setpoints=tuple(setpoints),
+            fixed_voltage_v=voltage,
+            fixed_current_a=setpoints[0],
+            dwell_s=dwell_s,
+            interval_s=interval_s,
+            voltage_range_name=voltage_range_name,
+            scan_name="current_scan",
         )

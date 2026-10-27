@@ -112,3 +112,30 @@ Record the Windows edition, Python/PySide6 versions, date and observed result.
 The historical Milestone 4 visual check used the earlier CPX model identity.
 This Milestone 12 procedure is Simulation Mode only: do not select Real Hardware,
 enter a port, invoke a hardware tool or access a physical supply.
+
+## Milestone 13 Current Scan checks
+
+Keep Simulation Mode connected and use only simulator-safe values:
+
+1. In CH1 Current Scan enter start `0.1`, stop `0.3`, step `0.1`, voltage
+   compliance `2`, dwell `1` and interval `0.25`. Confirm steps `1/3` through
+   `3/3` appear once in order, CSV/plot measurements update and completion ends
+   with simulated Output Off.
+2. In CH2 enter start `0.3`, stop `0.1`, step `-0.08`, voltage compliance `2`,
+   dwell `1` and interval `0.25`. Confirm the inclusive sequence is `0.30`,
+   `0.22`, `0.14`, `0.10 A` without overshoot or a duplicate endpoint.
+3. Run CH1 and CH2 together. Confirm independent state, CSV and plots while the
+   shared queue keeps the GUI responsive and readbacks coherent.
+4. Pause one channel during a dwell, confirm its output is OFF and active time
+   freezes, then Resume. Confirm the same step continues and no step is skipped
+   or repeated. Stop it early while the other channel continues unaffected.
+5. Repeat with same-channel standalone logging already active. Confirm one CSV
+   writer is reused, `scan_name` is `current_scan`, commanded current is stored
+   in `scan_commanded_setpoint`, and protocol completion leaves the manual logger
+   active.
+6. Confirm both Current Scan Start controls are disabled with the Milestone 13
+   acceptance-pending message whenever Real Hardware mode is selected. Do not
+   enter or connect a port during this Simulation Mode procedure.
+
+Record the Windows/Python/PySide6 versions and outcome. Real Hardware Current
+Scan implementation and acceptance remain pending.

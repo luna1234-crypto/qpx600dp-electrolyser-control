@@ -41,6 +41,7 @@ QPX 600 DP/
             channel_panel.py
             constant_current_panel.py
             constant_voltage_panel.py
+            current_scan_panel.py
             voltage_scan_panel.py
             main_window.py
         instrument/
@@ -87,6 +88,7 @@ QPX 600 DP/
             milestone10.md
             milestone11.md
             milestone12.md
+            milestone13.md
             model_correction_qpx600dp.md
         architecture.md
         qpx600dp_commands.md
@@ -109,6 +111,7 @@ QPX 600 DP/
         test_connection_worker.py
         test_constant_current.py
         test_constant_voltage.py
+        test_current_scan.py
         test_voltage_scan.py
         test_csv_logging.py
         test_hardware_check.py
