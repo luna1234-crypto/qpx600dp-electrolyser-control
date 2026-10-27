@@ -5,8 +5,8 @@ Date: 2026-10-14
 ## Accepted scope
 
 Milestone 12 implements independent CH1 and CH2 automatic stepped Voltage Scan.
-Simulation Mode is accepted. A guarded Real Hardware follow-up is implemented
-and fake-serial tested, but supervised physical acceptance remains pending. No
+Simulation Mode and supervised CH1/CH2 resistor-load operation are accepted. A
+guarded Real Hardware follow-up was fake-serial tested before supervised use. No
 COM port was enumerated, opened or probed; Test Bridge, `hardware_check`,
 diagnostic tools and the physical QPX600DP were not used for the follow-up.
 
@@ -129,7 +129,7 @@ recommended for physical hardware.
 Pause/Resume completed without a skipped or duplicated step, and paused time
 was excluded from active timing. CSV step metadata, real-time plots, normal
 completion and final simulated Output Off all passed. Real Hardware Voltage
-Scan physical acceptance remains pending and unapproved.
+Scan physical acceptance is recorded below.
 
 ## Guarded Real Hardware follow-up
 
@@ -149,4 +149,16 @@ Output-Off cleanup, session-generation guards and CSV continuity. There is no
 automatic retry or reconnect and no command targets the other channel. Fake
 serial tests cover cancellation without commands, exact order, readback and
 communication failures, Pause/Resume, duplicate-action rejection, cleanup and
-simultaneous CH1/CH2 operation. Physical 100-ohm acceptance is still required.
+simultaneous CH1/CH2 operation. Supervised 100-ohm acceptance is recorded below.
+
+## Supervised Real Hardware acceptance
+
+Supervised functional acceptance passed on 2026-10-27. CH1 and CH2 each
+completed Voltage Scan with the verified 100-ohm load. Pause/Resume, early Stop
+and natural completion passed. The commanded step sequence, CSV scan metadata
+and real-time plots were correct, with no skipped or duplicated step. Channel
+isolation passed, and both the physical indicators and GUI reported both outputs
+OFF at the end.
+
+This is resistor-load functional acceptance. Low-current readings were not
+evaluated as metrology calibration evidence.

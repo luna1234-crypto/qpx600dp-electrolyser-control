@@ -444,9 +444,12 @@ is Simulation Mode-only and is not approved for physical hardware.
 The guarded Real Hardware Voltage Scan follow-up reuses the accepted Milestone
 11 transition and cleanup mechanism, adds detailed default-cancel Start/Resume
 authorization, verifies session/OFF/range/setpoints, and applies every step as
-one serialized set/readback operation. It is fake-serial tested only; supervised
-physical acceptance remains pending. No COM port or physical instrument was
-accessed during implementation. See [verification details](verification/milestone12.md).
+one serialized set/readback operation. After fake-serial validation, supervised
+physical acceptance passed on CH1 and CH2 with a verified 100-ohm
+load. Pause/Resume, Stop, natural completion, scan steps, CSV metadata, plots,
+channel isolation and final physical/GUI Output Off all passed. Low-current
+readings are functional evidence, not metrology calibration. See
+[verification details](verification/milestone12.md).
 
 ## Milestone 13 - Automatic stepped Current Scan
 
@@ -490,6 +493,11 @@ error in the affected channel panel.
 The same guarded Real Hardware follow-up applies to Current Scan without a
 second state machine. It preserves exact planning, per-channel ownership, one
 CSV writer and simultaneous shared-queue operation while using the accepted
-exactly-once settled output transitions and priority cleanup. It is fake-serial
-tested only; supervised physical acceptance remains pending. No COM port or
-physical instrument was accessed. See [verification details](verification/milestone13.md).
+exactly-once settled output transitions and priority cleanup. No COM port or
+physical instrument was accessed during implementation. After fake-serial
+validation, supervised CH1/CH2
+acceptance subsequently passed with the verified 100-ohm load: Pause/Resume,
+Stop, natural completion, exact step progression, CSV metadata, plots, channel
+isolation and final physical/GUI Output Off all passed. Low-current readings are
+functional evidence only, not metrology calibration. See
+[verification details](verification/milestone13.md).

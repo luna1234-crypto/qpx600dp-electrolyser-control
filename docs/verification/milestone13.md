@@ -5,8 +5,8 @@ Date: 2026-10-27
 ## Accepted scope
 
 Milestone 13 implements independent CH1 and CH2 automatic stepped Current Scan.
-Simulation Mode is accepted. A guarded Real Hardware follow-up is implemented
-and fake-serial tested, but supervised physical acceptance remains pending. No
+Simulation Mode and supervised CH1/CH2 resistor-load operation are accepted. A
+guarded Real Hardware follow-up was fake-serial tested before supervised use. No
 COM port, Test Bridge, `hardware_check`, diagnostic tool or physical instrument
 was accessed.
 
@@ -103,8 +103,8 @@ Manual operator acceptance passed on 2026-10-27 using the procedure in
 - both simulated outputs finished OFF; and
 - invalid input produced a visible validation error in the affected channel panel.
 
-This acceptance applies to Simulation Mode only. Real Hardware Current Scan
-physical acceptance remains pending.
+This section records Simulation Mode acceptance. Supervised Real Hardware
+acceptance is recorded separately below.
 
 ## Simulation Mode Start feedback follow-up
 
@@ -139,5 +139,16 @@ completion, failure, disconnect, logging failure and shutdown use the inherited
 single safety-priority Output-Off attempt with no retry or reconnect. Fake serial
 tests cover exact order, default cancellation, mismatch and malformed-response
 cleanup, stale/double Resume rejection, CSV continuity, both channels and
-simultaneous scans. The controls remain labelled as physically unaccepted;
-supervised 100-ohm validation is still pending.
+simultaneous scans. Supervised 100-ohm validation is recorded below.
+
+## Supervised Real Hardware acceptance
+
+Supervised functional acceptance passed on 2026-10-27. CH1 and CH2 each
+completed Current Scan with the verified 100-ohm load. Pause/Resume, early Stop
+and natural completion passed. The commanded step sequence, CSV scan metadata
+and real-time plots were correct, with no skipped or duplicated step. Channel
+isolation passed, and both the physical indicators and GUI reported both outputs
+OFF at the end.
+
+This is resistor-load functional acceptance. Low-current readings were not
+evaluated as metrology calibration evidence.
