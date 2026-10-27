@@ -33,6 +33,7 @@ from qpx_electrolyser.engine.constant_voltage import (
     ConstantVoltageController,
     REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
 )
+from qpx_electrolyser.engine.current_input import CurrentInputMode, CurrentInputSelection
 from qpx_electrolyser.engine.stepped_scan import (
     CurrentScanController,
     REAL_HARDWARE_SCAN_CONFIRMATION,
@@ -218,9 +219,10 @@ class MainWindow(QMainWindow):
             )
             panel.stop_logging_requested.connect(logging_controller.stop)
             protocol_panel.start_requested.connect(
-                lambda current, voltage, duration, interval, selected_channel=channel:
+                lambda current, voltage, duration, interval, mode, area,
+                selected_channel=channel:
                 self._start_protocol(
-                    selected_channel, current, voltage, duration, interval
+                    selected_channel, current, voltage, duration, interval, mode, area
                 )
             )
             protocol_panel.pause_requested.connect(protocol_controller.pause)
@@ -258,9 +260,10 @@ class MainWindow(QMainWindow):
             )
             voltage_scan_panel.stop_requested.connect(voltage_scan_controller.stop)
             current_scan_panel.start_requested.connect(
-                lambda start, stop, step, voltage, dwell, interval,
+                lambda start, stop, step, voltage, dwell, interval, mode, area,
                 selected_channel=channel: self._start_current_scan(
-                    selected_channel, start, stop, step, voltage, dwell, interval
+                    selected_channel, start, stop, step, voltage, dwell, interval,
+                    mode, area
                 )
             )
             current_scan_panel.pause_requested.connect(current_scan_controller.pause)
@@ -397,6 +400,8 @@ class MainWindow(QMainWindow):
         voltage: str,
         duration: str,
         interval: str,
+        current_input_mode: str = CurrentInputMode.CURRENT.value,
+        active_area_cm2: str = "",
     ) -> None:
         if (
             self.voltage_protocol_controllers[channel].snapshot.owns_channel
@@ -411,11 +416,21 @@ class MainWindow(QMainWindow):
         protocol = self.protocol_controllers[channel]
         logger = self.logging_controllers[channel]
         validation_error = protocol.validate_inputs(
-            current, voltage, duration, interval, manual.voltage_range_name
+            current,
+            voltage,
+            duration,
+            interval,
+            manual.voltage_range_name,
+            current_input_mode=current_input_mode,
+            active_area_cm2=active_area_cm2,
         )
         if validation_error is not None:
+            self.protocol_panels[channel].show_validation_error(validation_error)
             self.statusBar().showMessage(validation_error)
             return
+        resolved = CurrentInputSelection.parse(
+            current_input_mode, active_area_cm2
+        ).resolve(current, "Target current")
         confirmation = None
         if not self._connection_controller.snapshot.simulation_mode:
             log_target = (
@@ -428,7 +443,16 @@ class MainWindow(QMainWindow):
                 f"Confirm REAL HARDWARE Constant Current - CH{channel}",
                 "REAL HARDWARE OUTPUT-ON AUTHORIZATION\n\n"
                 f"Channel: CH{channel}\n"
-                f"Target current: {current} A\n"
+                f"Current input mode: {resolved.input_mode.value}\n"
+                f"Commanded current: {float(resolved.current_a):g} A\n"
+                + (
+                    f"Current density / active area: "
+                    f"{float(resolved.current_density_a_cm2):g} A/cm² / "
+                    f"{float(resolved.active_area_cm2):g} cm²\n"
+                    if resolved.current_density_a_cm2 is not None
+                    and resolved.active_area_cm2 is not None else ""
+                )
+                +
                 f"Voltage compliance: {voltage} V\n"
                 f"Active duration: {duration} s\n"
                 f"Measurement interval: {interval} s\n"
@@ -454,6 +478,8 @@ class MainWindow(QMainWindow):
             interval,
             manual.voltage_range_name,
             self._data_directory,
+            current_input_mode=current_input_mode,
+            active_area_cm2=active_area_cm2,
             logging_sink=logger if logger.snapshot.active else None,
             real_hardware_confirmation=confirmation,
         ):
@@ -679,6 +705,8 @@ class MainWindow(QMainWindow):
         voltage_compliance: str,
         dwell: str,
         interval: str,
+        current_input_mode: str = CurrentInputMode.CURRENT.value,
+        active_area_cm2: str = "",
     ) -> None:
         if (
             self.protocol_controllers[channel].snapshot.owns_channel
@@ -700,6 +728,8 @@ class MainWindow(QMainWindow):
             dwell,
             interval,
             manual.voltage_range_name,
+            current_input_mode=current_input_mode,
+            active_area_cm2=active_area_cm2,
         )
         if validation_error is not None:
             self.current_scan_panels[channel].show_validation_error(validation_error)
@@ -715,14 +745,21 @@ class MainWindow(QMainWindow):
             step_count = len(generate_inclusive_setpoints(
                 start_current, stop_current, current_step, axis_label="Current"
             ))
+            selection = CurrentInputSelection.parse(
+                current_input_mode, active_area_cm2
+            )
+            start_a = selection.resolve(start_current, "Start current").current_a
+            stop_a = selection.resolve(stop_current, "Stop current").current_a
+            step_a = selection.resolve(current_step, "Current step").current_a
             answer = QMessageBox.warning(
                 self,
                 f"Confirm REAL HARDWARE Current Scan - CH{channel}",
                 "REAL HARDWARE STEPPED-SCAN OUTPUT-ON AUTHORIZATION\n\n"
                 f"Channel: CH{channel}\n"
                 "Scan type: Current Scan\n"
-                f"Start / stop / step: {start_current} / {stop_current} / "
-                f"{current_step} A\n"
+                f"Current input mode: {current_input_mode}\n"
+                f"Start / stop / step: {float(start_a):g} / {float(stop_a):g} / "
+                f"{float(step_a):g} A\n"
                 f"Voltage compliance: {voltage_compliance} V\n"
                 f"Dwell / interval: {dwell} / {interval} s\n"
                 f"Total scan steps: {step_count}\n"
@@ -751,6 +788,8 @@ class MainWindow(QMainWindow):
             interval,
             manual.voltage_range_name,
             self._data_directory,
+            current_input_mode=current_input_mode,
+            active_area_cm2=active_area_cm2,
             logging_sink=logger if logger.snapshot.active else None,
             real_hardware_confirmation=confirmation,
         ):

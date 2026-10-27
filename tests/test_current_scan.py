@@ -132,6 +132,67 @@ def test_current_setpoints_are_exact_inclusive_and_non_divisible() -> None:
     ) == tuple(Decimal(value) for value in ("0.3", "0.22", "0.14", "0.1"))
 
 
+def test_density_scan_plans_convert_before_grid_validation(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, _backend = connected(qapp)
+    scan = CurrentScanController(1, connection)
+    try:
+        ascending = scan._validate_scan_config(
+            "0.05", "0.15", "0.05", "2", "0.2", "0.1", "60 V",
+            current_input_mode="current_density", active_area_cm2="2",
+        )
+        assert ascending.setpoints == (0.1, 0.2, 0.3)
+        assert ascending.current_density_setpoints_a_cm2 == (0.05, 0.1, 0.15)
+        descending = scan._validate_scan_config(
+            "0.15", "0.05", "-0.05", "2", "0.2", "0.1", "60 V",
+            current_input_mode="current_density", active_area_cm2="2",
+        )
+        assert descending.setpoints == (0.3, 0.2, 0.1)
+        assert scan.validate_inputs(
+            "0.0075", "0.02", "0.005", "2", "1", "0.1", "60 V",
+            current_input_mode="current_density", active_area_cm2="2",
+        ) is not None
+    finally:
+        scan.shutdown()
+        assert connection.shutdown(1)
+
+
+def test_simultaneous_density_scans_are_independent_and_write_metadata(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, backend = connected(qapp)
+    ch1 = CurrentScanController(1, connection)
+    ch2 = CurrentScanController(2, connection)
+    try:
+        assert ch1.start(
+            "0.05", "0.15", "0.05", "2", "0.2", "0.1", "60 V", tmp_path,
+            current_input_mode="current_density", active_area_cm2="2",
+        )
+        assert ch2.start(
+            "0.3", "0.1", "-0.1", "2", "0.2", "0.1", "60 V", tmp_path,
+            current_input_mode="current_density", active_area_cm2="1",
+        )
+        wait_until(qapp, lambda: all(
+            item.snapshot.state is ProtocolState.COMPLETED for item in (ch1, ch2)
+        ))
+        calls1 = [item[2] for item in backend.calls if item[0] == "set_current" and item[1] == 1]
+        calls2 = [item[2] for item in backend.calls if item[0] == "set_current" and item[1] == 2]
+        assert calls1[:3] == [0.1, 0.2, 0.3]
+        assert calls2[:3] == [0.3, 0.2, 0.1]
+        for controller, area in ((ch1, "2"), (ch2, "1")):
+            data = rows(controller.snapshot.file_path)  # type: ignore[arg-type]
+            scan_rows = [row for row in data if row["scan_step_index"]]
+            assert scan_rows
+            assert {row["current_input_mode"] for row in scan_rows} == {"current_density"}
+            assert {row["active_area_cm2"] for row in scan_rows} == {area}
+            assert all(row["commanded_current_density_a_cm2"] for row in scan_rows)
+    finally:
+        ch1.shutdown()
+        ch2.shutdown()
+        assert connection.shutdown(1)
+
+
 @pytest.mark.parametrize(
     ("start", "stop", "step", "voltage", "dwell", "interval"),
     [
@@ -324,6 +385,32 @@ def test_gui_reuses_logger_and_plot_flow_and_enables_guarded_real_hardware(
         isolated_panel.set_context(available=True, simulation_mode=False)
         assert isolated_panel.start_button.isEnabled()
         assert "physical acceptance pending" in isolated_panel.message_label.text()
+    finally:
+        window.close()
+        qapp.processEvents()
+        assert connection.shutdown(1)
+
+
+def test_gui_density_mode_previews_plan_and_shows_local_validation_error(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection = ConnectionController(lambda: RecordingSimulator())
+    window = MainWindow(tmp_path / "application.log", connection, data_directory=tmp_path)
+    try:
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        panel = window.current_scan_panels[1]
+        panel.input_mode.setCurrentIndex(1)
+        panel.active_area_input.setText("2")
+        panel.start_current_input.setText("0.05")
+        panel.stop_current_input.setText("0.15")
+        panel.step_input.setText("0.05")
+        assert panel.derived_current_value.text() == "0.1 → 0.3 A; step 0.1 A"
+        panel.active_area_input.setText("0")
+        panel.start_button.click()
+        assert "Active area" in panel.message_label.text()
+        assert window.current_scan_controllers[1].snapshot.state is ProtocolState.IDLE
+        assert window.current_scan_controllers[2].snapshot.state is ProtocolState.IDLE
     finally:
         window.close()
         qapp.processEvents()

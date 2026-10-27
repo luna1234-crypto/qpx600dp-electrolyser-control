@@ -26,6 +26,7 @@ QPX 600 DP/
         engine/
             constant_current.py
             constant_voltage.py
+            current_input.py
             stepped_scan.py
             protocols/
                 __init__.py

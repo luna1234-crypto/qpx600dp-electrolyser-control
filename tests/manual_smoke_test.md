@@ -33,6 +33,10 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
     at least 0.5 s and confirm active elapsed time stays fixed. Resume, confirm
     RUNNING/OUTPUT ON, then Stop early and confirm STOPPING, OUTPUT OFF and a
     closed CSV. Confirm CH2 remains unaffected.
+13a. Select Current density for CH1, enter `0.05 A/cm²` and active area `2 cm²`,
+    and confirm the preview is `0.1 A`. Start, Pause/Resume and complete the run;
+    verify its CSV contains `current_density`, area `2`, density `0.05`, and
+    nonblank measured power. Repeat independently on CH2.
 14. Choose a writable CSV output directory and set a short interval such as
     0.25 seconds. Start CH1 logging; confirm only CH1 shows increasing samples.
     Confirm CH1 Constant Current Start remains enabled. Run, Pause, Resume and Stop
@@ -133,6 +137,9 @@ Keep Simulation Mode connected and use only simulator-safe values:
    writer is reused, `scan_name` is `current_scan`, commanded current is stored
    in `scan_commanded_setpoint`, and protocol completion leaves the manual logger
    active.
+5a. Select Current density, area `2 cm²`, start `0.05`, stop `0.15` and step
+   `0.05 A/cm²`. Confirm the preview is `0.1 → 0.3 A; step 0.1 A`, the ampere
+   steps execute once in order, and each CSV step retains its density metadata.
 6. Keep Simulation Mode selected. The guarded Real Hardware Current Scan path is
    covered by fake serial and remains pending supervised physical acceptance.
    Do not enter or connect a port during this Simulation Mode procedure.

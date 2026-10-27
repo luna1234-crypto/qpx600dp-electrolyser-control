@@ -3,6 +3,7 @@
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
+    QComboBox,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -13,10 +14,11 @@ from PySide6.QtWidgets import (
 )
 
 from qpx_electrolyser.engine.constant_current import ProtocolSnapshot, ProtocolState
+from qpx_electrolyser.engine.current_input import CurrentInputMode, CurrentInputSelection
 
 
 class ConstantCurrentPanel(QGroupBox):
-    start_requested = Signal(str, str, str, str)
+    start_requested = Signal(str, str, str, str, str, str)
     pause_requested = Signal()
     resume_requested = Signal()
     stop_requested = Signal()
@@ -28,6 +30,16 @@ class ConstantCurrentPanel(QGroupBox):
         self._snapshot = ProtocolSnapshot(channel=channel)
 
         self.current_input = self._input("A", f"channel{channel}ProtocolCurrent")
+        self.input_mode = QComboBox()
+        self.input_mode.setObjectName(f"channel{channel}ProtocolCurrentMode")
+        self.input_mode.addItem("Current (A)", CurrentInputMode.CURRENT.value)
+        self.input_mode.addItem(
+            "Current density (A/cm²)", CurrentInputMode.CURRENT_DENSITY.value
+        )
+        self.active_area_input = self._input(
+            "cm²", f"channel{channel}ProtocolActiveArea"
+        )
+        self.active_area_input.setText("1")
         self.voltage_input = self._input("V", f"channel{channel}ProtocolVoltage")
         self.duration_input = self._input("s", f"channel{channel}ProtocolDuration")
         self.interval_input = self._input("s", f"channel{channel}ProtocolInterval")
@@ -37,16 +49,27 @@ class ConstantCurrentPanel(QGroupBox):
         self.interval_input.setText("1")
 
         inputs = QGridLayout()
+        self.input_mode_label = QLabel("Current input mode:")
+        inputs.addWidget(self.input_mode_label, 0, 0)
+        inputs.addWidget(self.input_mode, 0, 1)
         self.current_label = QLabel("Target current (A):")
         self.voltage_label = QLabel("Voltage compliance (V):")
-        inputs.addWidget(self.current_label, 0, 0)
-        inputs.addWidget(self.current_input, 0, 1)
-        inputs.addWidget(self.voltage_label, 1, 0)
-        inputs.addWidget(self.voltage_input, 1, 1)
-        inputs.addWidget(QLabel("Duration (s):"), 2, 0)
-        inputs.addWidget(self.duration_input, 2, 1)
-        inputs.addWidget(QLabel("Interval (s):"), 3, 0)
-        inputs.addWidget(self.interval_input, 3, 1)
+        inputs.addWidget(self.current_label, 1, 0)
+        inputs.addWidget(self.current_input, 1, 1)
+        self.active_area_label = QLabel("Active area (cm²):")
+        inputs.addWidget(self.active_area_label, 2, 0)
+        inputs.addWidget(self.active_area_input, 2, 1)
+        self.derived_current_value = QLabel("0.1 A")
+        self.derived_current_value.setObjectName(f"channel{channel}ProtocolDerivedCurrent")
+        self.derived_current_label = QLabel("Derived current:")
+        inputs.addWidget(self.derived_current_label, 3, 0)
+        inputs.addWidget(self.derived_current_value, 3, 1)
+        inputs.addWidget(self.voltage_label, 4, 0)
+        inputs.addWidget(self.voltage_input, 4, 1)
+        inputs.addWidget(QLabel("Duration (s):"), 5, 0)
+        inputs.addWidget(self.duration_input, 5, 1)
+        inputs.addWidget(QLabel("Interval (s):"), 6, 0)
+        inputs.addWidget(self.interval_input, 6, 1)
 
         self.start_button = QPushButton("Start")
         self.pause_button = QPushButton("Pause")
@@ -98,12 +121,42 @@ class ConstantCurrentPanel(QGroupBox):
                 self.voltage_input.text(),
                 self.duration_input.text(),
                 self.interval_input.text(),
+                str(self.input_mode.currentData()),
+                self.active_area_input.text(),
             )
         )
+        self.input_mode.currentIndexChanged.connect(self._current_mode_changed)
+        self.current_input.textChanged.connect(self._update_derived_current)
+        self.active_area_input.textChanged.connect(self._update_derived_current)
         self.pause_button.clicked.connect(self.pause_requested)
         self.resume_button.clicked.connect(self.resume_requested)
         self.stop_button.clicked.connect(self.stop_requested)
+        self._current_mode_changed()
         self.apply_snapshot(self._snapshot)
+
+    def _current_mode_changed(self) -> None:
+        density = self.input_mode.currentData() == CurrentInputMode.CURRENT_DENSITY.value
+        self.current_label.setText(
+            "Target current density (A/cm²):" if density else "Target current (A):"
+        )
+        self.active_area_label.setVisible(density)
+        self.active_area_input.setVisible(density)
+        self._update_derived_current()
+
+    def _update_derived_current(self) -> None:
+        try:
+            resolved = CurrentInputSelection.parse(
+                str(self.input_mode.currentData()), self.active_area_input.text()
+            ).resolve(self.current_input.text(), "Target current density")
+            self.derived_current_value.setText(f"{float(resolved.current_a):g} A")
+            self.derived_current_value.setStyleSheet("")
+        except ValueError as error:
+            self.derived_current_value.setText(str(error))
+            self.derived_current_value.setStyleSheet("color: #a61b1b;")
+
+    def show_validation_error(self, message: str) -> None:
+        self.message_label.setText(message)
+        self.message_label.setStyleSheet("color: #a61b1b;")
 
     @staticmethod
     def _input(placeholder: str, object_name: str) -> QLineEdit:
@@ -166,6 +219,8 @@ class ConstantCurrentPanel(QGroupBox):
         )
         for widget in (
             self.current_input,
+            self.input_mode,
+            self.active_area_input,
             self.voltage_input,
             self.duration_input,
             self.interval_input,

@@ -115,6 +115,66 @@ def csv_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(stream))
 
 
+def test_current_density_conversion_precedes_grid_validation_and_has_no_extra_poll(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, backend = connected(qapp)
+    protocol = ConstantCurrentController(1, connection)
+    try:
+        assert protocol.validate_inputs(
+            "0.0075", "2", "1", "0.1", "60 V",
+            current_input_mode="current_density", active_area_cm2="2",
+        ) is not None
+        assert backend.calls == []  # type: ignore[attr-defined]
+
+        assert protocol.start(
+            "0.05", "2", "0.35", "0.1", "60 V", tmp_path,
+            current_input_mode="current_density", active_area_cm2="2",
+        )
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.COMPLETED)
+        assert protocol.snapshot.config is not None
+        assert protocol.snapshot.config.target_current_a == 0.1
+        calls = [item for item in backend.calls if item[1] == 1]  # type: ignore[attr-defined]
+        assert [item for item in calls if item[0] == "set_current"][0][2] == 0.1
+        data = csv_rows(protocol.snapshot.file_path)  # type: ignore[arg-type]
+        sampled = [row for row in data if row["measured_voltage_v"]]
+        assert sampled
+        assert all(row["current_input_mode"] == "current_density" for row in data)
+        assert all(row["active_area_cm2"] == "2" for row in data)
+        assert all(
+            row["commanded_current_density_a_cm2"] == "0.05" for row in data
+        )
+        assert all(row["measured_power_w"] for row in sampled)
+    finally:
+        protocol.shutdown()
+        assert connection.shutdown(1)
+
+
+def test_density_pause_resume_keeps_metadata_and_channel_isolation(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, backend = connected(qapp)
+    protocol = ConstantCurrentController(1, connection)
+    try:
+        assert protocol.start(
+            "0.05", "2", "0.8", "0.1", "60 V", tmp_path,
+            current_input_mode="current_density", active_area_cm2="2",
+        )
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        protocol.pause()
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.PAUSED)
+        assert protocol.resume()
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.RUNNING)
+        protocol.stop()
+        wait_until(qapp, lambda: protocol.snapshot.state is ProtocolState.COMPLETED)
+        assert not [item for item in backend.calls if item[1] == 2]  # type: ignore[attr-defined]
+        data = csv_rows(protocol.snapshot.file_path)  # type: ignore[arg-type]
+        assert {row["current_input_mode"] for row in data} == {"current_density"}
+    finally:
+        protocol.shutdown()
+        assert connection.shutdown(1)
+
+
 @pytest.mark.parametrize("channel", [1, 2])
 def test_normal_completion_for_each_channel(
     qapp: QApplication, tmp_path: Path, channel: int,
@@ -470,6 +530,41 @@ def test_gui_disables_only_owned_channel_and_coordinates_disconnect(
         assert any(item[0] == "output_off" and item[1] == 1 for item in backend.calls)
     finally:
         window.close()
+        assert connection.shutdown(1)
+
+
+def test_gui_density_mode_previews_derived_current_and_routes_each_channel(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    backend = RecordingSimulator()
+    connection = ConnectionController(lambda: backend)
+    window = MainWindow(tmp_path / "application.log", connection, data_directory=tmp_path)
+    try:
+        connection.request_connect()
+        wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+        for channel, area in ((1, "2"), (2, "3")):
+            panel = window.protocol_panels[channel]
+            panel.input_mode.setCurrentIndex(1)
+            panel.current_input.setText("0.05")
+            panel.active_area_input.setText(area)
+            panel.duration_input.setText("0.35")
+            panel.interval_input.setText("0.1")
+            assert panel.derived_current_value.text() == f"{0.05 * float(area):g} A"
+            panel.start_button.click()
+        wait_until(qapp, lambda: all(
+            protocol.snapshot.state is ProtocolState.COMPLETED
+            for protocol in window.protocol_controllers.values()
+        ))
+        assert [item[2] for item in backend.calls if item[0] == "set_current" and item[1] == 1][0] == 0.1
+        assert [item[2] for item in backend.calls if item[0] == "set_current" and item[1] == 2][0] == 0.15
+
+        panel = window.protocol_panels[1]
+        panel.active_area_input.setText("0")
+        panel.start_button.click()
+        assert "Active area" in panel.message_label.text()
+    finally:
+        window.close()
+        qapp.processEvents()
         assert connection.shutdown(1)
 
 

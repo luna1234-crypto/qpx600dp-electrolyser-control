@@ -1,11 +1,15 @@
 """Per-channel Constant Voltage protocol controls and status."""
 
+from PySide6.QtCore import Signal
+
 from qpx_electrolyser.engine.constant_current import ProtocolSnapshot
 from qpx_electrolyser.gui.constant_current_panel import ConstantCurrentPanel
 
 
 class ConstantVoltagePanel(ConstantCurrentPanel):
     """Reuse the protocol status widget with CV-specific labels and input order."""
+
+    start_requested = Signal(str, str, str, str)
 
     def __init__(self, channel: int) -> None:
         super().__init__(channel)
@@ -19,6 +23,15 @@ class ConstantVoltagePanel(ConstantCurrentPanel):
         self.current_label.setText("Current limit (A):")
         self.voltage_label.setText("Target voltage (V):")
         self.message_label.setText("Constant Voltage protocol idle")
+        for widget in (
+            self.input_mode_label,
+            self.input_mode,
+            self.active_area_label,
+            self.active_area_input,
+            self.derived_current_label,
+            self.derived_current_value,
+        ):
+            widget.hide()
 
         self.start_button.clicked.disconnect()
         self.start_button.clicked.connect(

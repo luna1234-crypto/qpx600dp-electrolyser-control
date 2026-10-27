@@ -3,6 +3,7 @@
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
+    QComboBox,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -13,10 +14,11 @@ from PySide6.QtWidgets import (
 )
 
 from qpx_electrolyser.engine.constant_current import ProtocolSnapshot, ProtocolState
+from qpx_electrolyser.engine.current_input import CurrentInputMode, CurrentInputSelection
 
 
 class CurrentScanPanel(QGroupBox):
-    start_requested = Signal(str, str, str, str, str, str)
+    start_requested = Signal(str, str, str, str, str, str, str, str)
     pause_requested = Signal()
     resume_requested = Signal()
     stop_requested = Signal()
@@ -38,19 +40,43 @@ class CurrentScanPanel(QGroupBox):
         )
         self.dwell_input = self._input("1", f"channel{channel}CurrentScanDwell")
         self.interval_input = self._input("0.25", f"channel{channel}CurrentScanInterval")
+        self.input_mode = QComboBox()
+        self.input_mode.setObjectName(f"channel{channel}CurrentScanMode")
+        self.input_mode.addItem("Current (A)", CurrentInputMode.CURRENT.value)
+        self.input_mode.addItem(
+            "Current density (A/cm²)", CurrentInputMode.CURRENT_DENSITY.value
+        )
+        self.active_area_input = self._input(
+            "1", f"channel{channel}CurrentScanActiveArea"
+        )
 
         inputs = QGridLayout()
+        inputs.addWidget(QLabel("Current input mode:"), 0, 0)
+        inputs.addWidget(self.input_mode, 0, 1)
+        self.start_current_label = QLabel("Start current (A):")
+        self.stop_current_label = QLabel("Stop current (A):")
+        self.step_label = QLabel("Current step (A):")
         labels = (
-            ("Start current (A):", self.start_current_input),
-            ("Stop current (A):", self.stop_current_input),
-            ("Current step (A):", self.step_input),
+            (self.start_current_label, self.start_current_input),
+            (self.stop_current_label, self.stop_current_input),
+            (self.step_label, self.step_input),
             ("Voltage compliance (V):", self.voltage_compliance_input),
             ("Dwell per step (s):", self.dwell_input),
             ("Sampling interval (s):", self.interval_input),
         )
-        for row, (label, widget) in enumerate(labels):
-            inputs.addWidget(QLabel(label), row, 0)
+        for row, (label, widget) in enumerate(labels, start=1):
+            inputs.addWidget(label if isinstance(label, QLabel) else QLabel(label), row, 0)
             inputs.addWidget(widget, row, 1)
+        self.active_area_label = QLabel("Active area (cm²):")
+        inputs.addWidget(self.active_area_label, 7, 0)
+        inputs.addWidget(self.active_area_input, 7, 1)
+        self.derived_current_value = QLabel("0.1 → 0.3 A; step 0.1 A")
+        self.derived_current_value.setWordWrap(True)
+        self.derived_current_value.setObjectName(
+            f"channel{channel}CurrentScanDerivedCurrent"
+        )
+        inputs.addWidget(QLabel("Derived current plan:"), 8, 0)
+        inputs.addWidget(self.derived_current_value, 8, 1)
 
         self.start_button = QPushButton("Start")
         self.pause_button = QPushButton("Pause")
@@ -101,11 +127,50 @@ class CurrentScanPanel(QGroupBox):
             self.voltage_compliance_input.text(),
             self.dwell_input.text(),
             self.interval_input.text(),
+            str(self.input_mode.currentData()),
+            self.active_area_input.text(),
         ))
+        self.input_mode.currentIndexChanged.connect(self._current_mode_changed)
+        for widget in (
+            self.start_current_input,
+            self.stop_current_input,
+            self.step_input,
+            self.active_area_input,
+        ):
+            widget.textChanged.connect(self._update_derived_current)
         self.pause_button.clicked.connect(self.pause_requested)
         self.resume_button.clicked.connect(self.resume_requested)
         self.stop_button.clicked.connect(self.stop_requested)
+        self._current_mode_changed()
         self.apply_snapshot(self._snapshot)
+
+    def _current_mode_changed(self) -> None:
+        density = self.input_mode.currentData() == CurrentInputMode.CURRENT_DENSITY.value
+        unit = "A/cm²" if density else "A"
+        noun = "current density" if density else "current"
+        self.start_current_label.setText(f"Start {noun} ({unit}):")
+        self.stop_current_label.setText(f"Stop {noun} ({unit}):")
+        self.step_label.setText(f"{noun.title()} step ({unit}):")
+        self.active_area_label.setVisible(density)
+        self.active_area_input.setVisible(density)
+        self._update_derived_current()
+
+    def _update_derived_current(self) -> None:
+        try:
+            selection = CurrentInputSelection.parse(
+                str(self.input_mode.currentData()), self.active_area_input.text()
+            )
+            start = selection.resolve(self.start_current_input.text(), "Start current")
+            stop = selection.resolve(self.stop_current_input.text(), "Stop current")
+            step = selection.resolve(self.step_input.text(), "Current step")
+            self.derived_current_value.setText(
+                f"{float(start.current_a):g} → {float(stop.current_a):g} A; "
+                f"step {float(step.current_a):g} A"
+            )
+            self.derived_current_value.setStyleSheet("")
+        except ValueError as error:
+            self.derived_current_value.setText(str(error))
+            self.derived_current_value.setStyleSheet("color: #a61b1b;")
 
     @staticmethod
     def _input(value: str, object_name: str, *, signed: bool = False) -> QLineEdit:
@@ -192,6 +257,8 @@ class CurrentScanPanel(QGroupBox):
             self.start_current_input,
             self.stop_current_input,
             self.step_input,
+            self.input_mode,
+            self.active_area_input,
             self.voltage_compliance_input,
             self.dwell_input,
             self.interval_input,

@@ -22,6 +22,7 @@ from qpx_electrolyser.data.csv_logging import (
     LoggingSnapshot,
     ProtocolLogSink,
 )
+from qpx_electrolyser.engine.current_input import CurrentInputMode, CurrentInputSelection
 from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
 from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback, read_channel
@@ -79,6 +80,9 @@ class ConstantCurrentConfig:
     duration_s: float
     interval_s: float
     voltage_range_name: str
+    current_input_mode: str = CurrentInputMode.CURRENT.value
+    active_area_cm2: float | None = None
+    commanded_current_density_a_cm2: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,6 +254,9 @@ class ConstantCurrentController(QObject):
         duration: str,
         interval: str,
         voltage_range_name: str | None,
+        *,
+        current_input_mode: str = CurrentInputMode.CURRENT.value,
+        active_area_cm2: str = "",
     ) -> str | None:
         """Return a user-facing validation error without queue or file side effects."""
         return self._validate_controller_inputs(
@@ -258,6 +265,8 @@ class ConstantCurrentController(QObject):
             duration,
             interval,
             voltage_range_name,
+            current_input_mode=current_input_mode,
+            active_area_cm2=active_area_cm2,
         )
 
     def _validate_controller_inputs(
@@ -267,6 +276,9 @@ class ConstantCurrentController(QObject):
         duration: str,
         interval: str,
         voltage_range_name: str | None,
+        *,
+        current_input_mode: str = CurrentInputMode.CURRENT.value,
+        active_area_cm2: str = "",
     ) -> str | None:
         if self._connection.snapshot.state is not ConnectionState.CONNECTED:
             return "Connect and initialize the selected instrument before starting."
@@ -286,6 +298,8 @@ class ConstantCurrentController(QObject):
                 duration,
                 interval,
                 voltage_range_name,
+                current_input_mode=current_input_mode,
+                active_area_cm2=active_area_cm2,
             )
         except (ValueError, InstrumentValueError) as error:
             return str(error)
@@ -300,6 +314,8 @@ class ConstantCurrentController(QObject):
         voltage_range_name: str | None,
         directory: Path,
         *,
+        current_input_mode: str = CurrentInputMode.CURRENT.value,
+        active_area_cm2: str = "",
         logging_sink: ProtocolLogSink | None = None,
         real_hardware_confirmation: str | None = None,
     ) -> bool:
@@ -312,6 +328,8 @@ class ConstantCurrentController(QObject):
             duration,
             interval,
             voltage_range_name,
+            current_input_mode=current_input_mode,
+            active_area_cm2=active_area_cm2,
         )
         if validation_error is not None:
             return self._reject(validation_error)
@@ -325,7 +343,13 @@ class ConstantCurrentController(QObject):
         assert voltage_range_name is not None
         try:
             config = self._validate_config(
-                target_current, voltage_compliance, duration, interval, voltage_range_name
+                target_current,
+                voltage_compliance,
+                duration,
+                interval,
+                voltage_range_name,
+                current_input_mode=current_input_mode,
+                active_area_cm2=active_area_cm2,
             )
         except (ValueError, InstrumentValueError) as error:
             return self._reject(str(error))
@@ -453,8 +477,14 @@ class ConstantCurrentController(QObject):
         duration: str,
         interval: str,
         voltage_range_name: str,
+        *,
+        current_input_mode: str = CurrentInputMode.CURRENT.value,
+        active_area_cm2: str = "",
     ) -> ConstantCurrentConfig:
-        current = self._number(target_current, self._current_label)
+        current_input = CurrentInputSelection.parse(
+            current_input_mode, active_area_cm2
+        ).resolve(target_current, self._current_label)
+        current = float(current_input.current_a)
         voltage = self._number(voltage_compliance, self._voltage_label)
         duration_s = self._number(duration, "Duration")
         interval_s = self._number(interval, "Measurement interval")
@@ -488,7 +518,22 @@ class ConstantCurrentController(QObject):
             )
         if interval_s > duration_s:
             raise ValueError("Measurement interval cannot be longer than the total duration.")
-        return ConstantCurrentConfig(current, voltage, duration_s, interval_s, voltage_range_name)
+        return ConstantCurrentConfig(
+            current,
+            voltage,
+            duration_s,
+            interval_s,
+            voltage_range_name,
+            current_input_mode=current_input.input_mode.value,
+            active_area_cm2=(
+                None if current_input.active_area_cm2 is None
+                else float(current_input.active_area_cm2)
+            ),
+            commanded_current_density_a_cm2=(
+                None if current_input.current_density_a_cm2 is None
+                else float(current_input.current_density_a_cm2)
+            ),
+        )
 
     @staticmethod
     def _number(text: str, label: str) -> float:
@@ -593,7 +638,16 @@ class ConstantCurrentController(QObject):
 
     def _protocol_csv_metadata(self) -> dict[str, object]:
         """Optional protocol-specific columns supplied to the shared CSV writer."""
-        return {}
+        config = self._snapshot.config
+        if not isinstance(config, ConstantCurrentConfig):
+            return {}
+        return {
+            "current_input_mode": config.current_input_mode,
+            "active_area_cm2": config.active_area_cm2,
+            "commanded_current_density_a_cm2": (
+                config.commanded_current_density_a_cm2
+            ),
+        }
 
     def _initial_snapshot_fields(
         self, config: ConstantCurrentConfig

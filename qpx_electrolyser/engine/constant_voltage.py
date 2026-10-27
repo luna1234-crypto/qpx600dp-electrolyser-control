@@ -124,6 +124,9 @@ class ConstantVoltageController(ConstantCurrentController):
         duration: str,
         interval: str,
         voltage_range_name: str,
+        *,
+        current_input_mode: str = "current",
+        active_area_cm2: str = "",
     ) -> ConstantVoltageConfig:
         validated: ConstantCurrentConfig = super()._validate_config(
             current_limit,
@@ -131,6 +134,8 @@ class ConstantVoltageController(ConstantCurrentController):
             duration,
             interval,
             voltage_range_name,
+            current_input_mode=current_input_mode,
+            active_area_cm2=active_area_cm2,
         )
         return ConstantVoltageConfig(
             target_voltage_v=validated.voltage_compliance_v,

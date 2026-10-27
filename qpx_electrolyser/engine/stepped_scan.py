@@ -24,6 +24,7 @@ from qpx_electrolyser.engine.constant_current import (
     _StartResult,
     _matches,
 )
+from qpx_electrolyser.engine.current_input import CurrentInputMode, CurrentInputSelection
 from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
 from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback, read_channel
@@ -95,6 +96,9 @@ class SteppedScanConfig:
     interval_s: float
     voltage_range_name: str
     scan_name: str
+    current_input_mode: str = ""
+    active_area_cm2: float | None = None
+    current_density_setpoints_a_cm2: tuple[float, ...] = ()
 
     @property
     def duration_s(self) -> float:
@@ -272,12 +276,22 @@ class SteppedScanController(ConstantCurrentController):
         config = self._snapshot.config
         if not isinstance(config, SteppedScanConfig):
             return {}
-        return {
+        metadata: dict[str, object] = {
             "scan_name": config.scan_name,
             "scan_step_index": self._scan_step_index + 1,
             "scan_total_steps": len(config.setpoints),
             "scan_commanded_setpoint": config.setpoints[self._scan_step_index],
         }
+        if config.current_input_mode:
+            metadata.update({
+                "current_input_mode": config.current_input_mode,
+                "active_area_cm2": config.active_area_cm2,
+                "commanded_current_density_a_cm2": (
+                    config.current_density_setpoints_a_cm2[self._scan_step_index]
+                    if config.current_density_setpoints_a_cm2 else None
+                ),
+            })
+        return metadata
 
     def _step_change_operation(
         self,
@@ -700,6 +714,9 @@ class CurrentScanController(SteppedScanController):
         dwell: str,
         interval: str,
         voltage_range_name: str | None,
+        *,
+        current_input_mode: str = CurrentInputMode.CURRENT.value,
+        active_area_cm2: str = "",
     ) -> str | None:
         session_error = self._validate_scan_session(voltage_range_name)
         if session_error is not None:
@@ -713,6 +730,8 @@ class CurrentScanController(SteppedScanController):
                 dwell,
                 interval,
                 voltage_range_name,
+                current_input_mode=current_input_mode,
+                active_area_cm2=active_area_cm2,
             )
         except (ValueError, InstrumentValueError) as error:
             return str(error)
@@ -729,6 +748,8 @@ class CurrentScanController(SteppedScanController):
         voltage_range_name: str | None,
         directory: Path,
         *,
+        current_input_mode: str = CurrentInputMode.CURRENT.value,
+        active_area_cm2: str = "",
         logging_sink: ProtocolLogSink | None = None,
         real_hardware_confirmation: str | None = None,
     ) -> bool:
@@ -742,6 +763,8 @@ class CurrentScanController(SteppedScanController):
             dwell,
             interval,
             voltage_range_name,
+            current_input_mode=current_input_mode,
+            active_area_cm2=active_area_cm2,
         )
         if validation_error is not None:
             return self._reject(validation_error)
@@ -759,6 +782,8 @@ class CurrentScanController(SteppedScanController):
             dwell,
             interval,
             voltage_range_name,
+            current_input_mode=current_input_mode,
+            active_area_cm2=active_area_cm2,
         )
         self._scan_step_index = 0
         return self._begin_validated_start(config, directory, logging_sink=logging_sink)
@@ -772,10 +797,27 @@ class CurrentScanController(SteppedScanController):
         dwell: str,
         interval: str,
         voltage_range_name: str,
+        *,
+        current_input_mode: str = CurrentInputMode.CURRENT.value,
+        active_area_cm2: str = "",
     ) -> SteppedScanConfig:
-        exact_start = _decimal(start_current, "Start current")
-        exact_stop = _decimal(stop_current, "Stop current")
-        exact_step = _decimal(current_step, "Current step")
+        selection = CurrentInputSelection.parse(current_input_mode, active_area_cm2)
+        input_label = (
+            "current density"
+            if selection.mode is CurrentInputMode.CURRENT_DENSITY else "current"
+        )
+        exact_start_input = _decimal(start_current, f"Start {input_label}")
+        exact_stop_input = _decimal(stop_current, f"Stop {input_label}")
+        exact_step_input = _decimal(current_step, f"{input_label.title()} step")
+        exact_start = selection.resolve(
+            exact_start_input, f"Start {input_label}"
+        ).current_a
+        exact_stop = selection.resolve(
+            exact_stop_input, f"Stop {input_label}"
+        ).current_a
+        exact_step = selection.resolve(
+            exact_step_input, f"{input_label.title()} step"
+        ).current_a
         QPX600DP_CAPABILITIES.validate_current(float(exact_start))
         QPX600DP_CAPABILITIES.validate_current(float(exact_stop))
         if exact_step == 0:
@@ -786,6 +828,15 @@ class CurrentScanController(SteppedScanController):
             exact_stop,
             exact_step,
             axis_label="Current",
+        )
+        density_setpoints = (
+            generate_inclusive_setpoints(
+                exact_start_input,
+                exact_stop_input,
+                exact_step_input,
+                axis_label="Current density",
+            )
+            if selection.mode is CurrentInputMode.CURRENT_DENSITY else ()
         )
         voltage = QPX600DP_CAPABILITIES.validate_voltage(
             self._number(voltage_compliance, "Voltage compliance"),
@@ -845,4 +896,12 @@ class CurrentScanController(SteppedScanController):
             interval_s=interval_s,
             voltage_range_name=voltage_range_name,
             scan_name="current_scan",
+            current_input_mode=selection.mode.value,
+            active_area_cm2=(
+                None if selection.active_area_cm2 is None
+                else float(selection.active_area_cm2)
+            ),
+            current_density_setpoints_a_cm2=tuple(
+                float(value) for value in density_setpoints
+            ),
         )

@@ -247,6 +247,7 @@ or call the backend.
 CSV files are created exclusively with Windows-safe UTC names, written with one
 fixed header, flushed after every row and closed deterministically. Rows record
 wall and monotonic time, channel, both programmed values, both measurements,
+measured power derived from the same atomic readback,
 range, output state, connection state/session generation and sample status/error.
 Fixed monotonic deadlines avoid drift; delayed slots are counted and skipped,
 not replayed as a burst, and overlapping channel polls are prevented.
@@ -279,6 +280,12 @@ measurement interval are validated before queue submission against QPX
 programming grids, the conservative power envelope and separate Simulation/Real
 Hardware project policy objects currently set to 10 V / 5 A / 50 W, 24 hours
 maximum and 0.1-3600 second intervals.
+
+The current input may be direct amperes or current density in A/cm² with a
+finite positive active area. One shared typed component converts `I = j × area`
+before the unchanged capability/grid and safety checks; the GUI previews the
+derived ampere value and CSV rows retain the selected mode, area and commanded
+density. Direct-current behavior remains unchanged.
 
 Start confirms OFF, sets voltage then current and verifies read-back. A separate
 queued final preflight rechecks session/OFF/settings immediately before one
@@ -458,6 +465,11 @@ Each accepts start/stop current, a signed current step, voltage compliance,
 dwell time per step and sample interval. Exact `Decimal` planning supports
 ascending, descending and non-divisible inclusive sequences without binary
 drift, duplicate endpoints or overshoot.
+
+The same shared current-input component also permits start/stop/step values in
+A/cm² with a finite positive active area. Exact density values are converted to
+amperes before grid validation, the derived plan is shown before Start, and the
+append-only CSV metadata records mode, area and the density for each step.
 
 `CurrentScanController` is a current-axis adapter over the existing
 `SteppedScanController`; no second scan state machine was created. It validates

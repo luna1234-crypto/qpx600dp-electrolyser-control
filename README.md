@@ -162,8 +162,10 @@ visually confirmed OFF and the load was removed after disconnection.
 
 CH1 and CH2 log independently or simultaneously. Rows contain ISO-8601 UTC and
 monotonic elapsed timestamps, channel, programmed voltage/current, measured
-voltage/current, selected range, output state, connection state, session
-generation, sample status and error text.
+voltage/current, measured power from that same atomic sample, selected range,
+output state, connection state, session generation, sample status and error text.
+The power and current-input metadata columns are appended to the established
+schema so existing readers that consume the original leading columns remain valid.
 
 Scheduling is anchored to fixed monotonic deadlines, with no more than one
 pending logging read per channel. If queue or backend latency passes deadlines,
@@ -185,7 +187,10 @@ OP1/OP2 were confirmed OFF.
 
 Each channel has an independent Constant Current state machine: `IDLE`,
 `STARTING`, `RUNNING`, `PAUSING`, `PAUSED`, `RESUMING`, `STOPPING`, `COMPLETED`
-and `FAILED`. Inputs are target current, voltage compliance, active duration and
+and `FAILED`. Current may be entered directly in A or as current density in
+A/cm² with a finite positive active area; the GUI previews the derived current
+and the shared conversion model applies `I = j × area` before instrument-grid
+validation. Further inputs are voltage compliance, active duration and
 measurement interval. All are validated against the active voltage range,
 hardware programming grids, conservative power envelope and the explicit
 Simulation Mode project policy of 10 V, 5 A, 50 W, 24 hours maximum duration and
@@ -351,6 +356,10 @@ interval. The current-axis adapter reuses the Milestone 12
 planning provides ascending, descending and non-divisible inclusive sequences
 without drift, duplicate endpoints or overshoot.
 
+The current axis can alternatively be entered as A/cm² with a finite positive
+active area. Exact density setpoints are converted to amperes before the same
+capability/grid checks, and the GUI displays the derived ampere plan before Start.
+
 The complete plan is validated against the selected voltage range, current grid,
 power envelope and project limits before ownership, logging or output mutation.
 Initial voltage compliance/current and every later current are applied and read
@@ -359,6 +368,8 @@ bounded Output-Off cleanup, one-writer CSV ownership and plot sample flow are
 unchanged. Current-scan rows use the existing optional scan columns with
 `scan_name=current_scan` and the current setpoint in
 `scan_commanded_setpoint`.
+Rows also identify `current_input_mode`, `active_area_cm2` and the commanded
+current density when density mode is selected.
 
 Milestone 13 uses the same guarded Real Hardware follow-up: default-cancel
 authorization, fresh OFF/range/settings checks, exactly-once settled output

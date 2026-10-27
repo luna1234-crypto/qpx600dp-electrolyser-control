@@ -15,6 +15,13 @@ compliance, dwell per step and sampling interval. It displays state, step/total,
 commanded current, active elapsed/remaining time, measurements, output state,
 missed samples and concise status.
 
+The M1–M13 audit remediation adds an explicit direct-current/current-density
+mode shared with Constant Current and future Milestone 14. Density mode requires
+a finite positive active area; exact density start/stop/step values are converted
+to amperes before the existing grid and safety validation. The derived ampere
+plan is visible before Start, while append-only CSV metadata preserves input
+mode, area and the commanded density at each step.
+
 ## Shared scan engine
 
 `CurrentScanController` supplies only current-axis validation and setpoint

@@ -336,6 +336,8 @@ sequence. Use explicit V, A, s, cm2
 and A/cm2 fields internally. Convert `I = j * area` at the boundary, reject
 non-finite values, and validate every step before arming. Scheduling and final
 polarisation-window averaging must be testable with a fake monotonic clock.
+The shared typed current-input component now performs this conversion for
+Constant Current and Current Scan and is the reuse point for future Milestone 14.
 
 Keep immutable hardware capabilities separate from user-configured safety limits.
 `QPX600DP_CAPABILITIES` records 80 V, 50 A and 600 W ratings; none is an
@@ -371,6 +373,9 @@ flushing is not a guarantee against sudden power loss. File errors stop only the
 affected logger and never command an output or change any instrument setting.
 The logger records an error row only when the file remains writable and never
 invents a successful error row.
+Measured power is derived from the voltage and current in the same atomic
+readback. Power and optional current-input metadata are append-only CSV columns,
+leaving the established leading schema readable by older consumers.
 
 Retain full data on disk. Implemented plotting receives existing sample signals
 and retains at most 2,000 downsampled display points per channel. Display reset

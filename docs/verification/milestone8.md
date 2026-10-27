@@ -11,7 +11,7 @@ run alone or both can run simultaneously. A logger submits only an atomic
 Milestone 6 queue. It never receives a backend reference and never changes
 voltage, current, range, protection or output state.
 
-The fixed schema is:
+The original fixed schema prefix is:
 
 ```text
 timestamp_iso,elapsed_seconds,channel,programmed_voltage_v,
@@ -19,9 +19,13 @@ programmed_current_limit_a,measured_voltage_v,measured_current_a,
 voltage_range,output_state,connection_state,session_id,sample_status,error
 ```
 
-Milestone 9 appends optional `protocol_name` and `protocol_state` columns. They
-remain blank for standalone Milestone 8 logging; the original columns and their
-meaning are unchanged.
+Later milestones append optional protocol and scan columns. The M1–M13 audit
+remediation additionally appends `measured_power_w`, `current_input_mode`,
+`active_area_cm2` and `commanded_current_density_a_cm2`. Measured power is the
+product of measured voltage and current from the same atomic `ChannelReadback`;
+terminal/error rows without a readback leave it blank. Standalone logging leaves
+the current-input metadata blank. No earlier column was removed, renamed or
+reordered, so readers consuming the established prefix remain compatible.
 
 UTC filenames contain only Windows-safe characters and are opened with exclusive
 creation. The header is written once, every row is flushed immediately, and the

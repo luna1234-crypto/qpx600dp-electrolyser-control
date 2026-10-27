@@ -41,6 +41,10 @@ CSV_COLUMNS = (
     "scan_step_index",
     "scan_total_steps",
     "scan_commanded_setpoint",
+    "measured_power_w",
+    "current_input_mode",
+    "active_area_cm2",
+    "commanded_current_density_a_cm2",
 )
 
 
@@ -64,6 +68,9 @@ class CsvWriter(Protocol):
         scan_step_index: int | None = None,
         scan_total_steps: int | None = None,
         scan_commanded_setpoint: float | None = None,
+        current_input_mode: str = "",
+        active_area_cm2: float | None = None,
+        commanded_current_density_a_cm2: float | None = None,
     ) -> None: ...
 
     def close(self) -> None: ...
@@ -90,6 +97,9 @@ class ProtocolLogSink(Protocol):
         scan_step_index: int | None = None,
         scan_total_steps: int | None = None,
         scan_commanded_setpoint: float | None = None,
+        current_input_mode: str = "",
+        active_area_cm2: float | None = None,
+        commanded_current_density_a_cm2: float | None = None,
     ) -> None: ...
 
     def suspend_sampling(self) -> None: ...
@@ -136,6 +146,9 @@ class CsvLogFile:
         scan_step_index: int | None = None,
         scan_total_steps: int | None = None,
         scan_commanded_setpoint: float | None = None,
+        current_input_mode: str = "",
+        active_area_cm2: float | None = None,
+        commanded_current_density_a_cm2: float | None = None,
     ) -> None:
         stream = self._stream
         if stream is None:
@@ -160,6 +173,18 @@ class CsvLogFile:
             "scan_commanded_setpoint": (
                 "" if scan_commanded_setpoint is None
                 else f"{scan_commanded_setpoint:.12g}"
+            ),
+            "measured_power_w": (
+                "" if readback is None
+                else f"{readback.measured_voltage_v * readback.measured_current_a:.12g}"
+            ),
+            "current_input_mode": current_input_mode,
+            "active_area_cm2": (
+                "" if active_area_cm2 is None else f"{active_area_cm2:.12g}"
+            ),
+            "commanded_current_density_a_cm2": (
+                "" if commanded_current_density_a_cm2 is None
+                else f"{commanded_current_density_a_cm2:.12g}"
             ),
             "sample_status": status,
             "error": error,
@@ -305,6 +330,9 @@ class ChannelLoggingController(QObject):
         scan_step_index: int | None = None,
         scan_total_steps: int | None = None,
         scan_commanded_setpoint: float | None = None,
+        current_input_mode: str = "",
+        active_area_cm2: float | None = None,
+        commanded_current_density_a_cm2: float | None = None,
     ) -> None:
         """Append a protocol row through this logger's one open writer.
 
@@ -332,6 +360,9 @@ class ChannelLoggingController(QObject):
                 scan_step_index=scan_step_index,
                 scan_total_steps=scan_total_steps,
                 scan_commanded_setpoint=scan_commanded_setpoint,
+                current_input_mode=current_input_mode,
+                active_area_cm2=active_area_cm2,
+                commanded_current_density_a_cm2=commanded_current_density_a_cm2,
             )
         except (OSError, ValueError) as append_error:
             self._fail_file(append_error)

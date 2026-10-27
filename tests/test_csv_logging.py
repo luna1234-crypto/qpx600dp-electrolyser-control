@@ -85,6 +85,10 @@ def test_csv_schema_values_flush_exclusive_creation_and_close(tmp_path: Path) ->
         "scan_step_index": "",
         "scan_total_steps": "",
         "scan_commanded_setpoint": "",
+        "measured_power_w": "0.1596",
+        "current_input_mode": "",
+        "active_area_cm2": "",
+        "commanded_current_density_a_cm2": "",
         "sample_status": "ok",
         "error": "",
     }
@@ -97,6 +101,33 @@ def test_csv_schema_values_flush_exclusive_creation_and_close(tmp_path: Path) ->
             timestamp=created, elapsed_s=2, channel=1, readback=readback,
             connection_state="connected", session_id=3, status="ok",
         )
+
+
+def test_appended_columns_preserve_legacy_prefix_and_terminal_rows_are_blank(
+    tmp_path: Path,
+) -> None:
+    legacy_columns = (
+        "timestamp_iso", "elapsed_seconds", "channel", "programmed_voltage_v",
+        "programmed_current_limit_a", "measured_voltage_v", "measured_current_a",
+        "voltage_range", "output_state", "connection_state", "session_id",
+        "sample_status", "error", "protocol_name", "protocol_state", "scan_name",
+        "scan_step_index", "scan_total_steps", "scan_commanded_setpoint",
+    )
+    assert CSV_COLUMNS[:len(legacy_columns)] == legacy_columns
+    writer = CsvLogFile(tmp_path, 1)
+    writer.append(
+        timestamp=datetime.now(timezone.utc), elapsed_s=0, channel=1,
+        readback=None, connection_state="disconnected", session_id=1,
+        status="terminal", error="done", current_input_mode="current_density",
+        active_area_cm2=2.0, commanded_current_density_a_cm2=0.05,
+    )
+    path = writer.path
+    writer.close()
+    row = rows(path)[0]
+    assert row["measured_power_w"] == ""
+    assert row["current_input_mode"] == "current_density"
+    assert row["active_area_cm2"] == "2"
+    assert row["commanded_current_density_a_cm2"] == "0.05"
 
 
 @pytest.mark.parametrize("channel", [1, 2])

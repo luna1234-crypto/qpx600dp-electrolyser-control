@@ -21,6 +21,13 @@ maximum active duration of 24 hours and intervals from 0.1 through 3600 seconds.
 Hardware programming grids, selected voltage range and the conservative power
 envelope are also enforced before any command or file is submitted.
 
+The M1–M13 audit remediation adds a shared typed current-input model. Direct A
+input remains the default and follows the unchanged path. Density mode requires
+a finite positive active area, converts exact A/cm² input with `I = j × area`,
+then applies the existing instrument grid and policy validation without clamping
+or rounding. The GUI shows the derived amperes before Start. Protocol CSV rows
+record the mode, area and commanded density through the existing single writer.
+
 ## Command sequences and timing
 
 After GUI/session validation and selection of either an active logger or a newly
