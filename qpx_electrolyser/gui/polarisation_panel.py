@@ -140,7 +140,9 @@ class PolarisationPanel(QGroupBox):
             f"{snapshot.measured_voltage_v:g} V / {snapshot.measured_current_a:g} A"
         )
         self.summary_path_value.setText(
-            "Unavailable" if snapshot.file_path is None else str(snapshot.file_path)
+            "Unavailable"
+            if snapshot.summary_file_path is None
+            else str(snapshot.summary_file_path)
         )
         if snapshot.error or snapshot.operator_warning:
             self.message_label.setText(snapshot.message)

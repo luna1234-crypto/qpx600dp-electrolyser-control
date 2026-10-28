@@ -105,6 +105,7 @@ class ProtocolSnapshot:
     scan_step_index: int | None = None
     scan_total_steps: int | None = None
     scan_commanded_setpoint: float | None = None
+    summary_file_path: Path | None = None
 
     @property
     def owns_channel(self) -> bool:
@@ -375,6 +376,16 @@ class ConstantCurrentController(QObject):
                 return self._reject(f"Cannot create protocol CSV: {error}")
             file_path = writer.path
 
+        try:
+            self._prepare_protocol_resources(file_path)
+        except (OSError, ValueError) as error:
+            if writer is not None:
+                try:
+                    writer.close()
+                except (OSError, ValueError):
+                    pass
+            return self._reject(f"Cannot create protocol companion data: {error}")
+
         self._writer = writer
         self._logging_sink = logging_sink
         self._session_id = self._connection.snapshot.session_id
@@ -398,6 +409,12 @@ class ConstantCurrentController(QObject):
         return self._submit_action(
             "start-prepare", lambda supply: self._start_prepare_operation(supply, config)
         )
+
+    def _prepare_protocol_resources(self, raw_file_path: Path) -> None:
+        """Hook for protocol-specific files created before any backend mutation."""
+
+    def _close_protocol_resources(self) -> None:
+        """Hook for deterministic protocol-specific resource closure."""
 
     @Slot()
     def pause(self) -> None:
@@ -1077,6 +1094,10 @@ class ConstantCurrentController(QObject):
                 writer.close()
             except (OSError, ValueError) as error:
                 close_error = error
+        try:
+            self._close_protocol_resources()
+        except (OSError, ValueError) as error:
+            close_error = close_error or error
         if close_error is not None:
             state = ProtocolState.FAILED
             message = f"{message}; protocol CSV close failed: {close_error}"

@@ -156,7 +156,10 @@ Keep Simulation Mode connected. For CH1 use area `2 cm²`, density `0.05 → 0.1
 with increment `0.05 A/cm²`, compliance `2 V`, dwell `1 s`, interval `0.1 s`
 and final averaging window `0.3 s`. Use the reverse plan on CH2. Confirm derived
 ampere plans, independent simultaneous progress, one summary row per completed
-step, raw CSV continuity, and bounded mean-V-versus-j plots.
+step, raw CSV continuity, the exact companion path in each panel, and bounded
+mean-V-versus-j plots. Open each companion while the run is active and confirm
+completed rows are already visible and its name ends in
+`_polarisation_summary.csv`.
 
 Pause CH1 during a dwell and confirm simulated Output Off and frozen active time;
 Resume and confirm the same step completes without duplication. Stop a later

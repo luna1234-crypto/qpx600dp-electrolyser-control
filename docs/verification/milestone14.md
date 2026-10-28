@@ -26,11 +26,17 @@ readback mechanism; there is no retry or reconnect.
 
 No additional measurement is requested. All scheduled samples remain in the raw
 CSV. At a completed step, samples with active timestamps inside the final
-averaging window are reduced to one summary row and flushed immediately. The row
-contains the existing step/commanded current/current-density fields plus mean
-voltage, population voltage SD, mean current/density, sample count and active-time
-bounds. A partial or stopped step has no summary row. A summary write failure
-fails the owning protocol and enters guarded cleanup.
+averaging window are reduced to one summary row and flushed immediately. The raw
+CSV retains its existing embedded summary row. Every M14 run additionally owns
+one exclusive companion beside the raw file, named from the same raw run identity
+with a `_polarisation_summary.csv` suffix (and a non-overwriting numeric
+discriminator if that name already exists). Its stable header contains step,
+commanded density/current, mean voltage, population voltage SD, mean
+current/density, count and active-time bounds. The exact companion path is shown
+in the panel. Pause/Resume keeps the same writer; a partial or stopped step has no
+summary row. Creation failure rejects the run before backend mutation, while a
+write failure fails the owning protocol and enters guarded cleanup. Both writers
+are deterministically flushed and closed on every terminal path.
 
 The bounded live polarisation plot consumes completed summary points only and
 shows mean voltage versus commanded current density. Existing time plots and raw
@@ -43,7 +49,8 @@ data are unchanged.
 - averaging-window capacity/boundaries and population standard deviation;
 - Pause/Resume continuity, partial Stop, completion and file-failure cleanup;
 - CH1/CH2 independent and simultaneous operation;
-- one raw CSV writer per channel, flushed summary rows and bounded plots;
+- one raw and one exclusive companion writer per run, per-row flush,
+  Pause/Resume continuity, deterministic closure and bounded plots;
 - no extra polling and M9/M12/M13 regression coverage;
 - fake-serial exact guarded start/cleanup order and channel isolation;
 - simultaneous Simulation Mode automated smoke and clean worker shutdown.

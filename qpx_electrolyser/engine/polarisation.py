@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from decimal import Decimal
+import csv
 from pathlib import Path
 import math
 import statistics
+from typing import TextIO
 
 from PySide6.QtCore import Signal, Slot
 
@@ -43,6 +45,75 @@ class PolarisationPoint:
     sample_count: int
     active_start_s: float
     active_end_s: float
+
+
+POLARISATION_SUMMARY_COLUMNS = (
+    "step_index",
+    "commanded_current_density_a_cm2",
+    "commanded_current_a",
+    "mean_measured_voltage_v",
+    "population_voltage_sd_v",
+    "mean_measured_current_a",
+    "mean_measured_current_density_a_cm2",
+    "sample_count",
+    "active_start_s",
+    "active_end_s",
+)
+
+
+class PolarisationSummaryFile:
+    """Exclusive, incrementally flushed companion summary for one M14 run."""
+
+    def __init__(self, raw_file_path: Path) -> None:
+        raw_file_path = Path(raw_file_path)
+        index = 1
+        while True:
+            discriminator = "" if index == 1 else f"_{index}"
+            candidate = raw_file_path.with_name(
+                f"{raw_file_path.stem}{discriminator}_polarisation_summary.csv"
+            )
+            try:
+                stream = candidate.open("x", newline="", encoding="utf-8")
+            except FileExistsError:
+                index += 1
+                continue
+            self.path = candidate
+            self._stream: TextIO | None = stream
+            self._writer = csv.DictWriter(stream, fieldnames=POLARISATION_SUMMARY_COLUMNS)
+            try:
+                self._writer.writeheader()
+                stream.flush()
+            except BaseException:
+                self.close()
+                raise
+            return
+
+    def append(self, point: PolarisationPoint) -> None:
+        stream = self._stream
+        if stream is None:
+            raise ValueError("polarisation summary CSV is closed")
+        self._writer.writerow({
+            "step_index": str(point.step_index),
+            "commanded_current_density_a_cm2": (
+                f"{point.commanded_current_density_a_cm2:.12g}"
+            ),
+            "commanded_current_a": f"{point.commanded_current_a:.12g}",
+            "mean_measured_voltage_v": f"{point.mean_voltage_v:.12g}",
+            "population_voltage_sd_v": f"{point.population_voltage_sd_v:.12g}",
+            "mean_measured_current_a": f"{point.mean_current_a:.12g}",
+            "mean_measured_current_density_a_cm2": (
+                f"{point.mean_current_density_a_cm2:.12g}"
+            ),
+            "sample_count": str(point.sample_count),
+            "active_start_s": f"{point.active_start_s:.12g}",
+            "active_end_s": f"{point.active_end_s:.12g}",
+        })
+        stream.flush()
+
+    def close(self) -> None:
+        stream, self._stream = self._stream, None
+        if stream is not None:
+            stream.close()
 
 
 def summarize_polarisation_samples(
@@ -82,6 +153,7 @@ class PolarisationController(CurrentScanController):
         monotonic=None,
         utc_now=None,
         writer_factory=CsvLogFile,
+        summary_writer_factory=PolarisationSummaryFile,
     ) -> None:
         super().__init__(
             channel,
@@ -99,6 +171,27 @@ class PolarisationController(CurrentScanController):
         self._sample_key = f"polarisation-sample-{channel}"
         self._step_samples: list[tuple[float, ChannelReadback]] = []
         self._summary_metadata: dict[str, object] | None = None
+        self._summary_writer_factory = summary_writer_factory
+        self._summary_writer: PolarisationSummaryFile | None = None
+        self._summary_file_path: Path | None = None
+
+    def _prepare_protocol_resources(self, raw_file_path: Path) -> None:
+        if self._summary_writer is not None:
+            raise ValueError("a polarisation summary writer is already active")
+        self._summary_file_path = None
+        writer = self._summary_writer_factory(raw_file_path)
+        self._summary_writer = writer
+        self._summary_file_path = writer.path
+
+    def _close_protocol_resources(self) -> None:
+        writer, self._summary_writer = self._summary_writer, None
+        if writer is not None:
+            writer.close()
+
+    def _initial_snapshot_fields(self, config) -> dict[str, object]:  # type: ignore[no-untyped-def]
+        fields = super()._initial_snapshot_fields(config)
+        fields["summary_file_path"] = self._summary_file_path
+        return fields
 
     def validate_inputs(
         self,
@@ -347,5 +440,9 @@ class PolarisationController(CurrentScanController):
             self._append(summary, "polarisation_summary", ProtocolState.RUNNING)
         finally:
             self._summary_metadata = None
+        writer = self._summary_writer
+        if writer is None:
+            raise ValueError("polarisation summary writer is unavailable")
+        writer.append(point)
         self._step_samples.clear()
         self.point_result_received.emit(point)

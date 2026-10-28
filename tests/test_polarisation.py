@@ -14,9 +14,10 @@ import pytest
 
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
 from qpx_electrolyser.engine.constant_current import ProtocolState
-from qpx_electrolyser.data.csv_logging import CsvLogFile
 from qpx_electrolyser.engine.polarisation import (
+    POLARISATION_SUMMARY_COLUMNS,
     PolarisationController,
+    PolarisationSummaryFile,
     summarize_polarisation_samples,
 )
 from qpx_electrolyser.gui.main_window import MainWindow
@@ -129,20 +130,60 @@ def test_known_mean_population_sd_density_and_active_bounds() -> None:
 def test_summary_file_failure_triggers_safe_cleanup(
     qapp: QApplication, tmp_path: Path,
 ) -> None:
-    class FailingSummaryWriter(CsvLogFile):
-        def append(self, **values) -> None:  # type: ignore[no-untyped-def]
-            if values.get("status") == "polarisation_summary":
-                raise OSError("summary disk failure")
-            super().append(**values)
+    class FailingSummaryWriter:
+        def __init__(self, raw_path: Path) -> None:
+            self.path = raw_path.with_name(
+                f"{raw_path.stem}_polarisation_summary.csv"
+            )
+            self.path.touch(exist_ok=False)
+
+        def append(self, _point) -> None:  # type: ignore[no-untyped-def]
+            raise OSError("summary disk failure")
+
+        def close(self) -> None:
+            pass
 
     connection, backend = connected(qapp)
-    controller = PolarisationController(1, connection, writer_factory=FailingSummaryWriter)
+    controller = PolarisationController(
+        1, connection, summary_writer_factory=FailingSummaryWriter
+    )
     try:
         assert start(controller, tmp_path, last="0.05")
         wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.FAILED)
         assert "summary CSV write failed" in controller.snapshot.message
         assert [call[0] for call in backend.calls].count("output_off") == 1
         assert controller.snapshot.output_enabled is False
+    finally:
+        assert connection.shutdown(1)
+
+
+def test_summary_creation_is_exclusive_and_never_overwrites(tmp_path: Path) -> None:
+    raw = tmp_path / "qpx600dp_ch1_RUN.csv"
+    raw.write_text("raw\n", encoding="utf-8")
+    first = PolarisationSummaryFile(raw)
+    first.close()
+    first.path.write_text("preserve me\n", encoding="utf-8")
+    second = PolarisationSummaryFile(raw)
+    second.close()
+    assert first.path.name == "qpx600dp_ch1_RUN_polarisation_summary.csv"
+    assert second.path.name == "qpx600dp_ch1_RUN_2_polarisation_summary.csv"
+    assert first.path.read_text(encoding="utf-8") == "preserve me\n"
+
+
+def test_summary_create_failure_precedes_backend_mutation(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    def fail_create(_raw_path: Path):  # type: ignore[no-untyped-def]
+        raise PermissionError("summary directory denied")
+
+    connection, backend = connected(qapp)
+    controller = PolarisationController(
+        1, connection, summary_writer_factory=fail_create
+    )
+    try:
+        assert not start(controller, tmp_path, last="0.05")
+        assert "companion data" in controller.snapshot.message
+        assert backend.calls == []
     finally:
         assert connection.shutdown(1)
 
@@ -156,6 +197,13 @@ def test_completed_steps_write_one_flushed_summary_and_preserve_raw_rows(
     controller.point_result_received.connect(points.append)
     try:
         assert start(controller, tmp_path)
+        wait_until(qapp, lambda: len(points) >= 1)
+        summary_path = controller.snapshot.summary_file_path
+        assert summary_path is not None
+        # The first row must be visible while the protocol and writer remain active.
+        flushed = rows(summary_path)
+        assert len(flushed) == 1
+        assert tuple(flushed[0]) == POLARISATION_SUMMARY_COLUMNS
         wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
         data = rows(controller.snapshot.file_path)  # type: ignore[arg-type]
         summaries = [row for row in data if row["sample_status"] == "polarisation_summary"]
@@ -171,6 +219,29 @@ def test_completed_steps_write_one_flushed_summary_and_preserve_raw_rows(
         assert [item[2] for item in backend.calls if item[0] == "set_current"] == [0.1, 0.2, 0.3]
         assert [item[0] for item in backend.calls].count("output_on") == 1
         assert [item[0] for item in backend.calls].count("output_off") == 1
+        source_readback_rows = [
+            row for row in data
+            if row["measured_voltage_v"]
+            and row["sample_status"] != "polarisation_summary"
+        ]
+        # The sole non-CSV readback is the authoritative terminal OFF check;
+        # summary reduction itself must add no backend read.
+        assert [item[0] for item in backend.calls].count("read_voltage") == (
+            len(source_readback_rows) + 1
+        )
+        companion = rows(summary_path)
+        assert len(companion) == 3
+        for row, point in zip(companion, points, strict=True):
+            assert int(row["step_index"]) == point.step_index
+            assert float(row["commanded_current_density_a_cm2"]) == point.commanded_current_density_a_cm2
+            assert float(row["commanded_current_a"]) == point.commanded_current_a
+            assert float(row["mean_measured_voltage_v"]) == point.mean_voltage_v
+            assert float(row["population_voltage_sd_v"]) == point.population_voltage_sd_v
+            assert float(row["mean_measured_current_a"]) == point.mean_current_a
+            assert float(row["mean_measured_current_density_a_cm2"]) == point.mean_current_density_a_cm2
+            assert int(row["sample_count"]) == point.sample_count
+            assert float(row["active_start_s"]) == pytest.approx(point.active_start_s)
+            assert float(row["active_end_s"]) == pytest.approx(point.active_end_s)
     finally:
         controller.shutdown(); assert connection.shutdown(1)
 
@@ -186,6 +257,7 @@ def test_stop_during_partial_step_writes_no_summary(
         controller.stop("operator stop")
         wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
         assert not [row for row in rows(controller.snapshot.file_path) if row["sample_status"] == "polarisation_summary"]  # type: ignore[arg-type]
+        assert rows(controller.snapshot.summary_file_path) == []  # type: ignore[arg-type]
         assert controller.snapshot.output_enabled is False
     finally:
         assert connection.shutdown(1)
@@ -202,6 +274,7 @@ def test_pause_resume_same_step_file_and_dual_channel_isolation(
         assert start(ch2, tmp_path, first="0.15", last="0.05", increment="-0.05", dwell="0.8")
         wait_until(qapp, lambda: ch1.snapshot.sample_count >= 1)
         path = ch1.snapshot.file_path; step = ch1.snapshot.scan_step_index
+        summary_path = ch1.snapshot.summary_file_path
         ch1.pause(); wait_until(qapp, lambda: ch1.snapshot.state is ProtocolState.PAUSED)
         paused = ch1.snapshot.elapsed_active_s
         time.sleep(0.1); qapp.processEvents()
@@ -209,11 +282,47 @@ def test_pause_resume_same_step_file_and_dual_channel_isolation(
         assert ch1.resume()
         wait_until(qapp, lambda: all(c.snapshot.state is ProtocolState.COMPLETED for c in (ch1, ch2)))
         assert ch1.snapshot.file_path == path and ch1.snapshot.scan_step_index >= step
+        assert ch1.snapshot.summary_file_path == summary_path
         assert {call[1] for call in backend.calls if call[0] in {"set_current", "output_on", "output_off"}} == {1, 2}
         assert len([r for r in rows(ch1.snapshot.file_path) if r["sample_status"] == "polarisation_summary"]) == 3  # type: ignore[arg-type]
         assert len([r for r in rows(ch2.snapshot.file_path) if r["sample_status"] == "polarisation_summary"]) == 3  # type: ignore[arg-type]
+        assert ch1.snapshot.summary_file_path != ch2.snapshot.summary_file_path
     finally:
         ch1.shutdown(); ch2.shutdown(); assert connection.shutdown(1)
+
+
+def test_summary_writer_is_single_per_run_and_closes_deterministically(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    created = []
+
+    class TrackingWriter:
+        def __init__(self, raw_path: Path) -> None:
+            self.delegate = PolarisationSummaryFile(raw_path)
+            self.path = self.delegate.path
+            self.closed = False
+            created.append(self)
+
+        def append(self, point) -> None:  # type: ignore[no-untyped-def]
+            self.delegate.append(point)
+
+        def close(self) -> None:
+            self.delegate.close()
+            self.closed = True
+
+    connection, _backend = connected(qapp)
+    controller = PolarisationController(
+        1, connection, summary_writer_factory=TrackingWriter
+    )
+    try:
+        assert start(controller, tmp_path, last="0.05")
+        assert not start(controller, tmp_path, last="0.05")
+        assert len(created) == 1
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
+        assert created[0].closed
+        assert controller.snapshot.summary_file_path == created[0].path
+    finally:
+        controller.shutdown(); assert connection.shutdown(1)
 
 
 def test_bounded_polarisation_plot_has_no_backend_dependency() -> None:
@@ -245,6 +354,11 @@ def test_gui_panels_start_correct_channels_and_show_validation(
             for c in window.polarisation_controllers.values()
         ))
         assert all(c.snapshot.file_path is not None for c in window.polarisation_controllers.values())
+        for channel in (1, 2):
+            snapshot = window.polarisation_controllers[channel].snapshot
+            assert window.polarisation_panels[channel].summary_path_value.text() == str(
+                snapshot.summary_file_path
+            )
         panel = window.polarisation_panels[1]
         panel.increment_input.setText("0")
         panel.start_button.click(); qapp.processEvents()

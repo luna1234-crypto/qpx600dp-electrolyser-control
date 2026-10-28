@@ -539,9 +539,11 @@ ownership, file creation or output mutation.
 The output remains ON between steps. Pause, Resume, Stop, completion, failures,
 disconnect and shutdown use the accepted M11 guarded transition and authoritative
 Output-Off cleanup path. Raw samples are preserved. At each completed step,
-samples in the final averaging window produce one flushed summary row with mean
-voltage, population voltage SD, mean current/density, count and active-time
-bounds; a partial step produces no summary. The bounded mean-voltage versus
+samples in the final averaging window produce one flushed summary row in both
+the backward-compatible raw CSV and one exclusive companion
+`_polarisation_summary.csv` file. The companion path is visible in the panel.
+Rows contain mean voltage, population voltage SD, mean current/density, count
+and active-time bounds; a partial step produces no summary. The bounded mean-voltage versus
 current-density plot consumes those results without polling.
 
 This is power-supply polarisation, not potentiostat control. Simulation and fake

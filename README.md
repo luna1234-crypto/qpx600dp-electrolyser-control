@@ -405,9 +405,11 @@ M11 guarded transitions provide Pause/Resume and terminal Output-Off cleanup.
 
 Every scheduled reading remains in the raw CSV and time plot. A completed step
 reduces only existing samples in its final averaging window. One immediately
-flushed summary row records mean voltage, population voltage standard deviation,
-mean current/density, sample count, and active-time bounds. Partial/stopped steps
-produce no summary. The bounded polarisation plot shows mean voltage against
+flushed row is retained in the raw CSV and is also written to an exclusive
+companion file beside it with a `_polarisation_summary.csv` suffix. The panel
+shows that exact path. Summary rows record mean voltage, population voltage
+standard deviation, mean current/density, sample count, and active-time bounds.
+Partial/stopped steps produce no summary. The bounded polarisation plot shows mean voltage against
 current density without extra polling. This is two-terminal power-supply
 polarisation, not potentiostat control. Simulation/fake-serial validation is
 implemented; supervised physical acceptance remains pending. See the

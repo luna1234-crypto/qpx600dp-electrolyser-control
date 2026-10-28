@@ -269,6 +269,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         fail_smoke_test("Polarisation completion stopped an active logger.")
                     if snapshot.file_path != logger_snapshot.file_path:
                         fail_smoke_test("Polarisation did not reuse the active channel CSV.")
+                    if (
+                        snapshot.summary_file_path is None
+                        or not snapshot.summary_file_path.is_file()
+                    ):
+                        fail_smoke_test("Polarisation companion summary CSV is unavailable.")
                     if snapshot.scan_step_index != snapshot.scan_total_steps:
                         fail_smoke_test("Polarisation did not reach its inclusive endpoint.")
                     if window.polarisation_plot_controllers[channel].snapshot.total_points != 1:
