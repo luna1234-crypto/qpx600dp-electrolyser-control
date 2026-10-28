@@ -4,6 +4,8 @@
 > CPX400DP assumption. Their claims are intentionally not rewritten as QPX600DP
 > results. The post-Milestone-4 model correction is recorded separately at the
 > end of this file and in `verification/model_correction_qpx600dp.md`.
+> All current implementation and every future Milestone 14–20 target the
+> QPX600DP. CPX400DP is retained only as historical context for Milestones 1–4.
 
 ## Milestone 1 - Project skeleton
 
@@ -259,6 +261,9 @@ and live plotting were deferred at the Milestone 8 checkpoint. The complete suit
 test passed without residual worker threads or QThread warnings. See
 [verification details](verification/milestone8.md).
 
+The same-sample measured-power remediation subsequently passed Simulation Mode
+acceptance without changing poll count or the established CSV prefix.
+
 Supervised real-hardware read-only acceptance subsequently connected to a
 manually entered COM3, identified the QPX600DP and ran both independent loggers
 with no load and both outputs OFF. Both logged simultaneously for approximately
@@ -320,6 +325,9 @@ normal completion, continued CSV ownership and final Output Off all passed. A
 brief 0.189-0.201 A first loaded sample was observed after startup/resume.
 Electrolyser validation and unattended operation remain unapproved pending
 assessment of that transient and later safety milestones.
+
+The shared current-density conversion, GUI preview and append-only metadata also
+passed Simulation Mode acceptance for independent and simultaneous CH1/CH2 runs.
 
 ## Milestone 10 - Responsive real-time plotting
 
@@ -452,10 +460,12 @@ The guarded Real Hardware transition path still reuses the accepted Milestone
 11 transition and cleanup mechanism, adds detailed default-cancel Start/Resume
 authorization, verifies session/OFF/range/setpoints, and applies every step as
 one serialized set/readback operation. After fake-serial validation, supervised
-physical acceptance passed on CH1 and CH2 with a verified 100-ohm
-load for the earlier stepped-voltage workflow. The revised Staircase LSV
-timing, averaging and I-V/j-V workflow requires a new supervised 100-ohm
-acceptance and remains physically pending. See
+physical acceptance passed on CH1 and CH2 with a verified 100-ohm load. The
+revised Staircase LSV then passed supervised functional acceptance: CH1 ascended
+`1 -> 4 V` with valid representative points, Pause/Resume continuity and safe
+operator Stop; CH2 descended `4 -> 1 V`; no step was skipped or duplicated;
+the load response was approximately `0.01 A` per volt; and both GUI and physical
+outputs finished OFF. This is not metrology or electrolyser approval. See
 [verification details](verification/milestone12.md).
 
 ## Milestone 13 - Automatic stepped Current Scan
@@ -493,7 +503,7 @@ plans, dwell and missed-slot timing, Pause/Resume, cleanup/failure/disconnect/
 shutdown behavior, stale and duplicate actions, logging continuity, plotting,
 channel isolation and simultaneous scans. The automated Simulation Mode smoke
 completes simultaneous CH1/CH2 Current Scans after the existing protocol and
-Voltage Scan checks, then verifies clean disconnect and worker shutdown.
+Staircase LSV checks, then verifies clean disconnect and worker shutdown.
 
 Windows Simulation Mode manual acceptance passed on 2026-10-27. CH1 completed
 an ascending Current Scan and CH2 completed a descending Current Scan;
@@ -501,6 +511,10 @@ independent and simultaneous operation, Pause/Resume and early Stop all passed.
 The observed step sequences, plots and CSV scan metadata were correct, both
 simulated outputs finished OFF, and invalid input produced a visible validation
 error in the affected channel panel.
+
+The current-density remediation also passed Simulation Mode acceptance for
+ascending/descending, independent/simultaneous and Pause/Resume operation with
+correct plots and CSV metadata.
 
 The same guarded Real Hardware follow-up applies to Current Scan without a
 second state machine. It preserves exact planning, per-channel ownership, one
@@ -513,3 +527,47 @@ Stop, natural completion, exact step progression, CSV metadata, plots, channel
 isolation and final physical/GUI Output Off all passed. Low-current readings are
 functional evidence only, not metrology calibration. See
 [verification details](verification/milestone13.md).
+
+## Milestone 14 - Polarisation curve
+
+Original roadmap task: run a polarisation curve. This milestone is pending and
+will target QPX600DP. It will reuse the shared current-input/active-area model,
+serialized queue, one-writer CSV path and tested monotonic scheduling; detailed
+implementation and supervised acceptance remain future work.
+
+## Milestone 15 - Custom sequence editor
+
+Original roadmap task: edit and execute custom sequences. This milestone is
+pending and will target QPX600DP. Sequence semantics, validation and acceptance
+remain future work; no custom-sequence behavior is claimed by Milestones 1–13.
+
+## Milestone 16 - Full safety and emergency system
+
+Original roadmap task: Emergency All Outputs Off and complete fault handling.
+This milestone is pending for QPX600DP. Existing channel-local guarded cleanup
+is not a substitute for the planned global emergency/fault system.
+
+## Milestone 17 - Persistence
+
+Original roadmap task: restore settings through persistent configuration. This
+milestone is pending for the QPX600DP application. Current sessions do not claim
+persistent connection, experiment or safety defaults.
+
+## Milestone 18 - UI refinement
+
+Original roadmap task: refine the operator UI. This milestone is pending for
+the QPX600DP application; completed functional panels are not a claim of final
+operator-workflow or accessibility acceptance.
+
+## Milestone 19 - Windows packaging
+
+Original roadmap task: build the Windows executable. This milestone is pending
+for the QPX600DP application; no packaged executable or installer is currently
+claimed.
+
+## Milestone 20 - Final regression and accelerated stress testing
+
+Original roadmap task: final regression and accelerated stress tests. This
+milestone is pending for the complete QPX600DP application, including the
+planned 24-hour accelerated simulator/stability evidence. Existing milestone
+tests are not a substitute for final-system acceptance.

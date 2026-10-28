@@ -27,6 +27,11 @@ terminal/error rows without a readback leave it blank. Standalone logging leaves
 the current-input metadata blank. No earlier column was removed, renamed or
 reordered, so readers consuming the established prefix remain compatible.
 
+The appended `measured_power_w` remediation passed Simulation Mode acceptance:
+each value is derived from voltage and current in the same atomic sample, no
+extra instrument poll is introduced, terminal/error rows remain blank, and the
+established schema prefix remains readable.
+
 UTC filenames contain only Windows-safe characters and are opened with exclusive
 creation. The header is written once, every row is flushed immediately, and the
 file closes on channel stop, disconnect, error or application shutdown. A

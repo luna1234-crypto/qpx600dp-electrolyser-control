@@ -13,6 +13,10 @@ Milestone 11 independent Constant Voltage protocols with supervised two-channel
 resistor-load acceptance, Milestone 12 independent Voltage Sweep / Staircase LSV,
 and Milestone 13 independent Simulation Mode stepped current scans.
 
+All current implementation and every future Milestone 14–20 target the Aim-TTi
+QPX600DP. CPX400DP references are retained only as historical context for the
+original Milestone 1–4 records and are not current or future requirements.
+
 Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
 shared backend-owner worker constructs `SerialTransport` and `QPX600DPDriver`
@@ -166,6 +170,8 @@ voltage/current, measured power from that same atomic sample, selected range,
 output state, connection state, session generation, sample status and error text.
 The power and current-input metadata columns are appended to the established
 schema so existing readers that consume the original leading columns remain valid.
+The same-sample measured-power remediation passed Simulation Mode acceptance;
+it adds no backend poll and leaves terminal/error power blank.
 
 Scheduling is anchored to fixed monotonic deadlines, with no more than one
 pending logging read per channel. If queue or backend latency passes deadlines,
@@ -196,6 +202,9 @@ hardware programming grids, conservative power envelope and the explicit
 Simulation Mode project policy of 10 V, 5 A, 50 W, 24 hours maximum duration and
 0.1-3600 second intervals.
 
+Direct-current and current-density entry passed Simulation Mode acceptance on
+both channels, including simultaneous operation, Pause/Resume and CSV metadata.
+
 Start confirms the selected output is OFF, sets voltage then current and verifies
 both read-backs. A separate queued final preflight rechecks the session, OFF state
 and both settings immediately before exactly one Output On attempt and ON
@@ -222,7 +231,7 @@ Pause/Resume, completion, CSV continuity and final OFF confirmation. The supplie
 CSVs contain a brief 0.189-0.201 A first loaded sample after startup/resume before
 stable readings; electrolyser and unattended use remain unapproved pending its
 assessment and later safety milestones. Milestone 10 adds downstream live plots;
-sweep/polarization protocols are not implemented. See
+polarisation and custom-sequence protocols are not implemented. See
 [Milestone 9 verification](docs/verification/milestone9.md).
 
 ## Milestone 10 responsive real-time plotting
@@ -333,9 +342,11 @@ Milestone 11 transition mechanism. Start and Resume require detailed,
 default-cancel authorization; the controller then verifies the identified
 QPX600DP session, selected output OFF, voltage range and setpoint readbacks before
 one Output-On attempt. Every later voltage is queued and verified before dwell.
-The earlier stepped-voltage workflow passed supervised CH1/CH2 100-ohm
-acceptance. Revised physical Staircase LSV acceptance is pending a new
-supervised 100-ohm test; this revision is Simulation/fake-serial accepted. See
+The revised Staircase LSV passed supervised 100-ohm functional acceptance: CH1
+completed `1 -> 4 V` with Pause/Resume continuity and safe operator Stop; CH2
+completed `4 -> 1 V`; representative points were valid with no skipped or
+duplicate steps and approximately `0.01 A` per volt. Final GUI and physical
+CH1/CH2 outputs were OFF. This is not metrology or electrolyser approval. See
 [Milestone 12 verification](docs/verification/milestone12.md).
 
 Manual Simulation Mode acceptance passed with simultaneous isolated scans: CH1
@@ -369,6 +380,9 @@ unchanged. Current-scan rows use the existing optional scan columns with
 `scan_commanded_setpoint`.
 Rows also identify `current_input_mode`, `active_area_cm2` and the commanded
 current density when density mode is selected.
+
+Direct-current and current-density Current Scan inputs passed Simulation Mode
+acceptance for both channels, including simultaneous scans and Pause/Resume.
 
 Milestone 13 uses the same guarded Real Hardware follow-up: default-cancel
 authorization, fresh OFF/range/settings checks, exactly-once settled output
@@ -556,15 +570,19 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent Constant Current protocols | Simulation/fake-serial validated; supervised CH1/CH2 resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Independent live voltage/current plots | Implemented for both channels with bounded display memory and unchanged full CSV data |
 | Independent Constant Voltage protocols | Simulation and guarded fake-serial validation passed; supervised CH1/CH2 100-ohm resistor-load acceptance passed, electrolyser and unattended use unapproved |
-| Voltage Sweep / Staircase LSV | Simulation and fake-serial accepted; revised 100-ohm physical acceptance pending |
+| Voltage Sweep / Staircase LSV | Simulation/fake-serial and supervised 100-ohm functional acceptance passed; not metrology or electrolyser approval |
 | Independent stepped Current Scan | Simulation and supervised CH1/CH2 100-ohm Real Hardware functional acceptance passed; low-current readings are not calibration |
-| Later polarization protocols | Not implemented |
-| Complete configurable safety system | Not implemented |
+| M14 Polarisation curve | Pending for QPX600DP |
+| M15 Custom sequence editor | Pending for QPX600DP |
+| M16 Full safety/emergency system | Pending; existing channel cleanup is not global Emergency Off |
+| M17 persistence / M18 UI refinement | Pending for QPX600DP |
+| M19 Windows packaging | Pending; no packaged executable is claimed |
+| M20 final regression/stress testing | Pending; no 24-hour final-system result is claimed |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
 
-The QPX600DP is a programmable DC power supply, not a potentiostat. Any later
-voltage sweep would apply discrete two-terminal voltage steps and would not
-control potential against a reference electrode.
+The QPX600DP is a programmable DC power supply, not a potentiostat. The
+implemented Staircase LSV applies discrete two-terminal voltage steps and does
+not control potential against a reference electrode.
 
 ## Documentation and history
 
@@ -579,7 +597,7 @@ control potential against a reference electrode.
 - [Milestone 9 Constant Current verification](docs/verification/milestone9.md)
 - [Milestone 10 real-time plotting verification](docs/verification/milestone10.md)
 - [Milestone 11 Constant Voltage verification](docs/verification/milestone11.md)
-- [Milestone 12 Voltage Scan verification](docs/verification/milestone12.md)
+- [Milestone 12 Voltage Sweep / Staircase LSV verification](docs/verification/milestone12.md)
 - [Milestone 13 Current Scan verification](docs/verification/milestone13.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
@@ -589,5 +607,5 @@ The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption; the model-correction and Milestones 5-12 work record the
+CPX400DP assumption; the model-correction and Milestones 5–13 work record the
 current QPX600DP basis.

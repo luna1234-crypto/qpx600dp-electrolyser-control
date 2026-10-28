@@ -50,12 +50,17 @@ voltage remains one serialized set/readback operation. Pause freezes active
 time; Resume continues the same point and CSV without duplicate or skipped
 steps. CH1/CH2 ownership and shared-queue serialization are unchanged.
 
-The earlier stepped-voltage implementation passed supervised CH1/CH2 100-ohm
-functional acceptance. That result does not accept the revised Staircase LSV
-timing, settling, averaging or I-V/j-V workflow. A new supervised 100-ohm
-physical acceptance is pending. This release is accepted only through
-Simulation Mode and fake-serial safety tests; it does not approve electrolyser
-or unattended operation.
+The revised Staircase LSV workflow has now passed supervised 100-ohm functional
+acceptance. CH1 completed an ascending `1 -> 4 V` sweep with valid
+representative points; Pause/Resume preserved point and CSV continuity, and an
+operator Stop terminated safely. CH2 completed a descending `4 -> 1 V` sweep.
+No step was skipped or duplicated. The load response was approximately
+`0.01 A` per volt, consistent with the nominal resistor. At the end, both GUI
+states and both physical CH1/CH2 indicators were confirmed OFF.
+
+This is supervised resistor-load functional acceptance only. It is not
+metrology calibration, electrolyser validation or unattended-operation
+approval. The instrument serial number is intentionally omitted.
 
 ## Verification
 

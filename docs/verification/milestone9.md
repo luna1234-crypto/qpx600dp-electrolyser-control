@@ -28,6 +28,11 @@ then applies the existing instrument grid and policy validation without clamping
 or rounding. The GUI shows the derived amperes before Start. Protocol CSV rows
 record the mode, area and commanded density through the existing single writer.
 
+Direct-current and current-density modes passed Simulation Mode acceptance for
+independent and simultaneous CH1/CH2 operation, validation, Pause/Resume and CSV
+metadata. This accepts the conversion/UI/data remediation only; it does not add
+electrolyser or unattended-operation approval.
+
 ## Command sequences and timing
 
 After GUI/session validation and selection of either an active logger or a newly

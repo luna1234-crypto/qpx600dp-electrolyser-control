@@ -1,4 +1,9 @@
-# Proposed application and communication architecture
+# Application and communication architecture
+
+All current code and every future implementation target Milestone 14–20 is for
+the Aim-TTi **QPX600DP**. CPX400DP appears only in historical Milestone 1–4
+records retained to explain the post-Milestone-4 model correction; it is not a
+current or future implementation target.
 
 **Worker, GUI connection and test-engine design.** Current
 code implements the entrypoints, dual-channel manual-control GUI, diagnostic logging,
@@ -189,9 +194,10 @@ count and CSV target. Initial and resumed preflight verifies the identified
 session, selected output OFF, actual voltage range and programmed settings.
 Each new step remains one serialized set/readback operation. Existing scheduled
 samples also feed a queue-free per-point reduction after settling; bounded I-V
-and optional j-V plots consume those results without backend access. Revised
-physical Staircase LSV acceptance remains pending; M13 retains its prior
-accepted behavior.
+and optional j-V plots consume those results without backend access. The revised
+Staircase LSV subsequently passed supervised 100-ohm functional acceptance on
+both channels, including Pause/Resume, safe Stop and final physical OFF. This is
+not metrology or electrolyser approval. M13 retains its prior accepted behavior.
 
 The connection controller defaults to Simulation Mode. Real Hardware selection
 requires a warning acknowledgement and a manually typed `COM<N>` name; neither
@@ -384,8 +390,8 @@ leaving the established leading schema readable by older consumers.
 Retain full data on disk. Implemented plotting receives existing sample signals
 and retains at most 2,000 downsampled display points per channel. Display reset
 does not pause or alter engines, loggers or CSV output. Snapshot/repaint delivery
-is coalesced at 10 Hz. Polarisation summary writes occur at each
-completed step and use only the measured final averaging window.
+is coalesced at 10 Hz. Future Milestone 14 polarisation summary writes must
+occur at each completed step and use only the measured final averaging window.
 
 ## Milestone boundaries and acceptance
 
@@ -405,9 +411,10 @@ use remain unapproved pending transient assessment and later safety milestones.
 Milestone 7 real-hardware GUI acceptance and Milestone 8 read-only hardware
 logging acceptance are complete. Milestones 10/11 add live plots and Constant
 Voltage without extra polling or another worker. Milestones 12 and 13 add
-Voltage Scan and Current Scan through the same reusable stepped-scan core. Their
-shared guarded Real Hardware follow-up is fake-serial tested, while physical
-scan acceptance remains pending. Later protocol types remain out of scope.
+Staircase LSV and Current Scan through the same reusable stepped-scan core. Their
+shared guarded Real Hardware follow-up and supervised resistor-load functional
+acceptance are complete. Later protocol types remain out of scope until their
+roadmap milestones; all will target QPX600DP.
 Later concurrency tests must cover cancellation just before ON, stale replies,
 interleaved queries, independent channel shutdown and in-flight emergency latency.
 Logging tests cover unwritable files, interruption and bounded in-flight work.

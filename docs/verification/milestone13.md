@@ -6,9 +6,9 @@ Date: 2026-10-27
 
 Milestone 13 implements independent CH1 and CH2 automatic stepped Current Scan.
 Simulation Mode and supervised CH1/CH2 resistor-load operation are accepted. A
-guarded Real Hardware follow-up was fake-serial tested before supervised use. No
-COM port, Test Bridge, `hardware_check`, diagnostic tool or physical instrument
-was accessed.
+guarded Real Hardware follow-up was fake-serial tested before supervised use.
+During implementation and automated testing, no COM port, Test Bridge,
+`hardware_check`, diagnostic tool or physical instrument was accessed.
 
 Each panel accepts start current, stop current, signed current step, voltage
 compliance, dwell per step and sampling interval. It displays state, step/total,
@@ -21,6 +21,12 @@ a finite positive active area; exact density start/stop/step values are converte
 to amperes before the existing grid and safety validation. The derived ampere
 plan is visible before Start, while append-only CSV metadata preserves input
 mode, area and the commanded density at each step.
+
+Direct-current and current-density Current Scan modes passed Simulation Mode
+acceptance for ascending/descending plans, independent and simultaneous CH1/CH2
+operation, Pause/Resume, plots and CSV metadata. Physical acceptance remains
+the previously recorded direct-current resistor-load functional evidence; no
+new density-mode hardware or metrology claim is made.
 
 ## Shared scan engine
 
@@ -89,8 +95,8 @@ simulated Output Off, clean disconnect and no residual worker/QThread warning.
 
 Validation results:
 
-- focused Milestone 12/13 and guarded fake-serial scan suite: **57 passed**;
-- complete regression suite: **437 passed**;
+- focused LSV/CSV/fake-serial/M13 suite after remediation: **83 passed**;
+- complete regression suite after remediation: **462 passed**;
 - `compileall`: **passed**;
 - `pip check`: **no broken requirements**;
 - simultaneous CH1/CH2 Simulation Mode smoke: **passed**;
