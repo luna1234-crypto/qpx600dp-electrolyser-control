@@ -77,6 +77,35 @@ def connected(qapp: QApplication) -> tuple[ConnectionController, RecordingSimula
     return connection, backend
 
 
+class ActiveClock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def set_active(self, controller: PolarisationController, elapsed_s: float) -> None:
+        assert controller._run_started_at > 0
+        self.now = (
+            controller._run_started_at
+            + elapsed_s
+            - controller._active_before_run_s
+        )
+
+
+def submit_sample_at(
+    qapp: QApplication,
+    controller: PolarisationController,
+    clock: ActiveClock,
+    active_s: float,
+) -> None:
+    before = controller.snapshot.sample_count
+    clock.set_active(controller, active_s)
+    controller._sample_timer.stop()
+    controller._submit_sample()
+    wait_until(qapp, lambda: controller.snapshot.sample_count > before)
+
+
 def start(controller: PolarisationController, directory: Path, **overrides: str) -> bool:
     values = {
         "area": "2", "first": "0.05", "last": "0.15", "increment": "0.05",
@@ -270,15 +299,17 @@ def test_pause_resume_same_step_file_and_dual_channel_isolation(
     ch1 = PolarisationController(1, connection)
     ch2 = PolarisationController(2, connection)
     try:
-        assert start(ch1, tmp_path, dwell="0.8")
-        assert start(ch2, tmp_path, first="0.15", last="0.05", increment="-0.05", dwell="0.8")
+        assert start(ch1, tmp_path, dwell="1.2")
+        assert start(ch2, tmp_path, first="0.15", last="0.05", increment="-0.05", dwell="1.2")
         wait_until(qapp, lambda: ch1.snapshot.sample_count >= 1)
         path = ch1.snapshot.file_path; step = ch1.snapshot.scan_step_index
         summary_path = ch1.snapshot.summary_file_path
+        ch2_samples_before_pause = ch2.snapshot.sample_count
         ch1.pause(); wait_until(qapp, lambda: ch1.snapshot.state is ProtocolState.PAUSED)
         paused = ch1.snapshot.elapsed_active_s
-        time.sleep(0.1); qapp.processEvents()
+        wait_until(qapp, lambda: ch2.snapshot.sample_count > ch2_samples_before_pause)
         assert ch1.snapshot.elapsed_active_s == paused
+        assert ch2.snapshot.state is ProtocolState.RUNNING
         assert ch1.resume()
         wait_until(qapp, lambda: all(c.snapshot.state is ProtocolState.COMPLETED for c in (ch1, ch2)))
         assert ch1.snapshot.file_path == path and ch1.snapshot.scan_step_index >= step
@@ -289,6 +320,144 @@ def test_pause_resume_same_step_file_and_dual_channel_isolation(
         assert ch1.snapshot.summary_file_path != ch2.snapshot.summary_file_path
     finally:
         ch1.shutdown(); ch2.shutdown(); assert connection.shutdown(1)
+
+
+@pytest.mark.parametrize("pause_at", [0.2, 0.6, 0.75])
+def test_pause_freezes_active_time_and_preserves_final_window_samples(
+    qapp: QApplication, tmp_path: Path, pause_at: float,
+) -> None:
+    """Cover Pause before, at, and inside the final averaging window."""
+    connection, _backend = connected(qapp)
+    clock = ActiveClock()
+    controller = PolarisationController(1, connection, monotonic=clock.monotonic)
+    points = []
+    controller.point_result_received.connect(points.append)
+    try:
+        assert start(
+            controller, tmp_path, last="0.05", dwell="1", interval="0.1",
+            window="0.4",
+        )
+        wait_until(
+            qapp,
+            lambda: controller.snapshot.state is ProtocolState.RUNNING
+            and controller._pending_request_id is None,
+        )
+        clock.set_active(controller, pause_at)
+        controller.pause()
+        # Model the real-hardware OFF confirmation/settling delay.  It is wall
+        # time, not protocol active time.
+        clock.now += 5.0
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.PAUSED)
+        assert controller.snapshot.elapsed_active_s == pytest.approx(pause_at)
+        assert controller.resume()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING)
+
+        for sample_at in (0.6, 0.7, 0.8, 0.9):
+            if sample_at + 1e-12 >= pause_at:
+                submit_sample_at(qapp, controller, clock, sample_at)
+        clock.set_active(controller, 1.0)
+        controller._sample_timer.stop()
+        controller._submit_sample()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
+
+        assert len(points) == 1
+        assert points[0].sample_count >= 1
+        assert points[0].active_start_s >= 0.6 - 1e-12
+        assert len(rows(controller.snapshot.summary_file_path)) == 1  # type: ignore[arg-type]
+    finally:
+        controller.shutdown(); assert connection.shutdown(1)
+
+
+def test_repeated_pause_resume_preserves_one_step_and_one_summary(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, _backend = connected(qapp)
+    clock = ActiveClock()
+    controller = PolarisationController(1, connection, monotonic=clock.monotonic)
+    try:
+        assert start(
+            controller, tmp_path, last="0.05", dwell="1", interval="0.1",
+            window="0.4",
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING)
+        for pause_at in (0.2, 0.65):
+            wait_until(qapp, lambda: controller._pending_request_id is None)
+            clock.set_active(controller, pause_at)
+            controller.pause()
+            clock.now += 3.0
+            wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.PAUSED)
+            assert controller.snapshot.elapsed_active_s == pytest.approx(pause_at)
+            assert controller.resume()
+            wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING)
+
+        for sample_at in (0.7, 0.8, 0.9):
+            submit_sample_at(qapp, controller, clock, sample_at)
+        clock.set_active(controller, 1.0)
+        controller._sample_timer.stop(); controller._submit_sample()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
+        assert len(rows(controller.snapshot.summary_file_path)) == 1  # type: ignore[arg-type]
+        assert controller.snapshot.scan_step_index == 1
+    finally:
+        controller.shutdown(); assert connection.shutdown(1)
+
+
+def test_stale_pre_pause_timer_cannot_poll_or_fire_boundary_after_resume(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, backend = connected(qapp)
+    clock = ActiveClock()
+    controller = PolarisationController(1, connection, monotonic=clock.monotonic)
+    try:
+        assert start(
+            controller, tmp_path, last="0.05", dwell="1", interval="0.2",
+            window="0.4",
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING)
+        submit_sample_at(qapp, controller, clock, 0.8)
+        wait_until(qapp, lambda: controller._pending_request_id is None)
+        clock.set_active(controller, 0.95)
+        controller.pause(); clock.now += 2.0
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.PAUSED)
+        assert controller.resume()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING)
+
+        reads_before = [call[0] for call in backend.calls].count("read_voltage")
+        # Simulate delivery of the timeout queued before Pause.  The rebuilt
+        # active-time deadline is 1.0 s, so 0.95 s must neither poll nor finish.
+        controller._sample_timer.stop(); controller._submit_sample()
+        qapp.processEvents()
+        assert [call[0] for call in backend.calls].count("read_voltage") == reads_before
+        assert controller.snapshot.state is ProtocolState.RUNNING
+
+        clock.set_active(controller, 1.0)
+        controller._sample_timer.stop(); controller._submit_sample()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
+        assert len(rows(controller.snapshot.summary_file_path)) == 1  # type: ignore[arg-type]
+    finally:
+        controller.shutdown(); assert connection.shutdown(1)
+
+
+def test_empty_active_window_is_protocol_summary_error_not_csv_error(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, _backend = connected(qapp)
+    clock = ActiveClock()
+    controller = PolarisationController(1, connection, monotonic=clock.monotonic)
+    try:
+        assert start(
+            controller, tmp_path, last="0.05", dwell="0.5", interval="0.1",
+            window="0.2",
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING)
+        controller._step_samples.clear()
+        clock.set_active(controller, 0.5)
+        controller._sample_timer.stop(); controller._submit_sample()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.FAILED)
+        assert "step summary unavailable" in controller.snapshot.message
+        assert "CSV write failed" not in controller.snapshot.message
+        assert controller.snapshot.output_enabled is False
+    finally:
+        controller.shutdown(); assert connection.shutdown(1)
 
 
 def test_summary_writer_is_single_per_run_and_closes_deterministically(

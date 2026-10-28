@@ -16,7 +16,12 @@ are validated before ownership, file creation or mutation. Inclusive
 non-divisible endpoints occur once without overshoot.
 
 The output is enabled once and remains ON between setpoints. Pause confirms OFF
-and freezes active time; Resume revalidates the same step and continues it. Stop,
+and freezes active time as soon as the Pause request is accepted; the guarded
+Output-Off transaction and any paused wall-clock time therefore do not advance
+the dwell or final averaging window. Resume revalidates the same step, preserves
+its consumed sample slots, and rebuilds the next active-time sample/boundary
+deadline without skipping a sample exactly due at the Pause instant. A stale
+pre-Pause timer callback cannot poll early or complete the step. Stop,
 completion, file/backend failure, disconnect and shutdown use the existing
 authoritative safety-priority Output-Off cleanup. Real Hardware uses the accepted
 one-write, one-`*OPC?`, query-free settling, confirmation and authoritative
@@ -47,7 +52,8 @@ data are unchanged.
 - Decimal ascending, descending and inclusive non-divisible planning;
 - density/area conversion and derived-current grid validation;
 - averaging-window capacity/boundaries and population standard deviation;
-- Pause/Resume continuity, partial Stop, completion and file-failure cleanup;
+- Pause before, at and inside the final averaging window, repeated Pause/Resume,
+  stale boundary callbacks, partial Stop, completion and file-failure cleanup;
 - CH1/CH2 independent and simultaneous operation;
 - one raw and one exclusive companion writer per run, per-row flush,
   Pause/Resume continuity, deterministic closure and bounded plots;
@@ -57,3 +63,9 @@ data are unchanged.
 
 Supervised physical polarisation acceptance remains pending. No COM port or real
 instrument was accessed during implementation or automated validation.
+
+The earlier Real Hardware failure reporting `completed step has no samples in its
+final averaging window` was traced to active time continuing through guarded
+Output-Off confirmation. This was a scheduling/summary-construction failure, not
+a CSV write failure. Summary construction errors are now reported separately;
+`Polarisation summary CSV write failed` is reserved for writer/resource errors.

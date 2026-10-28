@@ -61,6 +61,10 @@ POLARISATION_SUMMARY_COLUMNS = (
 )
 
 
+class PolarisationSummaryConstructionError(RuntimeError):
+    """A completed step cannot be reduced from its valid active-time samples."""
+
+
 class PolarisationSummaryFile:
     """Exclusive, incrementally flushed companion summary for one M14 run."""
 
@@ -335,6 +339,24 @@ class PolarisationController(CurrentScanController):
             metadata.update(self._summary_metadata)
         return metadata
 
+    @Slot()
+    def pause(self) -> None:
+        """Freeze M14 active time when Pause is accepted, before OFF settling."""
+        if (
+            self._snapshot.state is not ProtocolState.RUNNING
+            or self._pending_request_id is not None
+        ):
+            return
+        frozen_active_s = self._elapsed_active()
+        self._active_before_run_s = frozen_active_s
+        self._run_started_at = 0.0
+        self._publish(replace(
+            self._snapshot,
+            elapsed_active_s=frozen_active_s,
+            remaining_active_s=self._remaining_active(frozen_active_s),
+        ))
+        super().pause()
+
     def _command_completed(self, request_id: int, name: str, result: object) -> None:
         is_sample = (
             request_id == self._pending_request_id
@@ -372,6 +394,12 @@ class PolarisationController(CurrentScanController):
         if config.scan_name == "steady_state_polarisation":
             try:
                 self._finalize_point(config)
+            except PolarisationSummaryConstructionError as error:
+                self._begin_cleanup(
+                    ProtocolState.FAILED,
+                    f"Polarisation step summary unavailable: {error}",
+                )
+                return
             except (OSError, ValueError) as error:
                 self._begin_cleanup(
                     ProtocolState.FAILED,
@@ -390,10 +418,14 @@ class PolarisationController(CurrentScanController):
             if elapsed + 1e-12 >= window_start and elapsed < step_end + 1e-12
         ]
         if not selected:
-            raise ValueError("completed step has no sample in its final averaging window")
+            raise PolarisationSummaryConstructionError(
+                "completed step has no valid sample in its final active-time averaging window"
+            )
         area = config.active_area_cm2
         if area is None or not math.isfinite(area) or area <= 0:
-            raise ValueError("polarisation active area is unavailable")
+            raise PolarisationSummaryConstructionError(
+                "polarisation active area is unavailable"
+            )
         (
             mean_voltage,
             voltage_sd,

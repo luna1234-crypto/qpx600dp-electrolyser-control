@@ -158,6 +158,7 @@ class SteppedScanController(ConstantCurrentController):
         self._axis_name = axis_name
         self._scan_step_index = 0
         self._pending_step_index: int | None = None
+        self._next_scan_event_active_s: float | None = None
 
     def _validate_scan_session(self, voltage_range_name: str | None) -> str | None:
         if self._connection.snapshot.state is not ConnectionState.CONNECTED:
@@ -271,6 +272,7 @@ class SteppedScanController(ConstantCurrentController):
     ) -> dict[str, object]:
         scan = config
         assert isinstance(scan, SteppedScanConfig)
+        self._next_scan_event_active_s = None
         return {
             "scan_step_index": 1,
             "scan_total_steps": len(scan.setpoints),
@@ -352,6 +354,15 @@ class SteppedScanController(ConstantCurrentController):
         ):
             return
         elapsed = self._elapsed_active()
+        # A stopped QTimer may already have queued its timeout event when Pause
+        # wins the race.  Resume installs a new active-time deadline before the
+        # event loop can deliver that stale callback.  Never let such a callback
+        # poll early or advance a step before the rebuilt deadline.
+        not_before = self._next_scan_event_active_s
+        if not_before is not None and elapsed + 1e-12 < not_before:
+            self._schedule_next_sample()
+            return
+        self._next_scan_event_active_s = None
         step_end = (self._scan_step_index + 1) * config.dwell_s
         if elapsed + 1e-12 >= step_end:
             self._advance_or_complete(config)
@@ -383,6 +394,7 @@ class SteppedScanController(ConstantCurrentController):
         self._next_sample_slot += 1
 
     def _advance_or_complete(self, config: SteppedScanConfig) -> None:
+        self._next_scan_event_active_s = None
         slots_per_step = math.ceil(config.dwell_s / config.interval_s - 1e-12)
         if self._next_sample_slot < slots_per_step:
             self._publish(replace(
@@ -486,6 +498,7 @@ class SteppedScanController(ConstantCurrentController):
             self._next_sample_slot = due_slot
         next_sample = step_start + self._next_sample_slot * config.interval_s
         next_event = min(next_sample, step_end)
+        self._next_scan_event_active_s = next_event
         delay_s = max(0.0, next_event - elapsed)
         self._sample_timer.start(max(0, math.ceil(delay_s * 1000)))
 
@@ -497,9 +510,16 @@ class SteppedScanController(ConstantCurrentController):
         elapsed = self._elapsed_active()
         step_start = self._scan_step_index * config.dwell_s
         self._sample_epoch_active_s = step_start
-        self._next_sample_slot = math.floor(
-            max(0.0, elapsed - step_start) / config.interval_s
-        ) + 1
+        step_elapsed = max(0.0, elapsed - step_start)
+        # Preserve every already-consumed slot while retaining a sample that is
+        # exactly due at the frozen Pause instant.  The old floor(...)+1 rule
+        # skipped that boundary slot after Resume.
+        due_slot = max(
+            1,
+            math.ceil((step_elapsed - 1e-12) / config.interval_s),
+        )
+        self._next_sample_slot = max(self._next_sample_slot, due_slot)
+        self._next_scan_event_active_s = None
 
 
 @dataclass(frozen=True, slots=True)
