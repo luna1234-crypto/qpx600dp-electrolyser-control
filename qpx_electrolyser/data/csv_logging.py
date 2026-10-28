@@ -53,6 +53,11 @@ CSV_COLUMNS = (
     "measured_current_density_a_cm2",
     "scan_point_valid",
     "scan_point_result_index",
+    "polarisation_averaging_window_s",
+    "polarisation_voltage_sd_v",
+    "polarisation_sample_count",
+    "polarisation_active_start_s",
+    "polarisation_active_end_s",
 )
 
 
@@ -87,6 +92,11 @@ class CsvWriter(Protocol):
         measured_current_density_a_cm2: float | None = None,
         scan_point_valid: bool | None = None,
         scan_point_result_index: int | None = None,
+        polarisation_averaging_window_s: float | None = None,
+        polarisation_voltage_sd_v: float | None = None,
+        polarisation_sample_count: int | None = None,
+        polarisation_active_start_s: float | None = None,
+        polarisation_active_end_s: float | None = None,
     ) -> None: ...
 
     def close(self) -> None: ...
@@ -124,6 +134,11 @@ class ProtocolLogSink(Protocol):
         measured_current_density_a_cm2: float | None = None,
         scan_point_valid: bool | None = None,
         scan_point_result_index: int | None = None,
+        polarisation_averaging_window_s: float | None = None,
+        polarisation_voltage_sd_v: float | None = None,
+        polarisation_sample_count: int | None = None,
+        polarisation_active_start_s: float | None = None,
+        polarisation_active_end_s: float | None = None,
     ) -> None: ...
 
     def suspend_sampling(self) -> None: ...
@@ -181,6 +196,11 @@ class CsvLogFile:
         measured_current_density_a_cm2: float | None = None,
         scan_point_valid: bool | None = None,
         scan_point_result_index: int | None = None,
+        polarisation_averaging_window_s: float | None = None,
+        polarisation_voltage_sd_v: float | None = None,
+        polarisation_sample_count: int | None = None,
+        polarisation_active_start_s: float | None = None,
+        polarisation_active_end_s: float | None = None,
     ) -> None:
         stream = self._stream
         if stream is None:
@@ -240,6 +260,25 @@ class CsvLogFile:
             ),
             "scan_point_result_index": (
                 "" if scan_point_result_index is None else str(scan_point_result_index)
+            ),
+            "polarisation_averaging_window_s": (
+                "" if polarisation_averaging_window_s is None
+                else f"{polarisation_averaging_window_s:.12g}"
+            ),
+            "polarisation_voltage_sd_v": (
+                "" if polarisation_voltage_sd_v is None
+                else f"{polarisation_voltage_sd_v:.12g}"
+            ),
+            "polarisation_sample_count": (
+                "" if polarisation_sample_count is None else str(polarisation_sample_count)
+            ),
+            "polarisation_active_start_s": (
+                "" if polarisation_active_start_s is None
+                else f"{polarisation_active_start_s:.12g}"
+            ),
+            "polarisation_active_end_s": (
+                "" if polarisation_active_end_s is None
+                else f"{polarisation_active_end_s:.12g}"
             ),
             "sample_status": status,
             "error": error,
@@ -396,6 +435,11 @@ class ChannelLoggingController(QObject):
         measured_current_density_a_cm2: float | None = None,
         scan_point_valid: bool | None = None,
         scan_point_result_index: int | None = None,
+        polarisation_averaging_window_s: float | None = None,
+        polarisation_voltage_sd_v: float | None = None,
+        polarisation_sample_count: int | None = None,
+        polarisation_active_start_s: float | None = None,
+        polarisation_active_end_s: float | None = None,
     ) -> None:
         """Append a protocol row through this logger's one open writer.
 
@@ -434,6 +478,11 @@ class ChannelLoggingController(QObject):
                 measured_current_density_a_cm2=measured_current_density_a_cm2,
                 scan_point_valid=scan_point_valid,
                 scan_point_result_index=scan_point_result_index,
+                polarisation_averaging_window_s=polarisation_averaging_window_s,
+                polarisation_voltage_sd_v=polarisation_voltage_sd_v,
+                polarisation_sample_count=polarisation_sample_count,
+                polarisation_active_start_s=polarisation_active_start_s,
+                polarisation_active_end_s=polarisation_active_end_s,
             )
         except (OSError, ValueError) as append_error:
             self._fail_file(append_error)

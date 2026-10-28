@@ -13,8 +13,8 @@ the Milestone 5 `SerialTransport` / `QPX600DPDriver`, the Milestone 6 shared
 priority command worker, Milestone 7 per-channel controllers, Milestone 8
 independent CSV loggers, Milestone 9 Constant Current state machines, Milestone
 10 bounded live-plot models, Milestone 11 Constant Voltage state machines,
-the Milestone 12 reusable stepped-scan engine and Milestone 13 Current Scan
-controllers.
+the Milestone 12 reusable stepped-scan engine, Milestone 13 Current Scan and
+Milestone 14 Steady-State Polarisation controllers.
 The guarded follow-up connects the physical backend
 through that same worker only after an explicit mode, port and Connect action.
 See [simulator behaviour](simulator.md).
@@ -175,6 +175,10 @@ state machine. `VoltageScanController` supplies Staircase LSV voltage-axis valid
 setpoint application. Milestone 13 supplies `CurrentScanController` as the
 current-axis adapter without copying ownership, Pause/Resume, cleanup, queue,
 CSV or timing logic.
+`PolarisationController` subclasses the current-axis adapter and adds only
+current-density/active-area validation plus a final-window reducer. It therefore
+inherits the same state machine, readback, Pause/Resume, queue serialization and
+guarded output transitions rather than duplicating them.
 Exact `Decimal` arithmetic plans an inclusive tuple before ownership. The
 voltage adapter derives duration from signed mV step and positive mV/s rate,
 validates post-settling sample capacity, then checks every voltage and fixed
@@ -390,8 +394,9 @@ leaving the established leading schema readable by older consumers.
 Retain full data on disk. Implemented plotting receives existing sample signals
 and retains at most 2,000 downsampled display points per channel. Display reset
 does not pause or alter engines, loggers or CSV output. Snapshot/repaint delivery
-is coalesced at 10 Hz. Future Milestone 14 polarisation summary writes must
-occur at each completed step and use only the measured final averaging window.
+is coalesced at 10 Hz. Milestone 14 writes one flushed summary at each completed
+step using only existing samples in the final averaging window; its bounded
+mean-voltage-versus-density plot adds no polling.
 
 ## Milestone boundaries and acceptance
 

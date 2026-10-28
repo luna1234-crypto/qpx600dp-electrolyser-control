@@ -14,6 +14,7 @@ import pytest
 
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
 from qpx_electrolyser.engine.constant_current import ProtocolState
+from qpx_electrolyser.engine.polarisation import PolarisationController
 from qpx_electrolyser.engine.stepped_scan import (
     CurrentScanController,
     REAL_HARDWARE_SCAN_CONFIRMATION,
@@ -159,6 +160,19 @@ def start_current(
     )
 
 
+def start_polarisation(
+    scan: PolarisationController,
+    directory: Path,
+    *,
+    dwell: str = "4",
+    confirmation: str | None = REAL_HARDWARE_SCAN_CONFIRMATION,
+) -> bool:
+    return scan.start(
+        "1", "0.1", "0.1", "0.1", "2", dwell, "1", "2",
+        "60 V", directory, real_hardware_confirmation=confirmation,
+    )
+
+
 def test_real_voltage_scan_exact_start_order_and_exactly_once_cleanup(
     qapp: QApplication, tmp_path: Path,
 ) -> None:
@@ -196,6 +210,32 @@ def test_real_scan_confirmation_cancel_has_no_file_or_command(
         assert "not confirmed" in scan.snapshot.message
         assert fake.writes == []
         assert not list(tmp_path.glob("*.csv"))
+    finally:
+        assert connection.shutdown(2)
+
+
+def test_real_polarisation_reuses_exact_guarded_order_and_cleanup(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, fake = connected_real(qapp)
+    scan = PolarisationController(1, connection)
+    try:
+        assert start_polarisation(scan, tmp_path)
+        wait_until(qapp, lambda: scan.snapshot.state is ProtocolState.RUNNING)
+        assert fake.writes[:21] == [
+            b"OP1?\n", b"VRANGE1?\n", b"VRANGE1?\n", b"V1 2.000\n",
+            b"I1 0.10\n", b"V1?\n", b"I1?\n", b"VRANGE1?\n",
+            b"VRANGE1?\n", b"OP1?\n", b"V1?\n", b"I1?\n", b"OP1 1\n",
+            b"*OPC?\n", b"OP1?\n", b"OP1?\n", b"VRANGE1?\n",
+            b"V1?\n", b"I1?\n", b"V1O?\n", b"I1O?\n",
+        ]
+        scan.stop("polarisation fake-serial cleanup")
+        wait_until(qapp, lambda: scan.snapshot.state is ProtocolState.COMPLETED)
+        assert fake.writes.count(b"OP1 1\n") == 1
+        assert fake.writes.count(b"OP1 0\n") == 1
+        assert fake.writes.count(b"*OPC?\n") == 2
+        assert not fake.output[1]
+        assert all(b"2" not in item.split(b" ")[0] for item in fake.writes)
     finally:
         assert connection.shutdown(2)
 

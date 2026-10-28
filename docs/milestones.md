@@ -530,10 +530,23 @@ functional evidence only, not metrology calibration. See
 
 ## Milestone 14 - Polarisation curve
 
-Original roadmap task: run a polarisation curve. This milestone is pending and
-will target QPX600DP. It will reuse the shared current-input/active-area model,
-serialized queue, one-writer CSV path and tested monotonic scheduling; detailed
-implementation and supervised acceptance remain future work.
+Implemented independent CH1/CH2 Steady-State Polarisation panels as a thin
+current-density specialization of the M13 stepped-scan controller. Exact Decimal
+density plans support ascending, descending and inclusive non-divisible endpoints;
+derived current is `I = j × area` and every value is capability/grid checked before
+ownership, file creation or output mutation.
+
+The output remains ON between steps. Pause, Resume, Stop, completion, failures,
+disconnect and shutdown use the accepted M11 guarded transition and authoritative
+Output-Off cleanup path. Raw samples are preserved. At each completed step,
+samples in the final averaging window produce one flushed summary row with mean
+voltage, population voltage SD, mean current/density, count and active-time
+bounds; a partial step produces no summary. The bounded mean-voltage versus
+current-density plot consumes those results without polling.
+
+This is power-supply polarisation, not potentiostat control. Simulation and fake
+serial validation are complete; supervised physical acceptance is pending. See
+[verification details](verification/milestone14.md).
 
 ## Milestone 15 - Custom sequence editor
 

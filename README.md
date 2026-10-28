@@ -2,7 +2,7 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.13.0 preserves those historical records, the Milestone 5
+assumption. Version 0.14.0 preserves those historical records, the Milestone 5
 QPX600DP serial backend and completed two-channel standard-load Windows
 validation, the Milestone 6 shared
 asynchronous command queue, Milestone 7 dual-channel manual controls with a
@@ -11,7 +11,8 @@ Milestone 9 independent Constant Current protocols with an offline-tested,
 guarded Real Hardware follow-up, Milestone 10 bounded real-time plots, and
 Milestone 11 independent Constant Voltage protocols with supervised two-channel
 resistor-load acceptance, Milestone 12 independent Voltage Sweep / Staircase LSV,
-and Milestone 13 independent Simulation Mode stepped current scans.
+Milestone 13 stepped current scans, and Milestone 14 steady-state power-supply
+polarisation.
 
 All current implementation and every future Milestone 14–20 target the Aim-TTi
 QPX600DP. CPX400DP references are retained only as historical context for the
@@ -393,6 +394,25 @@ channel isolation and final Output Off all passed. Low-current readings are not
 metrology calibration. See
 [Milestone 13 verification](docs/verification/milestone13.md).
 
+## Milestone 14 steady-state polarisation
+
+CH1 and CH2 now provide independent Steady-State Polarisation panels. Each run
+accepts active area, signed start/end/increment current density, voltage
+compliance, dwell, sampling interval and a final averaging window. The existing
+M13 stepped-scan path performs exact Decimal planning and converts `I = j × area`
+before capability/grid validation. Output remains ON between steps; the existing
+M11 guarded transitions provide Pause/Resume and terminal Output-Off cleanup.
+
+Every scheduled reading remains in the raw CSV and time plot. A completed step
+reduces only existing samples in its final averaging window. One immediately
+flushed summary row records mean voltage, population voltage standard deviation,
+mean current/density, sample count, and active-time bounds. Partial/stopped steps
+produce no summary. The bounded polarisation plot shows mean voltage against
+current density without extra polling. This is two-terminal power-supply
+polarisation, not potentiostat control. Simulation/fake-serial validation is
+implemented; supervised physical acceptance remains pending. See the
+[Milestone 14 verification](docs/verification/milestone14.md).
+
 ## Milestone 5 offline physical backend
 
 `SerialTransport` opens only an explicitly supplied port. It never enumerates
@@ -572,6 +592,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent Constant Voltage protocols | Simulation and guarded fake-serial validation passed; supervised CH1/CH2 100-ohm resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Voltage Sweep / Staircase LSV | Simulation/fake-serial and supervised 100-ohm functional acceptance passed; not metrology or electrolyser approval |
 | Independent stepped Current Scan | Simulation and supervised CH1/CH2 100-ohm Real Hardware functional acceptance passed; low-current readings are not calibration |
+| Steady-State Polarisation | Simulation and fake-serial validation implemented; supervised physical acceptance pending |
 | M14 Polarisation curve | Pending for QPX600DP |
 | M15 Custom sequence editor | Pending for QPX600DP |
 | M16 Full safety/emergency system | Pending; existing channel cleanup is not global Emergency Off |
@@ -599,6 +620,7 @@ not control potential against a reference electrode.
 - [Milestone 11 Constant Voltage verification](docs/verification/milestone11.md)
 - [Milestone 12 Voltage Sweep / Staircase LSV verification](docs/verification/milestone12.md)
 - [Milestone 13 Current Scan verification](docs/verification/milestone13.md)
+- [Milestone 14 Steady-State Polarisation verification](docs/verification/milestone14.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 

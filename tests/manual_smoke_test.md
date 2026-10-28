@@ -149,3 +149,17 @@ Keep Simulation Mode connected and use only simulator-safe values:
 
 Record the Windows/Python/PySide6 versions and outcome. Real Hardware Current
 Scan physical acceptance remains pending.
+
+## Milestone 14 Steady-State Polarisation checks
+
+Keep Simulation Mode connected. For CH1 use area `2 cm²`, density `0.05 → 0.15`
+with increment `0.05 A/cm²`, compliance `2 V`, dwell `1 s`, interval `0.1 s`
+and final averaging window `0.3 s`. Use the reverse plan on CH2. Confirm derived
+ampere plans, independent simultaneous progress, one summary row per completed
+step, raw CSV continuity, and bounded mean-V-versus-j plots.
+
+Pause CH1 during a dwell and confirm simulated Output Off and frozen active time;
+Resume and confirm the same step completes without duplication. Stop a later
+partial step and confirm it produces no completed summary row while CH2 continues.
+Both outputs must finish OFF. This is power-supply polarisation, not potentiostat
+control. Do not select Real Hardware: supervised physical acceptance is pending.

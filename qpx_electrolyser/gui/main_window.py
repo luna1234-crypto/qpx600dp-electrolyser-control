@@ -35,6 +35,7 @@ from qpx_electrolyser.engine.constant_voltage import (
     REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
 )
 from qpx_electrolyser.engine.current_input import CurrentInputMode, CurrentInputSelection
+from qpx_electrolyser.engine.polarisation import PolarisationController
 from qpx_electrolyser.engine.stepped_scan import (
     CurrentScanController,
     REAL_HARDWARE_SCAN_CONFIRMATION,
@@ -48,6 +49,11 @@ from qpx_electrolyser.gui.constant_voltage_panel import ConstantVoltagePanel
 from qpx_electrolyser.gui.current_scan_panel import CurrentScanPanel
 from qpx_electrolyser.gui.plots.realtime import ChannelPlotController, ChannelPlotPanel
 from qpx_electrolyser.gui.plots.lsv import LsvPlotController, LsvPlotPanel
+from qpx_electrolyser.gui.plots.polarisation import (
+    PolarisationPlotController,
+    PolarisationPlotPanel,
+)
+from qpx_electrolyser.gui.polarisation_panel import PolarisationPanel
 from qpx_electrolyser.gui.voltage_scan_panel import VoltageScanPanel
 
 
@@ -118,15 +124,19 @@ class MainWindow(QMainWindow):
         self.voltage_protocol_controllers: dict[int, ConstantVoltageController] = {}
         self.voltage_scan_controllers: dict[int, VoltageScanController] = {}
         self.current_scan_controllers: dict[int, CurrentScanController] = {}
+        self.polarisation_controllers: dict[int, PolarisationController] = {}
         self.plot_controllers: dict[int, ChannelPlotController] = {}
         self.lsv_plot_controllers: dict[int, LsvPlotController] = {}
+        self.polarisation_plot_controllers: dict[int, PolarisationPlotController] = {}
         self.channel_panels: dict[int, ChannelPanel] = {}
         self.protocol_panels: dict[int, ConstantCurrentPanel] = {}
         self.voltage_protocol_panels: dict[int, ConstantVoltagePanel] = {}
         self.voltage_scan_panels: dict[int, VoltageScanPanel] = {}
         self.current_scan_panels: dict[int, CurrentScanPanel] = {}
+        self.polarisation_panels: dict[int, PolarisationPanel] = {}
         self.plot_panels: dict[int, ChannelPlotPanel] = {}
         self.lsv_plot_panels: dict[int, LsvPlotPanel] = {}
+        self.polarisation_plot_panels: dict[int, PolarisationPlotPanel] = {}
         for channel in (1, 2):
             controller = ManualChannelController(channel, connection_controller, self)
             logging_controller = ChannelLoggingController(channel, connection_controller, self)
@@ -140,15 +150,21 @@ class MainWindow(QMainWindow):
             current_scan_controller = CurrentScanController(
                 channel, connection_controller, self
             )
+            polarisation_controller = PolarisationController(
+                channel, connection_controller, self
+            )
             plot_controller = ChannelPlotController(channel, connection_controller, self)
             lsv_plot_controller = LsvPlotController(channel, self)
+            polarisation_plot_controller = PolarisationPlotController(channel, self)
             panel = ChannelPanel(channel)
             protocol_panel = ConstantCurrentPanel(channel)
             voltage_protocol_panel = ConstantVoltagePanel(channel)
             voltage_scan_panel = VoltageScanPanel(channel)
             current_scan_panel = CurrentScanPanel(channel)
+            polarisation_panel = PolarisationPanel(channel)
             plot_panel = ChannelPlotPanel(channel)
             lsv_plot_panel = LsvPlotPanel(channel)
+            polarisation_plot_panel = PolarisationPlotPanel(channel)
             panel.refresh_requested.connect(controller.request_refresh)
             panel.voltage_requested.connect(controller.request_set_voltage)
             panel.current_requested.connect(controller.request_set_current)
@@ -175,6 +191,9 @@ class MainWindow(QMainWindow):
             )
             logging_controller.snapshot_changed.connect(
                 current_scan_controller.logging_snapshot_changed
+            )
+            logging_controller.snapshot_changed.connect(
+                polarisation_controller.logging_snapshot_changed
             )
             logging_controller.sample_received.connect(controller.accept_logging_readback)
             logging_controller.sample_received.connect(plot_controller.accept_sample)
@@ -221,6 +240,29 @@ class MainWindow(QMainWindow):
                 controller.accept_logging_readback
             )
             current_scan_controller.sample_received.connect(plot_controller.accept_sample)
+            polarisation_controller.snapshot_changed.connect(
+                polarisation_panel.apply_snapshot
+            )
+            polarisation_controller.snapshot_changed.connect(
+                lambda snapshot, selected_channel=channel:
+                self._apply_protocol_snapshot(selected_channel, snapshot)
+            )
+            polarisation_controller.sample_received.connect(
+                controller.accept_logging_readback
+            )
+            polarisation_controller.sample_received.connect(plot_controller.accept_sample)
+            polarisation_controller.point_result_received.connect(
+                polarisation_panel.apply_point
+            )
+            polarisation_controller.point_result_received.connect(
+                polarisation_plot_controller.accept_point
+            )
+            polarisation_plot_controller.snapshot_changed.connect(
+                polarisation_plot_panel.apply_snapshot
+            )
+            polarisation_plot_panel.clear_requested.connect(
+                polarisation_plot_controller.reset
+            )
             plot_controller.snapshot_changed.connect(plot_panel.apply_snapshot)
             plot_panel.clear_requested.connect(plot_controller.reset)
             panel.start_logging_requested.connect(
@@ -284,6 +326,20 @@ class MainWindow(QMainWindow):
                 )
             )
             current_scan_panel.stop_requested.connect(current_scan_controller.stop)
+            polarisation_panel.start_requested.connect(
+                lambda area, start, stop, increment, voltage, dwell, interval, window,
+                selected_channel=channel: self._start_polarisation(
+                    selected_channel, area, start, stop, increment, voltage,
+                    dwell, interval, window
+                )
+            )
+            polarisation_panel.pause_requested.connect(polarisation_controller.pause)
+            polarisation_panel.resume_requested.connect(
+                lambda selected_channel=channel: self._resume_scan(
+                    selected_channel, "polarisation"
+                )
+            )
+            polarisation_panel.stop_requested.connect(polarisation_controller.stop)
             panel.apply_snapshot(controller.snapshot)
             plot_panel.apply_snapshot(plot_controller.snapshot)
             self.channel_controllers[channel] = controller
@@ -292,15 +348,19 @@ class MainWindow(QMainWindow):
             self.voltage_protocol_controllers[channel] = voltage_protocol_controller
             self.voltage_scan_controllers[channel] = voltage_scan_controller
             self.current_scan_controllers[channel] = current_scan_controller
+            self.polarisation_controllers[channel] = polarisation_controller
             self.plot_controllers[channel] = plot_controller
             self.lsv_plot_controllers[channel] = lsv_plot_controller
+            self.polarisation_plot_controllers[channel] = polarisation_plot_controller
             self.channel_panels[channel] = panel
             self.protocol_panels[channel] = protocol_panel
             self.voltage_protocol_panels[channel] = voltage_protocol_panel
             self.voltage_scan_panels[channel] = voltage_scan_panel
             self.current_scan_panels[channel] = current_scan_panel
+            self.polarisation_panels[channel] = polarisation_panel
             self.plot_panels[channel] = plot_panel
             self.lsv_plot_panels[channel] = lsv_plot_panel
+            self.polarisation_plot_panels[channel] = polarisation_plot_panel
             panels.addWidget(panel, 1)
         layout.addLayout(panels)
 
@@ -332,6 +392,13 @@ class MainWindow(QMainWindow):
             self._update_protocol_context(channel)
         layout.addLayout(current_scan_panels)
 
+        polarisation_panels = QHBoxLayout()
+        polarisation_panels.setSpacing(18)
+        for channel in (1, 2):
+            polarisation_panels.addWidget(self.polarisation_panels[channel], 1)
+            self._update_protocol_context(channel)
+        layout.addLayout(polarisation_panels)
+
         plot_panels = QHBoxLayout()
         plot_panels.setSpacing(18)
         for channel in (1, 2):
@@ -343,6 +410,14 @@ class MainWindow(QMainWindow):
         for channel in (1, 2):
             lsv_plot_panels.addWidget(self.lsv_plot_panels[channel], 1)
         layout.addLayout(lsv_plot_panels)
+
+        polarisation_plot_panels = QHBoxLayout()
+        polarisation_plot_panels.setSpacing(18)
+        for channel in (1, 2):
+            polarisation_plot_panels.addWidget(
+                self.polarisation_plot_panels[channel], 1
+            )
+        layout.addLayout(polarisation_plot_panels)
 
         self._disconnect_pending = False
         self._close_pending = False
@@ -426,6 +501,7 @@ class MainWindow(QMainWindow):
             self.voltage_protocol_controllers[channel].snapshot.owns_channel
             or self.voltage_scan_controllers[channel].snapshot.owns_channel
             or self.current_scan_controllers[channel].snapshot.owns_channel
+            or self.polarisation_controllers[channel].snapshot.owns_channel
         ):
             self.statusBar().showMessage(
                 f"Stop the active CH{channel} protocol first."
@@ -543,6 +619,7 @@ class MainWindow(QMainWindow):
             self.protocol_controllers[channel].snapshot.owns_channel
             or self.voltage_scan_controllers[channel].snapshot.owns_channel
             or self.current_scan_controllers[channel].snapshot.owns_channel
+            or self.polarisation_controllers[channel].snapshot.owns_channel
         ):
             self.statusBar().showMessage(
                 f"Stop the active CH{channel} protocol first."
@@ -645,6 +722,7 @@ class MainWindow(QMainWindow):
             self.protocol_controllers[channel].snapshot.owns_channel
             or self.voltage_protocol_controllers[channel].snapshot.owns_channel
             or self.current_scan_controllers[channel].snapshot.owns_channel
+            or self.polarisation_controllers[channel].snapshot.owns_channel
         ):
             self.statusBar().showMessage(
                 f"Stop the active CH{channel} protocol before starting a Voltage Scan."
@@ -742,6 +820,7 @@ class MainWindow(QMainWindow):
             self.protocol_controllers[channel].snapshot.owns_channel
             or self.voltage_protocol_controllers[channel].snapshot.owns_channel
             or self.voltage_scan_controllers[channel].snapshot.owns_channel
+            or self.polarisation_controllers[channel].snapshot.owns_channel
         ):
             self.statusBar().showMessage(
                 f"Stop the active CH{channel} protocol before starting a Current Scan."
@@ -827,11 +906,11 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(scan.snapshot.message)
 
     def _resume_scan(self, channel: int, scan_type: str) -> None:
-        scan = (
-            self.voltage_scan_controllers[channel]
-            if scan_type == "voltage"
-            else self.current_scan_controllers[channel]
-        )
+        scan = {
+            "voltage": self.voltage_scan_controllers[channel],
+            "current": self.current_scan_controllers[channel],
+            "polarisation": self.polarisation_controllers[channel],
+        }[scan_type]
         confirmation = None
         if not self._connection_controller.snapshot.simulation_mode:
             config = scan.snapshot.config
@@ -874,6 +953,112 @@ class MainWindow(QMainWindow):
         if not scan.resume(confirmation):
             self.statusBar().showMessage(scan.snapshot.message)
 
+    def _start_polarisation(
+        self,
+        channel: int,
+        active_area: str,
+        start_density: str,
+        stop_density: str,
+        density_increment: str,
+        voltage_compliance: str,
+        dwell: str,
+        interval: str,
+        averaging_window: str,
+    ) -> None:
+        other_controllers = (
+            self.protocol_controllers[channel],
+            self.voltage_protocol_controllers[channel],
+            self.voltage_scan_controllers[channel],
+            self.current_scan_controllers[channel],
+        )
+        if any(item.snapshot.owns_channel for item in other_controllers):
+            message = (
+                f"Stop the active CH{channel} protocol before starting polarisation."
+            )
+            self.polarisation_panels[channel].show_validation_error(message)
+            self.statusBar().showMessage(message)
+            return
+        manual = self.channel_controllers[channel].snapshot
+        controller = self.polarisation_controllers[channel]
+        logger = self.logging_controllers[channel]
+        error = controller.validate_inputs(
+            active_area,
+            start_density,
+            stop_density,
+            density_increment,
+            voltage_compliance,
+            dwell,
+            interval,
+            averaging_window,
+            manual.voltage_range_name,
+        )
+        if error is not None:
+            self.polarisation_panels[channel].show_validation_error(error)
+            self.statusBar().showMessage(error)
+            return
+        confirmation = None
+        if not self._connection_controller.snapshot.simulation_mode:
+            selection = CurrentInputSelection.parse(
+                CurrentInputMode.CURRENT_DENSITY.value, active_area
+            )
+            start_a = selection.resolve(start_density, "Start density").current_a
+            stop_a = selection.resolve(stop_density, "End density").current_a
+            step_a = selection.resolve(density_increment, "Density increment").current_a
+            step_count = len(generate_inclusive_setpoints(
+                start_density, stop_density, density_increment,
+                axis_label="Current density",
+            ))
+            logger_path = (
+                str(logger.snapshot.file_path)
+                if logger.snapshot.active and logger.snapshot.file_path is not None
+                else f"new channel {channel} CSV in {self._data_directory}"
+            )
+            answer = QMessageBox.warning(
+                self,
+                f"Confirm REAL HARDWARE Polarisation - CH{channel}",
+                "REAL HARDWARE POWER-SUPPLY POLARISATION AUTHORIZATION\n\n"
+                f"Channel: CH{channel}\n"
+                f"Current density start / end / increment: {start_density} / "
+                f"{stop_density} / {density_increment} A/cm²\n"
+                f"Derived current start / end / increment: {float(start_a):g} / "
+                f"{float(stop_a):g} / {float(step_a):g} A\n"
+                f"Active area: {active_area} cm²\n"
+                f"Voltage compliance: {voltage_compliance} V\n"
+                f"Dwell / interval / final averaging window: {dwell} / {interval} / "
+                f"{averaging_window} s\n"
+                f"Total steps: {step_count}\n"
+                f"CSV destination: {logger_path}\n\n"
+                "This is power-supply polarisation, not potentiostat control. Confirm "
+                "the supervised load and wiring are safe. One guarded Output-On attempt "
+                "will follow fresh identity/OFF/range/setpoint checks.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage(
+                    f"CH{channel} Real Hardware polarisation cancelled; no command submitted."
+                )
+                return
+            confirmation = REAL_HARDWARE_SCAN_CONFIRMATION
+        if not controller.start(
+            active_area,
+            start_density,
+            stop_density,
+            density_increment,
+            voltage_compliance,
+            dwell,
+            interval,
+            averaging_window,
+            manual.voltage_range_name,
+            self._data_directory,
+            logging_sink=logger if logger.snapshot.active else None,
+            real_hardware_confirmation=confirmation,
+        ):
+            self.polarisation_panels[channel].show_validation_error(
+                controller.snapshot.message
+            )
+            self.statusBar().showMessage(controller.snapshot.message)
+
     def _apply_protocol_snapshot(self, channel: int, snapshot: ProtocolSnapshot) -> None:
         self.channel_panels[channel].set_protocol_owned(
             self._channel_protocol_owned(channel)
@@ -892,6 +1077,7 @@ class MainWindow(QMainWindow):
             or channel not in self.voltage_protocol_panels
             or channel not in self.voltage_scan_panels
             or channel not in self.current_scan_panels
+            or channel not in self.polarisation_panels
         ):
             return
         connection = self._connection_controller.snapshot
@@ -909,6 +1095,7 @@ class MainWindow(QMainWindow):
                 and not self.voltage_protocol_controllers[channel].snapshot.owns_channel
                 and not self.voltage_scan_controllers[channel].snapshot.owns_channel
                 and not self.current_scan_controllers[channel].snapshot.owns_channel
+                and not self.polarisation_controllers[channel].snapshot.owns_channel
             )
         )
         self.voltage_protocol_panels[channel].set_context(
@@ -917,6 +1104,7 @@ class MainWindow(QMainWindow):
                 and not self.protocol_controllers[channel].snapshot.owns_channel
                 and not self.voltage_scan_controllers[channel].snapshot.owns_channel
                 and not self.current_scan_controllers[channel].snapshot.owns_channel
+                and not self.polarisation_controllers[channel].snapshot.owns_channel
             )
         )
         self.voltage_scan_panels[channel].set_context(
@@ -925,6 +1113,7 @@ class MainWindow(QMainWindow):
                 and not self.protocol_controllers[channel].snapshot.owns_channel
                 and not self.voltage_protocol_controllers[channel].snapshot.owns_channel
                 and not self.current_scan_controllers[channel].snapshot.owns_channel
+                and not self.polarisation_controllers[channel].snapshot.owns_channel
             ),
             simulation_mode=connection.simulation_mode,
         )
@@ -934,6 +1123,17 @@ class MainWindow(QMainWindow):
                 and not self.protocol_controllers[channel].snapshot.owns_channel
                 and not self.voltage_protocol_controllers[channel].snapshot.owns_channel
                 and not self.voltage_scan_controllers[channel].snapshot.owns_channel
+                and not self.polarisation_controllers[channel].snapshot.owns_channel
+            ),
+            simulation_mode=connection.simulation_mode,
+        )
+        self.polarisation_panels[channel].set_context(
+            available=(
+                common_available
+                and not self.protocol_controllers[channel].snapshot.owns_channel
+                and not self.voltage_protocol_controllers[channel].snapshot.owns_channel
+                and not self.voltage_scan_controllers[channel].snapshot.owns_channel
+                and not self.current_scan_controllers[channel].snapshot.owns_channel
             ),
             simulation_mode=connection.simulation_mode,
         )
@@ -944,6 +1144,7 @@ class MainWindow(QMainWindow):
             or self.voltage_protocol_controllers[channel].snapshot.owns_channel
             or self.voltage_scan_controllers[channel].snapshot.owns_channel
             or self.current_scan_controllers[channel].snapshot.owns_channel
+            or self.polarisation_controllers[channel].snapshot.owns_channel
         )
 
     def _all_protocol_controllers(self):
@@ -952,6 +1153,7 @@ class MainWindow(QMainWindow):
             *self.voltage_protocol_controllers.values(),
             *self.voltage_scan_controllers.values(),
             *self.current_scan_controllers.values(),
+            *self.polarisation_controllers.values(),
         )
 
     def _request_disconnect(self) -> None:

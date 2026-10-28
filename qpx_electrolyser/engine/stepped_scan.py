@@ -103,6 +103,7 @@ class SteppedScanConfig:
     scan_rate_mv_per_s: float | None = None
     settling_time_s: float = 0.0
     measurements_per_point: int = 0
+    averaging_window_s: float = 0.0
 
     @property
     def duration_s(self) -> float:

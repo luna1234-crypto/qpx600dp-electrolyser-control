@@ -97,6 +97,11 @@ def test_csv_schema_values_flush_exclusive_creation_and_close(tmp_path: Path) ->
             "measured_current_density_a_cm2": "",
             "scan_point_valid": "",
             "scan_point_result_index": "",
+            "polarisation_averaging_window_s": "",
+            "polarisation_voltage_sd_v": "",
+            "polarisation_sample_count": "",
+            "polarisation_active_start_s": "",
+            "polarisation_active_end_s": "",
         "sample_status": "ok",
         "error": "",
     }
