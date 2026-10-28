@@ -84,17 +84,18 @@ This procedure checks the simulation connection GUI. Do not connect a power supp
    disconnection, worker cleanup and shutdown records
    from both runs. The first run's records must remain.
 
-## Milestone 12 Voltage Scan checks
+## Milestone 12 Voltage Sweep / Staircase LSV checks
 
 With Simulation Mode connected, complete these checks before the final
 disconnect/shutdown steps above:
 
-1. In CH1 Voltage Scan enter start `1`, stop `2`, step `0.5`, current limit
-   `0.1`, dwell `1` and interval `0.25`. Start and confirm steps `1/3`, `2/3`
-   and `3/3` appear in order, the commanded voltage reaches 2 V exactly once,
-   plot/measurements update, one CSV closes and the output ends OFF.
-2. On CH2 enter start `2`, stop `1`, step `-0.4`, current limit `0.1`, dwell
-   `1` and interval `0.25`. Confirm the non-divisible inclusive sequence is
+1. In CH1 Staircase LSV enter start `1`, end `2`, step `500` mV, rate `500`
+   mV/s, current limit `3.5` A, settling `0.25` s, measurements per point `2`,
+   interval `0.25` s and optional active area `2` cm². Confirm the derived
+   duration is 1 s and steps `1/3`, `2/3`, `3/3` appear in order.
+2. On CH2 enter start `2`, end `1`, step `-400` mV, rate `400` mV/s,
+   current limit `3.5` A, settling `0.25` s, measurements `2` and interval
+   `0.25` s. Confirm the non-divisible inclusive sequence is
    2.0, 1.6, 1.2 and 1.0 V, without an overshoot or duplicate endpoint.
 3. Start both channels together with short scans. Confirm both progress while
    the GUI remains responsive, their files and plots remain independent, and
@@ -106,11 +107,13 @@ disconnect/shutdown steps above:
    its scan file without changing CH2.
 6. Start same-channel standalone logging, then a scan. Confirm the scan reuses
    that one CSV, logging remains active after scan completion, scan rows contain
-   `scan_name`, step index/total and commanded setpoint, and plots use those
-   samples without visible extra polling.
-7. Keep Simulation Mode selected. Guarded Real Hardware scan controls and their
-   physical-acceptance-pending message are covered by fake-serial/widget tests;
-   do not select Real Hardware during this manual procedure.
+   `scan_name`, step index/total, commanded setpoint, scan rate, mV step,
+   duration, settling and measurement-count metadata.
+7. Confirm raw pre-settling samples remain in CSV, one `lsv_point` row exists
+   per step, I-V updates for both channels, and CH1 also displays j-V. Clear the
+   LSV display and confirm time plots/CSV are unchanged.
+8. Keep Simulation Mode selected. Revised Real Hardware Staircase LSV acceptance
+   remains pending; do not select Real Hardware during this procedure.
 
 Record the Windows edition, Python/PySide6 versions, date and observed result.
 The historical Milestone 4 visual check used the earlier CPX model identity.

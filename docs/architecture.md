@@ -166,13 +166,14 @@ supervised CH1/CH2 resistor-load acceptance; electrolyser and unattended
 operation remain unapproved.
 
 Milestone 12 adds an axis-neutral `SteppedScanController` on top of that same
-state machine. `VoltageScanController` supplies voltage-axis validation and
+state machine. `VoltageScanController` supplies Staircase LSV voltage-axis validation and
 setpoint application. Milestone 13 supplies `CurrentScanController` as the
 current-axis adapter without copying ownership, Pause/Resume, cleanup, queue,
 CSV or timing logic.
-Exact `Decimal` arithmetic plans an inclusive tuple before ownership. Every
-planned voltage and the fixed current limit is validated against the active
-range, programming grids, conservative envelope and existing project policy.
+Exact `Decimal` arithmetic plans an inclusive tuple before ownership. The
+voltage adapter derives duration from signed mV step and positive mV/s rate,
+validates post-settling sample capacity, then checks every voltage and fixed
+current against the range, programming grids, envelope and project policy.
 
 One scan holds one channel. Its initial settings and Output On use the existing
 atomic preflight path. Dwell is measured in active monotonic time. At a boundary,
@@ -186,8 +187,11 @@ period, two state confirmations about 100 ms apart and an authoritative channel
 readback. Start and Resume are default-cancel and include scan parameters, step
 count and CSV target. Initial and resumed preflight verifies the identified
 session, selected output OFF, actual voltage range and programmed settings.
-Each new step remains one serialized set/readback operation. Physical M12/M13
-scan acceptance remains pending even though the guarded controls are enabled.
+Each new step remains one serialized set/readback operation. Existing scheduled
+samples also feed a queue-free per-point reduction after settling; bounded I-V
+and optional j-V plots consume those results without backend access. Revised
+physical Staircase LSV acceptance remains pending; M13 retains its prior
+accepted behavior.
 
 The connection controller defaults to Simulation Mode. Real Hardware selection
 requires a warning acknowledgement and a manually typed `COM<N>` name; neither

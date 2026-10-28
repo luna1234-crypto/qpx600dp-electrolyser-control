@@ -16,10 +16,12 @@ import pytest
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
 from qpx_electrolyser.engine.constant_current import ProtocolState
 from qpx_electrolyser.engine.stepped_scan import (
+    StaircaseLsvPoint,
     VoltageScanController,
     generate_inclusive_setpoints,
 )
 from qpx_electrolyser.gui.main_window import MainWindow
+from qpx_electrolyser.gui.plots.lsv import BoundedLsvSeries, LsvPlotPoint
 from qpx_electrolyser.gui.voltage_scan_panel import VoltageScanPanel
 from qpx_electrolyser.instrument.simulator import SimulatedPowerSupply
 from qpx_electrolyser.instrument.simulator_config import SimulatorConfig
@@ -111,8 +113,11 @@ def start_scan(
     interval: str = "0.1",
     logging_sink=None,  # type: ignore[no-untyped-def]
 ) -> bool:
+    step_mv = Decimal(step) * Decimal("1000")
+    rate = abs(step_mv) / Decimal(dwell)
     return controller.start(
-        start, stop, step, "0.1", dwell, interval, "60 V", directory,
+        start, stop, str(step_mv), str(rate), "0.1", "0", "1", interval,
+        "60 V", directory,
         logging_sink=logging_sink,
     )
 
@@ -133,6 +138,66 @@ def test_exact_inclusive_setpoint_generation_has_no_drift_or_overshoot() -> None
         Decimal(value) for value in ("1", "0.7", "0.4", "0.1", "0")
     )
     assert generate_inclusive_setpoints("2", "2", "0.1") == (Decimal("2"),)
+
+
+def test_decimal_lsv_timing_grid_and_sample_capacity(qapp: QApplication) -> None:
+    connection, _backend = connected(qapp)
+    scan = VoltageScanController(1, connection)
+    try:
+        config = scan._validate_scan_config(  # noqa: SLF001 - focused validation contract
+            "1", "2", "125", "50", "0.1", "0.5", "3", "0.5", "60 V", "2"
+        )
+        assert Decimal(str(config.dwell_s)) == Decimal("2.5")
+        assert config.setpoints == tuple(float(value) for value in (
+            Decimal("1"), Decimal("1.125"), Decimal("1.25"), Decimal("1.375"),
+            Decimal("1.5"), Decimal("1.625"), Decimal("1.75"), Decimal("1.875"),
+            Decimal("2"),
+        ))
+        assert config.active_area_cm2 == 2.0
+    finally:
+        assert connection.shutdown(1)
+
+
+@pytest.mark.parametrize(
+    ("step_mv", "rate", "settling", "measurements", "interval", "message"),
+    [
+        ("-500", "500", "0", "1", "0.25", "positive for an ascending"),
+        ("500", "0", "0", "1", "0.25", "Scan rate must be positive"),
+        ("500", "500", "1.1", "1", "0.25", "fit inside"),
+        ("500", "500", "0", "0", "0.25", "positive integer"),
+        ("500", "500", "0.75", "2", "0.25", "fewer than"),
+        ("0.5", "500", "0", "1", "0.0001", "increments"),
+    ],
+)
+def test_lsv_rejects_invalid_sign_rate_settling_capacity_and_mv_grid(
+    qapp: QApplication,
+    step_mv: str,
+    rate: str,
+    settling: str,
+    measurements: str,
+    interval: str,
+    message: str,
+) -> None:
+    connection, backend = connected(qapp)
+    scan = VoltageScanController(1, connection)
+    try:
+        error = scan.validate_inputs(
+            "1", "2", step_mv, rate, "0.1", settling, measurements,
+            interval, "60 V",
+        )
+        assert error is not None and message.lower() in error.lower()
+        assert backend.calls == []
+    finally:
+        assert connection.shutdown(1)
+
+
+def test_bounded_lsv_plot_retains_latest_iv_and_jv_values() -> None:
+    series = BoundedLsvSeries(16)
+    for index in range(100):
+        series.append(LsvPlotPoint(index / 10, index / 100, index / 200, index + 1))
+    assert len(series.points) <= 16
+    assert series.total_points == 100
+    assert series.points[-1] == LsvPlotPoint(9.9, 0.99, 0.495, 100)
 
 
 @pytest.mark.parametrize(
@@ -162,8 +227,13 @@ def test_invalid_inputs_precede_file_queue_and_output_mutation(
     connection, backend = connected(qapp)
     scan = VoltageScanController(1, connection)
     try:
+        step_mv = Decimal(step) * Decimal("1000") if step not in {"nan"} else Decimal("NaN")
+        rate = "0" if Decimal(dwell) == 0 else "1"
+        if Decimal(dwell).is_finite() and Decimal(dwell) > 0 and step_mv.is_finite() and step_mv:
+            rate = str(abs(step_mv) / Decimal(dwell))
         assert not scan.start(
-            start, stop, step, current, dwell, interval, "60 V", tmp_path
+            start, stop, str(step_mv), rate, current, "0", "1", interval,
+            "60 V", tmp_path
         )
         assert scan.snapshot.state is ProtocolState.FAILED
         assert backend.calls == []
@@ -206,13 +276,62 @@ def test_scan_command_order_steps_csv_and_safe_completion(
         assert {call[1] for call in backend.calls} == {1}
         assert {call[3] for call in backend.calls} == {"InstrumentCommandWorker"}
         data = rows(scan.snapshot.file_path)  # type: ignore[arg-type]
-        scan_rows = [row for row in data if row["scan_name"] == "voltage_scan"]
+        scan_rows = [row for row in data if row["scan_name"] == "staircase_lsv"]
         assert scan_rows
         assert {int(row["scan_total_steps"]) for row in scan_rows} == {len(expected)}
         assert {float(row["scan_commanded_setpoint"]) for row in scan_rows} == set(expected)
         indices = [int(row["scan_step_index"]) for row in scan_rows]
         assert indices == sorted(indices)
         assert scan.snapshot.output_enabled is False
+    finally:
+        assert connection.shutdown(1)
+
+
+def test_lsv_settling_exclusion_averaging_density_csv_and_no_extra_polling(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, backend = connected(qapp)
+    scan = VoltageScanController(1, connection)
+    raw: list[object] = []
+    points: list[StaircaseLsvPoint] = []
+    scan.sample_received.connect(raw.append)
+    scan.point_result_received.connect(points.append)
+    try:
+        assert scan.start(
+            "2", "2", "500", "1250", "0.5", "0.15", "2", "0.1",
+            "60 V", tmp_path, active_area_cm2="2",
+        )
+        wait_until(qapp, lambda: scan.snapshot.state is ProtocolState.COMPLETED)
+        assert len(points) == 1 and points[0].valid
+        # Samples occur at 0.1, 0.2 and 0.3 seconds; only the latter two are
+        # eligible after 0.15 s, and no measurement was requested for plotting.
+        scheduled = raw[-4:-1] if len(raw) >= 4 else raw[-3:]
+        eligible = scheduled[-2:]
+        assert points[0].mean_voltage_v == pytest.approx(
+            sum(item.measured_voltage_v for item in eligible) / 2  # type: ignore[attr-defined]
+        )
+        assert points[0].mean_current_a == pytest.approx(
+            sum(item.measured_current_a for item in eligible) / 2  # type: ignore[attr-defined]
+        )
+        assert points[0].mean_current_density_a_cm2 == pytest.approx(
+            points[0].mean_current_a / 2  # type: ignore[operator]
+        )
+        data = rows(scan.snapshot.file_path)  # type: ignore[arg-type]
+        result_rows = [row for row in data if row["sample_status"] == "lsv_point"]
+        assert len(result_rows) == 1
+        result = result_rows[0]
+        assert result["scan_rate_mv_per_s"] == "1250"
+        assert result["scan_step_mv"] == "500"
+        assert result["scan_step_duration_s"] == "0.4"
+        assert result["scan_settling_time_s"] == "0.15"
+        assert result["scan_measurements_per_point"] == "2"
+        assert result["active_area_cm2"] == "2"
+        assert result["scan_point_valid"] == "true"
+        assert result["scan_point_result_index"] == "1"
+        assert result["measured_current_density_a_cm2"]
+        # One start readback, three scheduled raw samples and one cleanup
+        # readback use read_voltage; the representative point adds none.
+        assert [call[0] for call in backend.calls].count("read_voltage") == 5
     finally:
         assert connection.shutdown(1)
 
@@ -307,8 +426,10 @@ def test_gui_reuses_one_logger_plot_flow_and_enables_guarded_real_hardware_panel
         panel = window.voltage_scan_panels[1]
         panel.start_voltage_input.setText("1")
         panel.stop_voltage_input.setText("1.5")
-        panel.step_input.setText("0.5")
-        panel.dwell_input.setText("0.2")
+        panel.step_input.setText("500")
+        panel.scan_rate_input.setText("2500")
+        panel.settling_input.setText("0")
+        panel.measurements_input.setText("1")
         panel.interval_input.setText("0.1")
         panel.start_button.click()
         scan = window.voltage_scan_controllers[1]
@@ -319,12 +440,12 @@ def test_gui_reuses_one_logger_plot_flow_and_enables_guarded_real_hardware_panel
         assert len(list(tmp_path.glob("qpx600dp_ch1_*.csv"))) == 1
         window.logging_controllers[1].stop("scan integration test complete")
         data = rows(log_path)  # type: ignore[arg-type]
-        assert any(row["scan_name"] == "voltage_scan" for row in data)
+        assert any(row["scan_name"] == "staircase_lsv" for row in data)
 
         isolated_panel = VoltageScanPanel(1)
         isolated_panel.set_context(available=True, simulation_mode=False)
         assert isolated_panel.start_button.isEnabled()
-        assert "physical acceptance pending" in isolated_panel.message_label.text()
+        assert "acceptance pending" in isolated_panel.message_label.text()
     finally:
         window.close()
         qapp.processEvents()

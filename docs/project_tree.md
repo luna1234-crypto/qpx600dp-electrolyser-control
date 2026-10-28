@@ -34,6 +34,7 @@ QPX 600 DP/
         gui/
             plots/
                 __init__.py
+                lsv.py
                 realtime.py
             test_setup/
                 __init__.py

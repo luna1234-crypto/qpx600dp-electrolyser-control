@@ -1,164 +1,76 @@
-# Milestone 12 verification - automatic stepped Voltage Scan
+# Milestone 12 verification - Voltage Sweep / Staircase LSV
 
-Date: 2026-10-14
+Date: 2026-10-28
 
-## Accepted scope
+## Implemented scope
 
-Milestone 12 implements independent CH1 and CH2 automatic stepped Voltage Scan.
-Simulation Mode and supervised CH1/CH2 resistor-load operation are accepted. A
-guarded Real Hardware follow-up was fake-serial tested before supervised use. No
-COM port was enumerated, opened or probed; Test Bridge, `hardware_check`,
-diagnostic tools and the physical QPX600DP were not used for the follow-up.
+CH1 and CH2 share the existing axis-neutral `SteppedScanController`. The
+voltage adapter now implements a Voltage Sweep / Staircase LSV with start/end
+voltage, signed step in mV, positive scan rate in mV/s, current limit, settling
+time, measurements per point, sampling/logging interval and optional active
+area. Milestone 13's current-axis adapter is unchanged.
 
-Each panel accepts start voltage, stop voltage, signed voltage step, current
-limit, dwell time per step and sample interval. It displays protocol state,
-current/total step, commanded setpoint, active elapsed/remaining time, latest
-measurements, output state, missed samples and operator status.
+All planning uses `Decimal`. Step duration is exactly
+`abs(step_mV) / scan_rate_mV_per_s`; the signed step must follow scan direction.
+Inclusive non-divisible endpoints are appended once without overshoot. Start,
+end and step are checked against the selected QPX600DP programming grid before
+channel ownership, file creation or a queued mutation.
 
-## Reusable scan core
+Scheduled samples occur at interval multiples strictly before the step
+boundary. Samples whose active step elapsed time is less than settling time are
+retained as ordinary CSV rows but excluded from the representative point. The
+configuration is rejected unless it can provide the requested number of
+post-settling samples. At each boundary the most recent requested valid samples
+are averaged into one representative mean voltage/current point. If active area
+is supplied, mean current density is `mean_current / active_area`. A runtime
+shortfall records an invalid point and fails through existing safe cleanup; it
+never adds a compensating backend poll.
 
-`SteppedScanController` extends the established Constant Current/Constant
-Voltage controller rather than copying its state machine. It reuses:
+## Plot and CSV data flow
 
-- `IDLE`, `STARTING`, `RUNNING`, `PAUSING`, `PAUSED`, `RESUMING`, `STOPPING`,
-  `COMPLETED` and `FAILED` ownership states;
-- the one shared serialized command worker and per-channel cancellation keys;
-- guarded settings application/read-back and exactly-one output lifetime;
-- Pause/Resume active-time accounting and bounded Output-Off cleanup;
-- single-writer CSV ownership and existing sample signals for plots/manual state;
-- disconnect and application-shutdown coordination.
+Existing voltage/current time plots remain fed by the scheduled sample signal.
+Representative points feed a separate bounded I-V display, plus j-V when active
+area is valid. Neither plot can access the backend.
 
-The reusable controller accepts a scan axis. Milestone 12 supplies the voltage
-axis; Milestone 13 can supply a current axis without copying dwell, step,
-ownership, logging or cleanup behavior.
+The existing CSV column order remains intact. New fields are appended for scan
+rate, signed mV step, derived duration, settling time, measurements per point,
+measured current density, point validity and point-result index. The previously
+appended active-area field is reused. Ordinary raw rows retain the scan timing
+metadata; one `lsv_point` row records each representative result. Older rows and
+readers remain backward-readable because new fields are trailing and blank when
+not applicable.
 
-## Setpoint and timing behavior
+## Safety and acceptance status
 
-Setpoints are planned with `Decimal` arithmetic before ownership, file creation
-or queue submission. Positive steps are required for ascending scans and
-negative steps for descending scans. Zero and wrong-direction steps are
-rejected. The stop value is included once; when a step does not divide the span,
-the exact stop is appended without overshoot. Every planned voltage and the
-fixed current limit must satisfy the selected QPX600DP voltage range,
-programming grids, conservative power envelope and existing project policy.
+Initial settings, exactly-once Output On/Off, one `*OPC?`, the query-free
+one-second Real Hardware transition settle, two state confirmations,
+authoritative readback, session-generation checks and one priority cleanup
+attempt remain inherited from the accepted Milestone 11 mechanism. Each later
+voltage remains one serialized set/readback operation. Pause freezes active
+time; Resume continues the same point and CSV without duplicate or skipped
+steps. CH1/CH2 ownership and shared-queue serialization are unchanged.
 
-The initial queued transaction confirms selected output OFF, writes initial
-voltage and current limit, and verifies both. A fresh preflight then enables the
-simulated output once. Sampling uses monotonic active time with one pending poll
-maximum. At each dwell boundary, timing is frozen while one atomic worker action
-sets the next voltage and obtains authoritative read-back. The next dwell begins
-only after verification, so queue latency does not consume it. Late sampling
-slots increment the missed count and are never replayed in a burst.
+The earlier stepped-voltage implementation passed supervised CH1/CH2 100-ohm
+functional acceptance. That result does not accept the revised Staircase LSV
+timing, settling, averaging or I-V/j-V workflow. A new supervised 100-ohm
+physical acceptance is pending. This release is accepted only through
+Simulation Mode and fake-serial safety tests; it does not approve electrolyser
+or unattended operation.
 
-Pause cancels a pending sample, confirms selected output OFF and freezes active
-time. Resume verifies the current step and continues its remaining dwell; it
-does not advance, duplicate or skip a step. Stop, normal completion, scan/write
-failure, logging failure, disconnect and shutdown use the existing channel-local
-cleanup. The other channel is untouched unless the shared connection fails.
+## Verification
 
-## CSV and plot compatibility
+Automated coverage includes ascending/descending and non-divisible planning,
+Decimal timing, programming-grid rejection, invalid sign/rate/settling/sample
+capacity, settling exclusion, representative averaging/current density,
+Pause/Resume step continuity, bounded I-V/j-V storage, append-only CSV fields,
+simultaneous CH1/CH2 operation, no plot polling, Milestone 13 regressions and
+guarded fake-serial ordering/cleanup.
 
-A scan creates one exclusive channel CSV when no logger is active or appends to
-the already-active same-channel logger. Pause/Resume retains the same writer;
-completion does not stop an operator-owned logger. Four columns are appended to
-the existing schema:
+The automated smoke runs simultaneous CH1/CH2 Staircase LSV scans in Simulation
+Mode, reuses active channel loggers, checks inclusive completion and final OFF,
+then continues through the unchanged Current Scan smoke and clean shutdown.
+Manual inputs and observations are listed in `tests/manual_smoke_test.md`.
 
-1. `scan_name`
-2. `scan_step_index`
-3. `scan_total_steps`
-4. `scan_commanded_setpoint`
-
-They are blank for standalone and Milestone 8–11 rows, preserving the earlier
-columns and backward readability. Scan samples and verified step readbacks feed
-the existing plot signal. Plotting performs no queue submission or additional
-backend poll.
-
-## Automated evidence
-
-Focused simulator/fake-backend and regression tests cover:
-
-- exact ascending, descending, decimal and non-divisible endpoint planning;
-- invalid, non-finite, zero and wrong-direction inputs;
-- capability, range, power, current, dwell and interval validation;
-- exact initial command order, one Output On/Off lifetime and worker-thread use;
-- ordered step application without duplicates or omissions;
-- monotonic dwell/sample scheduling and missed-slot counting;
-- Pause/Resume during dwell and at a step boundary;
-- Stop, completion, step failure, logging failure, coordinated disconnect and
-  shutdown cleanup;
-- duplicate starts/stops and stale callback rejection;
-- CH1/CH2 isolation and simultaneous queue serialization;
-- one writer per channel, active-logger reuse, CSV continuity and scan columns;
-- plot reuse without a separate polling path;
-- guarded Real Hardware confirmation, command ordering, failure and cleanup.
-
-The automated Simulation Mode application smoke connects the simulator, keeps
-both standalone loggers active, completes simultaneous CH1/CH2 Constant Current,
-Constant Voltage and Voltage Scan runs, verifies CSV reuse and inclusive scan
-completion, exercises both plots, disconnects and exits without residual worker
-or QThread warnings.
-
-Validation results:
-
-- focused Milestone 12/13 and guarded fake-serial scan suite: **57 passed**;
-- full pytest suite: **437 passed**;
-- `compileall`: **passed**;
-- `pip check`: **no broken requirements**;
-- automated Simulation Mode smoke including simultaneous CH1/CH2 scans:
-  **passed**;
-- `git diff --check`: **passed**.
-
-The Windows manual procedure is documented in
-[`tests/manual_smoke_test.md`](../../tests/manual_smoke_test.md). Final operator
-acceptance was performed after the committed GUI was launched in Simulation
-Mode.
-
-## Manual Windows Simulation Mode acceptance
-
-Manual operator acceptance passed on 2026-10-14. CH1 completed an ascending
-`1.0 -> 1.5 -> 2.0 V` scan while CH2 simultaneously completed a descending,
-non-divisible `2.0 -> 1.6 -> 1.2 -> 1.0 V` scan. The channels remained isolated.
-Each used an independent 3-second dwell and 0.25-second sampling interval.
-
-For this Simulation Mode acceptance only, the current limit was 3.50 A. Under
-the documented simulator load curve, that limit permits the simulated load to
-reach 2.0 V without entering current-limit operation, so measured voltage
-matched every commanded scan setpoint. This 3.50 A value is not approved or
-recommended for physical hardware.
-
-Pause/Resume completed without a skipped or duplicated step, and paused time
-was excluded from active timing. CSV step metadata, real-time plots, normal
-completion and final simulated Output Off all passed. Real Hardware Voltage
-Scan physical acceptance is recorded below.
-
-## Guarded Real Hardware follow-up
-
-Voltage Scan Start and Resume now require a detailed default-cancel operator
-confirmation naming the channel, scan limits and step, current limit, dwell,
-interval, step count, one Output-On attempt and CSV destination. The controller
-requires the active session to identify as QPX600DP, confirms the selected output
-OFF, verifies the actual voltage range, applies and reads back initial settings,
-then uses the accepted Milestone 11 transition unchanged: one `OP<N> 1`, one
-`*OPC?`, a query-free non-blocking 1.0-second settle, two `OP<N>?` confirmations
-about 100 ms apart and one authoritative channel readback.
-
-Every later voltage is applied and fully read back as one shared-queue action
-before its dwell starts. Pause, Resume, Stop, completion, failure, disconnect,
-logging failure and shutdown retain the inherited exactly-once priority
-Output-Off cleanup, session-generation guards and CSV continuity. There is no
-automatic retry or reconnect and no command targets the other channel. Fake
-serial tests cover cancellation without commands, exact order, readback and
-communication failures, Pause/Resume, duplicate-action rejection, cleanup and
-simultaneous CH1/CH2 operation. Supervised 100-ohm acceptance is recorded below.
-
-## Supervised Real Hardware acceptance
-
-Supervised functional acceptance passed on 2026-10-27. CH1 and CH2 each
-completed Voltage Scan with the verified 100-ohm load. Pause/Resume, early Stop
-and natural completion passed. The commanded step sequence, CSV scan metadata
-and real-time plots were correct, with no skipped or duplicated step. Channel
-isolation passed, and both the physical indicators and GUI reported both outputs
-OFF at the end.
-
-This is resistor-load functional acceptance. Low-current readings were not
-evaluated as metrology calibration evidence.
+Final offline validation: focused LSV/CSV/fake-serial/M13 tests **83 passed**;
+full pytest **462 passed**; `compileall`, `pip check`, simultaneous Simulation
+Mode smoke and `git diff --check` passed with clean worker/QThread shutdown.

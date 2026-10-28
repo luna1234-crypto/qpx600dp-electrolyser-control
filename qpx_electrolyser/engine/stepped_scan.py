@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 import math
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Slot
+from PySide6.QtCore import QObject, Signal, Slot
 
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
 from qpx_electrolyser.data.csv_logging import CsvLogFile, ProtocolLogSink
@@ -99,6 +99,10 @@ class SteppedScanConfig:
     current_input_mode: str = ""
     active_area_cm2: float | None = None
     current_density_setpoints_a_cm2: tuple[float, ...] = ()
+    scan_step_mv: float | None = None
+    scan_rate_mv_per_s: float | None = None
+    settling_time_s: float = 0.0
+    measurements_per_point: int = 0
 
     @property
     def duration_s(self) -> float:
@@ -497,8 +501,24 @@ class SteppedScanController(ConstantCurrentController):
         ) + 1
 
 
+@dataclass(frozen=True, slots=True)
+class StaircaseLsvPoint:
+    """One representative, queue-free result derived from scheduled samples."""
+
+    channel: int
+    point_index: int
+    total_points: int
+    commanded_voltage_v: float
+    mean_voltage_v: float | None
+    mean_current_a: float | None
+    mean_current_density_a_cm2: float | None
+    valid: bool
+
+
 class VoltageScanController(SteppedScanController):
-    """Milestone 12 Simulation Mode stepped-voltage scan."""
+    """Milestone 12 Voltage Sweep / Staircase LSV controller."""
+
+    point_result_received = Signal(object)
 
     def __init__(
         self,
@@ -521,16 +541,21 @@ class VoltageScanController(SteppedScanController):
             utc_now=utc_now,
             writer_factory=writer_factory,
         )
+        self._point_samples: list[ChannelReadback] = []
+        self._point_metadata: dict[str, object] | None = None
 
     def validate_inputs(
         self,
         start_voltage: str,
         stop_voltage: str,
-        voltage_step: str,
+        voltage_step_mv: str,
+        scan_rate_mv_per_s: str,
         current_limit: str,
-        dwell: str,
+        settling_time: str,
+        measurements_per_point: str,
         interval: str,
         voltage_range_name: str | None,
+        active_area_cm2: str = "",
     ) -> str | None:
         session_error = self._validate_scan_session(voltage_range_name)
         if session_error is not None:
@@ -539,11 +564,14 @@ class VoltageScanController(SteppedScanController):
             self._validate_scan_config(
                 start_voltage,
                 stop_voltage,
-                voltage_step,
+                voltage_step_mv,
+                scan_rate_mv_per_s,
                 current_limit,
-                dwell,
+                settling_time,
+                measurements_per_point,
                 interval,
                 voltage_range_name,
+                active_area_cm2,
             )
         except (ValueError, InstrumentValueError) as error:
             return str(error)
@@ -553,26 +581,32 @@ class VoltageScanController(SteppedScanController):
         self,
         start_voltage: str,
         stop_voltage: str,
-        voltage_step: str,
+        voltage_step_mv: str,
+        scan_rate_mv_per_s: str,
         current_limit: str,
-        dwell: str,
+        settling_time: str,
+        measurements_per_point: str,
         interval: str,
         voltage_range_name: str | None,
         directory: Path,
         *,
         logging_sink: ProtocolLogSink | None = None,
         real_hardware_confirmation: str | None = None,
+        active_area_cm2: str = "",
     ) -> bool:
         if self._snapshot.owns_channel:
             return False
         validation_error = self.validate_inputs(
             start_voltage,
             stop_voltage,
-            voltage_step,
+            voltage_step_mv,
+            scan_rate_mv_per_s,
             current_limit,
-            dwell,
+            settling_time,
+            measurements_per_point,
             interval,
             voltage_range_name,
+            active_area_cm2,
         )
         if validation_error is not None:
             return self._reject(validation_error)
@@ -585,34 +619,46 @@ class VoltageScanController(SteppedScanController):
         config = self._validate_scan_config(
             start_voltage,
             stop_voltage,
-            voltage_step,
+            voltage_step_mv,
+            scan_rate_mv_per_s,
             current_limit,
-            dwell,
+            settling_time,
+            measurements_per_point,
             interval,
             voltage_range_name,
+            active_area_cm2,
         )
         self._scan_step_index = 0
+        self._point_samples.clear()
+        self._point_metadata = None
         return self._begin_validated_start(config, directory, logging_sink=logging_sink)
 
     def _validate_scan_config(
         self,
         start_voltage: str,
         stop_voltage: str,
-        voltage_step: str,
+        voltage_step_mv: str,
+        scan_rate_mv_per_s: str,
         current_limit: str,
-        dwell: str,
+        settling_time: str,
+        measurements_per_point: str,
         interval: str,
         voltage_range_name: str,
+        active_area_cm2: str = "",
     ) -> SteppedScanConfig:
         exact_start = _decimal(start_voltage, "Start voltage")
         exact_stop = _decimal(stop_voltage, "Stop voltage")
-        exact_step = _decimal(voltage_step, "Voltage step")
+        exact_step_mv = _decimal(voltage_step_mv, "Voltage step")
+        exact_rate = _decimal(scan_rate_mv_per_s, "Scan rate")
+        exact_step = exact_step_mv / Decimal("1000")
         # Reject unsupported endpoints/step grids before constructing the plan;
         # this also bounds plan size to the selected range's documented grid.
         QPX600DP_CAPABILITIES.validate_voltage(float(exact_start), voltage_range_name)
         QPX600DP_CAPABILITIES.validate_voltage(float(exact_stop), voltage_range_name)
-        if exact_step == 0:
+        if exact_step_mv == 0:
             raise ValueError("Voltage step must not be zero.")
+        if exact_rate <= 0:
+            raise ValueError("Scan rate must be positive.")
         QPX600DP_CAPABILITIES.validate_voltage(abs(float(exact_step)), voltage_range_name)
         exact_setpoints = generate_inclusive_setpoints(
             exact_start, exact_stop, exact_step
@@ -620,7 +666,21 @@ class VoltageScanController(SteppedScanController):
         current = QPX600DP_CAPABILITIES.validate_current(
             self._number(current_limit, "Current limit")
         )
-        dwell_s = self._number(dwell, "Dwell time")
+        exact_duration = abs(exact_step_mv) / exact_rate
+        if not exact_duration.is_finite() or exact_duration <= 0:
+            raise ValueError("Derived step duration must be positive and finite.")
+        dwell_s = float(exact_duration)
+        settling_s = self._number(settling_time, "Settling time")
+        if settling_s < 0:
+            raise ValueError("Settling time must be non-negative.")
+        if settling_s > dwell_s:
+            raise ValueError("Settling time must fit inside the derived step duration.")
+        try:
+            measurements = int(measurements_per_point.strip())
+        except (AttributeError, ValueError) as error:
+            raise ValueError("Measurements per point must be a positive integer.") from error
+        if str(measurements) != measurements_per_point.strip() or measurements <= 0:
+            raise ValueError("Measurements per point must be a positive integer.")
         interval_s = self._number(interval, "Sampling interval")
         limits = (
             self._limits
@@ -633,7 +693,7 @@ class VoltageScanController(SteppedScanController):
             )
         if not 0 < dwell_s <= limits.max_duration_s:
             raise ValueError(
-                f"Dwell time must be positive and no greater than "
+                f"Derived step duration must be positive and no greater than "
                 f"{limits.max_duration_s:g} seconds."
             )
         if not limits.min_interval_s <= interval_s <= limits.max_interval_s:
@@ -642,7 +702,28 @@ class VoltageScanController(SteppedScanController):
                 f"{limits.max_interval_s:g} seconds."
             )
         if interval_s > dwell_s:
-            raise ValueError("Sampling interval cannot be longer than dwell time.")
+            raise ValueError("Sampling interval cannot exceed the derived step duration.")
+        exact_interval = _decimal(interval, "Sampling interval")
+        exact_settling = _decimal(settling_time, "Settling time")
+        available = 0
+        sample_time = exact_interval
+        while sample_time < exact_duration:
+            if sample_time >= exact_settling:
+                available += 1
+            sample_time += exact_interval
+        if available < measurements:
+            raise ValueError(
+                "Step duration, settling time and sampling interval provide only "
+                f"{available} post-settling sample(s), fewer than the requested "
+                f"{measurements}."
+            )
+
+        area: float | None = None
+        if active_area_cm2.strip():
+            exact_area = _decimal(active_area_cm2, "Active area")
+            if exact_area <= 0:
+                raise ValueError("Active area must be positive when supplied.")
+            area = float(exact_area)
 
         setpoints: list[float] = []
         for exact in exact_setpoints:
@@ -676,8 +757,144 @@ class VoltageScanController(SteppedScanController):
             dwell_s=dwell_s,
             interval_s=interval_s,
             voltage_range_name=voltage_range_name,
-            scan_name="voltage_scan",
+            scan_name="staircase_lsv",
+            active_area_cm2=area,
+            scan_step_mv=float(exact_step_mv),
+            scan_rate_mv_per_s=float(exact_rate),
+            settling_time_s=settling_s,
+            measurements_per_point=measurements,
         )
+
+    def _protocol_csv_metadata(self) -> dict[str, object]:
+        metadata = super()._protocol_csv_metadata()
+        config = self._snapshot.config
+        if not isinstance(config, SteppedScanConfig) or config.scan_name != "staircase_lsv":
+            return metadata
+        metadata.update({
+            "scan_rate_mv_per_s": config.scan_rate_mv_per_s,
+            "scan_step_mv": config.scan_step_mv,
+            "scan_step_duration_s": config.dwell_s,
+            "scan_settling_time_s": config.settling_time_s,
+            "scan_measurements_per_point": config.measurements_per_point,
+            "active_area_cm2": config.active_area_cm2,
+        })
+        if self._point_metadata is not None:
+            metadata.update(self._point_metadata)
+        return metadata
+
+    def _command_completed(self, request_id: int, name: str, result: object) -> None:
+        is_sample = (
+            request_id == self._pending_request_id
+            and self._pending_action == "sample"
+            and isinstance(result, ChannelReadback)
+        )
+        sample_step_elapsed = 0.0
+        if is_sample:
+            config = self._snapshot.config
+            if isinstance(config, SteppedScanConfig):
+                sample_step_elapsed = max(
+                    0.0,
+                    self._elapsed_active() - self._scan_step_index * config.dwell_s,
+                )
+        super()._command_completed(request_id, name, result)
+        if is_sample and isinstance(result, ChannelReadback):
+            config = self._snapshot.config
+            if (
+                isinstance(config, SteppedScanConfig)
+                and config.scan_name == "staircase_lsv"
+                and sample_step_elapsed + 1e-12 >= config.settling_time_s
+            ):
+                self._point_samples.append(result)
+
+    @Slot()
+    def _update_clock(self) -> None:
+        """Let the scan boundary finalize the last LSV point before cleanup."""
+        if self._snapshot.state not in {ProtocolState.RUNNING, ProtocolState.PAUSING}:
+            return
+        elapsed = self._elapsed_active()
+        self._publish(replace(
+            self._snapshot,
+            elapsed_active_s=elapsed,
+            remaining_active_s=self._remaining_active(elapsed),
+        ))
+        config = self._snapshot.config
+        if (
+            self._snapshot.state is ProtocolState.RUNNING
+            and isinstance(config, SteppedScanConfig)
+            and elapsed >= config.duration_s
+            and self._pending_request_id is None
+        ):
+            self._sample_timer.start(0)
+
+    def _advance_or_complete(self, config: SteppedScanConfig) -> None:
+        if config.scan_name == "staircase_lsv":
+            try:
+                valid = self._finalize_lsv_point(config)
+            except (OSError, ValueError) as error:
+                self._begin_cleanup(
+                    ProtocolState.FAILED,
+                    f"Protocol CSV write failed: {error}",
+                )
+                return
+            if not valid:
+                self._begin_cleanup(
+                    ProtocolState.FAILED,
+                    "Staircase LSV point had insufficient valid post-settling samples.",
+                )
+                return
+        super()._advance_or_complete(config)
+
+    def _finalize_lsv_point(self, config: SteppedScanConfig) -> bool:
+        selected = self._point_samples[-config.measurements_per_point :]
+        valid = len(selected) == config.measurements_per_point
+        mean_voltage: float | None = None
+        mean_current: float | None = None
+        density: float | None = None
+        summary: ChannelReadback | None = None
+        if valid:
+            mean_voltage = sum(item.measured_voltage_v for item in selected) / len(selected)
+            mean_current = sum(item.measured_current_a for item in selected) / len(selected)
+            if config.active_area_cm2 is not None:
+                density = mean_current / config.active_area_cm2
+            last = selected[-1]
+            summary = ChannelReadback(
+                channel=self._channel,
+                programmed_voltage_v=config.setpoints[self._scan_step_index],
+                current_limit_a=config.fixed_current_a,
+                measured_voltage_v=mean_voltage,
+                measured_current_a=mean_current,
+                voltage_range_name=last.voltage_range_name,
+                output_enabled=last.output_enabled,
+            )
+        point = StaircaseLsvPoint(
+            channel=self._channel,
+            point_index=self._scan_step_index + 1,
+            total_points=len(config.setpoints),
+            commanded_voltage_v=config.setpoints[self._scan_step_index],
+            mean_voltage_v=mean_voltage,
+            mean_current_a=mean_current,
+            mean_current_density_a_cm2=density,
+            valid=valid,
+        )
+        self._point_metadata = {
+            "scan_point_result_index": point.point_index,
+            "scan_point_valid": valid,
+            "measured_current_density_a_cm2": density,
+        }
+        try:
+            self._append(
+                summary,
+                "lsv_point" if valid else "lsv_point_invalid",
+                ProtocolState.RUNNING,
+            )
+        except (OSError, ValueError):
+            self._point_metadata = None
+            self._point_samples.clear()
+            raise
+        self._point_metadata = None
+        self._point_samples.clear()
+        self.point_result_received.emit(point)
+        return valid
 
 
 class CurrentScanController(SteppedScanController):

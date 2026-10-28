@@ -176,9 +176,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 for panel in window.voltage_scan_panels.values():
                     panel.start_voltage_input.setText("1")
                     panel.stop_voltage_input.setText("1.5")
-                    panel.step_input.setText("0.5")
+                    panel.step_input.setText("500")
+                    panel.scan_rate_input.setText("2500")
                     panel.current_limit_input.setText("0.1")
-                    panel.dwell_input.setText("0.2")
+                    panel.settling_input.setText("0")
+                    panel.measurements_input.setText("1")
                     panel.interval_input.setText("0.1")
                     panel.start_button.click()
                 QTimer.singleShot(25, verify_voltage_scan_smoke_test)
@@ -203,6 +205,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         fail_smoke_test("Voltage Scan did not reuse the active channel CSV.")
                     if scan_snapshot.scan_step_index != scan_snapshot.scan_total_steps:
                         fail_smoke_test("Voltage Scan did not reach its inclusive endpoint.")
+                    if window.lsv_plot_controllers[channel].snapshot.total_points != 2:
+                        fail_smoke_test(
+                            "Staircase LSV did not emit one representative point per step."
+                        )
                 for panel in window.current_scan_panels.values():
                     panel.start_current_input.setText("0.1")
                     panel.stop_current_input.setText("0.2")

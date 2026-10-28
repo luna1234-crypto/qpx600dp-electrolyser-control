@@ -2,6 +2,7 @@
 
 from collections import defaultdict, deque
 from collections.abc import Callable
+from decimal import Decimal
 import os
 from pathlib import Path
 import time
@@ -138,8 +139,9 @@ def start_voltage(
     dwell: str = "4",
     confirmation: str | None = REAL_HARDWARE_SCAN_CONFIRMATION,
 ) -> bool:
+    rate = str(Decimal("500") / Decimal(dwell))
     return scan.start(
-        "1", stop, "0.5", "0.1", dwell, "1", "60 V", directory,
+        "1", stop, "500", rate, "0.1", "0", "1", "1", "60 V", directory,
         real_hardware_confirmation=confirmation,
     )
 
@@ -263,7 +265,7 @@ def test_real_scan_step_communication_failure_cleans_once_and_never_retries_on(
     connection, fake = connected_real(qapp)
     scan = VoltageScanController(1, connection)
     try:
-        assert start_voltage(scan, tmp_path, stop="1.5", dwell="1")
+        assert start_voltage(scan, tmp_path, stop="1.5", dwell="2")
         wait_until(qapp, lambda: scan.snapshot.state is ProtocolState.RUNNING)
         fake.fail_next["VRANGE1?"].append(b"malformed\r\n")
         wait_until(qapp, lambda: scan.snapshot.state is ProtocolState.FAILED, 6)
@@ -322,9 +324,11 @@ def test_real_gui_default_cancel_submits_no_scan_command(
         panel = window.voltage_scan_panels[1]
         panel.start_voltage_input.setText("1")
         panel.stop_voltage_input.setText("1.5")
-        panel.step_input.setText("0.5")
+        panel.step_input.setText("500")
+        panel.scan_rate_input.setText("250")
         panel.current_limit_input.setText("0.1")
-        panel.dwell_input.setText("1")
+        panel.settling_input.setText("0")
+        panel.measurements_input.setText("1")
         panel.interval_input.setText("1")
         assert panel.start_button.isEnabled()
         panel.start_button.click()
@@ -332,8 +336,8 @@ def test_real_gui_default_cancel_submits_no_scan_command(
         assert fake.writes == []
         assert window.voltage_scan_controllers[1].snapshot.state is ProtocolState.IDLE
         assert messages and all(text in messages[0] for text in (
-            "Channel: CH1", "Scan type: Voltage Scan", "Start / stop / step",
-            "Current limit", "Dwell / interval", "Total scan steps: 2",
+            "Channel: CH1", "Scan type: Voltage Sweep / Staircase LSV", "Start / end / step",
+            "Current limit", "Settling / measurements / interval", "Total scan steps: 2",
             "Output-On writes for this Start: exactly one", "CSV destination",
         ))
     finally:

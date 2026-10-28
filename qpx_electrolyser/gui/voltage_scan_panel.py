@@ -1,7 +1,9 @@
-"""Per-channel Milestone 12 guarded voltage-scan controls."""
+"""Per-channel Milestone 12 Voltage Sweep / Staircase LSV controls."""
+
+from decimal import Decimal, InvalidOperation
 
 from PySide6.QtCore import Signal, Slot
-from PySide6.QtGui import QDoubleValidator
+from PySide6.QtGui import QDoubleValidator, QIntValidator
 from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
@@ -16,33 +18,44 @@ from qpx_electrolyser.engine.constant_current import ProtocolSnapshot, ProtocolS
 
 
 class VoltageScanPanel(QGroupBox):
-    start_requested = Signal(str, str, str, str, str, str)
+    start_requested = Signal(str, str, str, str, str, str, str, str, str)
     pause_requested = Signal()
     resume_requested = Signal()
     stop_requested = Signal()
 
     def __init__(self, channel: int) -> None:
-        super().__init__(f"Channel {channel} Voltage Scan")
+        super().__init__(f"Channel {channel} Voltage Sweep / Staircase LSV")
         self.channel = channel
         self._available = False
         self._simulation_mode = True
-        self._snapshot = ProtocolSnapshot(channel=channel, message="Voltage Scan idle")
+        self._snapshot = ProtocolSnapshot(channel=channel, message="Staircase LSV idle")
 
         self.start_voltage_input = self._input("2", f"channel{channel}ScanStartVoltage")
         self.stop_voltage_input = self._input("3", f"channel{channel}ScanStopVoltage")
-        self.step_input = self._input("0.5", f"channel{channel}ScanVoltageStep", signed=True)
+        self.step_input = self._input("500", f"channel{channel}ScanVoltageStepMv", signed=True)
+        self.scan_rate_input = self._input("1250", f"channel{channel}ScanRateMvPerSecond")
         self.current_limit_input = self._input("0.1", f"channel{channel}ScanCurrentLimit")
-        self.dwell_input = self._input("1", f"channel{channel}ScanDwell")
-        self.interval_input = self._input("0.25", f"channel{channel}ScanInterval")
+        self.settling_input = self._input("0.1", f"channel{channel}ScanSettling")
+        self.measurements_input = QLineEdit("2")
+        self.measurements_input.setObjectName(f"channel{channel}ScanMeasurementsPerPoint")
+        self.measurements_input.setValidator(QIntValidator(1, 1_000))
+        self.interval_input = self._input("0.1", f"channel{channel}ScanInterval")
+        self.active_area_input = self._input("", f"channel{channel}ScanActiveArea")
+        self.derived_duration_value = QLabel("0.400 s")
+        self.derived_duration_value.setObjectName(f"channel{channel}ScanDerivedDuration")
 
         inputs = QGridLayout()
         labels = (
             ("Start voltage (V):", self.start_voltage_input),
-            ("Stop voltage (V):", self.stop_voltage_input),
-            ("Voltage step (V):", self.step_input),
+            ("End voltage (V):", self.stop_voltage_input),
+            ("Signed step size (mV):", self.step_input),
+            ("Scan rate (mV/s):", self.scan_rate_input),
+            ("Derived step duration:", self.derived_duration_value),
             ("Current limit (A):", self.current_limit_input),
-            ("Dwell per step (s):", self.dwell_input),
+            ("Settling per point (s):", self.settling_input),
+            ("Measurements per point:", self.measurements_input),
             ("Sampling interval (s):", self.interval_input),
+            ("Active area (cm², optional):", self.active_area_input),
         )
         for row, (label, widget) in enumerate(labels):
             inputs.addWidget(QLabel(label), row, 0)
@@ -94,14 +107,30 @@ class VoltageScanPanel(QGroupBox):
             self.start_voltage_input.text(),
             self.stop_voltage_input.text(),
             self.step_input.text(),
+            self.scan_rate_input.text(),
             self.current_limit_input.text(),
-            self.dwell_input.text(),
+            self.settling_input.text(),
+            self.measurements_input.text(),
             self.interval_input.text(),
+            self.active_area_input.text(),
         ))
         self.pause_button.clicked.connect(self.pause_requested)
         self.resume_button.clicked.connect(self.resume_requested)
         self.stop_button.clicked.connect(self.stop_requested)
+        self.step_input.textChanged.connect(self._update_derived_duration)
+        self.scan_rate_input.textChanged.connect(self._update_derived_duration)
         self.apply_snapshot(self._snapshot)
+
+    @Slot()
+    def _update_derived_duration(self) -> None:
+        try:
+            step = Decimal(self.step_input.text().strip())
+            rate = Decimal(self.scan_rate_input.text().strip())
+            if not step.is_finite() or not rate.is_finite() or step == 0 or rate <= 0:
+                raise InvalidOperation
+            self.derived_duration_value.setText(f"{abs(step) / rate:.6f} s")
+        except (InvalidOperation, ValueError):
+            self.derived_duration_value.setText("Invalid")
 
     @staticmethod
     def _input(value: str, object_name: str, *, signed: bool = False) -> QLineEdit:
@@ -154,7 +183,7 @@ class VoltageScanPanel(QGroupBox):
         self.missed_value.setText(str(snapshot.missed_samples))
         if not self._simulation_mode and not snapshot.owns_channel:
             self.message_label.setText(
-                "Guarded Real Hardware Voltage Scan available; physical acceptance pending"
+                "Revised Real Hardware Staircase LSV acceptance pending"
             )
         else:
             self.message_label.setText(snapshot.message)
@@ -169,7 +198,7 @@ class VoltageScanPanel(QGroupBox):
         self._simulation_mode = simulation_mode
         if not simulation_mode and not self._snapshot.owns_channel:
             self.message_label.setText(
-                "Guarded Real Hardware Voltage Scan available; physical acceptance pending"
+                "Revised Real Hardware Staircase LSV acceptance pending"
             )
         self._update_enabled()
 
@@ -187,9 +216,12 @@ class VoltageScanPanel(QGroupBox):
             self.start_voltage_input,
             self.stop_voltage_input,
             self.step_input,
+            self.scan_rate_input,
             self.current_limit_input,
-            self.dwell_input,
+            self.settling_input,
+            self.measurements_input,
             self.interval_input,
+            self.active_area_input,
         ):
             widget.setEnabled(start_ready)
         self.start_button.setEnabled(start_ready)

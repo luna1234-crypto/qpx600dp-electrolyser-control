@@ -45,6 +45,14 @@ CSV_COLUMNS = (
     "current_input_mode",
     "active_area_cm2",
     "commanded_current_density_a_cm2",
+    "scan_rate_mv_per_s",
+    "scan_step_mv",
+    "scan_step_duration_s",
+    "scan_settling_time_s",
+    "scan_measurements_per_point",
+    "measured_current_density_a_cm2",
+    "scan_point_valid",
+    "scan_point_result_index",
 )
 
 
@@ -71,6 +79,14 @@ class CsvWriter(Protocol):
         current_input_mode: str = "",
         active_area_cm2: float | None = None,
         commanded_current_density_a_cm2: float | None = None,
+        scan_rate_mv_per_s: float | None = None,
+        scan_step_mv: float | None = None,
+        scan_step_duration_s: float | None = None,
+        scan_settling_time_s: float | None = None,
+        scan_measurements_per_point: int | None = None,
+        measured_current_density_a_cm2: float | None = None,
+        scan_point_valid: bool | None = None,
+        scan_point_result_index: int | None = None,
     ) -> None: ...
 
     def close(self) -> None: ...
@@ -100,6 +116,14 @@ class ProtocolLogSink(Protocol):
         current_input_mode: str = "",
         active_area_cm2: float | None = None,
         commanded_current_density_a_cm2: float | None = None,
+        scan_rate_mv_per_s: float | None = None,
+        scan_step_mv: float | None = None,
+        scan_step_duration_s: float | None = None,
+        scan_settling_time_s: float | None = None,
+        scan_measurements_per_point: int | None = None,
+        measured_current_density_a_cm2: float | None = None,
+        scan_point_valid: bool | None = None,
+        scan_point_result_index: int | None = None,
     ) -> None: ...
 
     def suspend_sampling(self) -> None: ...
@@ -149,6 +173,14 @@ class CsvLogFile:
         current_input_mode: str = "",
         active_area_cm2: float | None = None,
         commanded_current_density_a_cm2: float | None = None,
+        scan_rate_mv_per_s: float | None = None,
+        scan_step_mv: float | None = None,
+        scan_step_duration_s: float | None = None,
+        scan_settling_time_s: float | None = None,
+        scan_measurements_per_point: int | None = None,
+        measured_current_density_a_cm2: float | None = None,
+        scan_point_valid: bool | None = None,
+        scan_point_result_index: int | None = None,
     ) -> None:
         stream = self._stream
         if stream is None:
@@ -185,6 +217,29 @@ class CsvLogFile:
             "commanded_current_density_a_cm2": (
                 "" if commanded_current_density_a_cm2 is None
                 else f"{commanded_current_density_a_cm2:.12g}"
+            ),
+            "scan_rate_mv_per_s": (
+                "" if scan_rate_mv_per_s is None else f"{scan_rate_mv_per_s:.12g}"
+            ),
+            "scan_step_mv": "" if scan_step_mv is None else f"{scan_step_mv:.12g}",
+            "scan_step_duration_s": (
+                "" if scan_step_duration_s is None else f"{scan_step_duration_s:.12g}"
+            ),
+            "scan_settling_time_s": (
+                "" if scan_settling_time_s is None else f"{scan_settling_time_s:.12g}"
+            ),
+            "scan_measurements_per_point": (
+                "" if scan_measurements_per_point is None else str(scan_measurements_per_point)
+            ),
+            "measured_current_density_a_cm2": (
+                "" if measured_current_density_a_cm2 is None
+                else f"{measured_current_density_a_cm2:.12g}"
+            ),
+            "scan_point_valid": (
+                "" if scan_point_valid is None else ("true" if scan_point_valid else "false")
+            ),
+            "scan_point_result_index": (
+                "" if scan_point_result_index is None else str(scan_point_result_index)
             ),
             "sample_status": status,
             "error": error,
@@ -333,6 +388,14 @@ class ChannelLoggingController(QObject):
         current_input_mode: str = "",
         active_area_cm2: float | None = None,
         commanded_current_density_a_cm2: float | None = None,
+        scan_rate_mv_per_s: float | None = None,
+        scan_step_mv: float | None = None,
+        scan_step_duration_s: float | None = None,
+        scan_settling_time_s: float | None = None,
+        scan_measurements_per_point: int | None = None,
+        measured_current_density_a_cm2: float | None = None,
+        scan_point_valid: bool | None = None,
+        scan_point_result_index: int | None = None,
     ) -> None:
         """Append a protocol row through this logger's one open writer.
 
@@ -363,6 +426,14 @@ class ChannelLoggingController(QObject):
                 current_input_mode=current_input_mode,
                 active_area_cm2=active_area_cm2,
                 commanded_current_density_a_cm2=commanded_current_density_a_cm2,
+                scan_rate_mv_per_s=scan_rate_mv_per_s,
+                scan_step_mv=scan_step_mv,
+                scan_step_duration_s=scan_step_duration_s,
+                scan_settling_time_s=scan_settling_time_s,
+                scan_measurements_per_point=scan_measurements_per_point,
+                measured_current_density_a_cm2=measured_current_density_a_cm2,
+                scan_point_valid=scan_point_valid,
+                scan_point_result_index=scan_point_result_index,
             )
         except (OSError, ValueError) as append_error:
             self._fail_file(append_error)

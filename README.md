@@ -10,8 +10,8 @@ guarded explicit-port hardware connection, Milestone 8 independent CSV logging,
 Milestone 9 independent Constant Current protocols with an offline-tested,
 guarded Real Hardware follow-up, Milestone 10 bounded real-time plots, and
 Milestone 11 independent Constant Voltage protocols with supervised two-channel
-resistor-load acceptance, Milestone 12 independent Simulation Mode stepped
-voltage scans, and Milestone 13 independent Simulation Mode stepped current scans.
+resistor-load acceptance, Milestone 12 independent Voltage Sweep / Staircase LSV,
+and Milestone 13 independent Simulation Mode stepped current scans.
 
 Simulation Mode remains the default. A deliberately selected Real Hardware mode
 accepts only a manually entered COM name and never enumerates ports. The one
@@ -302,41 +302,40 @@ remained correct. Both outputs were physically and authoritatively OFF at the en
 This approves supervised resistor-load operation only; electrolyser use and
 unattended operation remain unapproved.
 
-## Milestone 12 automatic stepped voltage scan
+## Milestone 12 Voltage Sweep / Staircase LSV
 
-CH1 and CH2 each provide an independent Voltage Scan panel with start voltage,
-stop voltage, signed voltage step, current limit, dwell per step and sampling
-interval. Ascending and descending sequences are generated with exact decimal
-arithmetic. The endpoint is included once even when the step does not divide the
-span, without accumulated floating-point drift or endpoint overshoot.
+CH1 and CH2 each provide an independent Voltage Sweep / Staircase LSV panel with
+start/end voltage, signed step in mV, positive scan rate in mV/s, current limit,
+settling time, measurements per point, sample interval and optional active area.
+Exact `Decimal` planning derives each duration as `abs(step_mV)/scan_rate`, checks
+the programming grid before ownership, and includes a non-divisible endpoint
+once without drift or overshoot.
 
 The reusable `SteppedScanController` layers step scheduling on the Milestone
 9–11 state machine. A scan validates every planned point against the selected
 QPX600DP voltage range, programming grids, conservative power envelope and
 existing project limits before taking channel ownership or creating a CSV. It
 then applies and verifies the first point, enables the simulated output once,
-samples through each monotonic dwell, atomically applies and verifies subsequent
+samples through each monotonic derived step duration, atomically applies and verifies subsequent
 points, and finishes through the existing confirmed Output-Off cleanup. Pause
 confirms OFF and freezes active time; Resume verifies the current point and
 continues it without skipping or duplicating a step.
 
 Scans create one channel CSV or reuse an already-active same-channel logger.
-Four optional columns were appended after the existing schema:
-`scan_name`, `scan_step_index`, `scan_total_steps` and
-`scan_commanded_setpoint`. Existing columns and standalone/Milestone 8–11 rows
-remain readable, with the new fields blank when not applicable. Scan readbacks
-feed the existing plots and manual display; plotting submits no additional
-instrument request.
+Raw scheduled samples remain in the backward-readable CSV; pre-settling rows are
+excluded only from the representative point. The requested latest valid samples
+are averaged into one I-V point and, when active area is supplied, one j-V point.
+Trailing fields record timing and result validity/index. Existing time and
+bounded I-V/j-V plots submit no additional instrument request.
 
 Milestone 12 now has a guarded Real Hardware follow-up built on the accepted
 Milestone 11 transition mechanism. Start and Resume require detailed,
 default-cancel authorization; the controller then verifies the identified
 QPX600DP session, selected output OFF, voltage range and setpoint readbacks before
 one Output-On attempt. Every later voltage is queued and verified before dwell.
-Supervised CH1/CH2 acceptance subsequently passed with a verified 100-ohm load,
-including Pause/Resume, Stop, natural completion, step/CSV/plot integrity,
-channel isolation and final physical/GUI Output Off. Low-current observations
-are functional evidence only, not metrology calibration. See
+The earlier stepped-voltage workflow passed supervised CH1/CH2 100-ohm
+acceptance. Revised physical Staircase LSV acceptance is pending a new
+supervised 100-ohm test; this revision is Simulation/fake-serial accepted. See
 [Milestone 12 verification](docs/verification/milestone12.md).
 
 Manual Simulation Mode acceptance passed with simultaneous isolated scans: CH1
@@ -557,7 +556,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent Constant Current protocols | Simulation/fake-serial validated; supervised CH1/CH2 resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Independent live voltage/current plots | Implemented for both channels with bounded display memory and unchanged full CSV data |
 | Independent Constant Voltage protocols | Simulation and guarded fake-serial validation passed; supervised CH1/CH2 100-ohm resistor-load acceptance passed, electrolyser and unattended use unapproved |
-| Independent stepped Voltage Scan | Simulation and supervised CH1/CH2 100-ohm Real Hardware functional acceptance passed |
+| Voltage Sweep / Staircase LSV | Simulation and fake-serial accepted; revised 100-ohm physical acceptance pending |
 | Independent stepped Current Scan | Simulation and supervised CH1/CH2 100-ohm Real Hardware functional acceptance passed; low-current readings are not calibration |
 | Later polarization protocols | Not implemented |
 | Complete configurable safety system | Not implemented |

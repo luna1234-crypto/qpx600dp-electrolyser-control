@@ -1,6 +1,7 @@
 """Compose guarded simulation/real connection and manual channel controls."""
 
 from pathlib import Path
+from decimal import Decimal
 import time
 
 from PySide6.QtCore import QTimer
@@ -46,6 +47,7 @@ from qpx_electrolyser.gui.constant_current_panel import ConstantCurrentPanel
 from qpx_electrolyser.gui.constant_voltage_panel import ConstantVoltagePanel
 from qpx_electrolyser.gui.current_scan_panel import CurrentScanPanel
 from qpx_electrolyser.gui.plots.realtime import ChannelPlotController, ChannelPlotPanel
+from qpx_electrolyser.gui.plots.lsv import LsvPlotController, LsvPlotPanel
 from qpx_electrolyser.gui.voltage_scan_panel import VoltageScanPanel
 
 
@@ -117,12 +119,14 @@ class MainWindow(QMainWindow):
         self.voltage_scan_controllers: dict[int, VoltageScanController] = {}
         self.current_scan_controllers: dict[int, CurrentScanController] = {}
         self.plot_controllers: dict[int, ChannelPlotController] = {}
+        self.lsv_plot_controllers: dict[int, LsvPlotController] = {}
         self.channel_panels: dict[int, ChannelPanel] = {}
         self.protocol_panels: dict[int, ConstantCurrentPanel] = {}
         self.voltage_protocol_panels: dict[int, ConstantVoltagePanel] = {}
         self.voltage_scan_panels: dict[int, VoltageScanPanel] = {}
         self.current_scan_panels: dict[int, CurrentScanPanel] = {}
         self.plot_panels: dict[int, ChannelPlotPanel] = {}
+        self.lsv_plot_panels: dict[int, LsvPlotPanel] = {}
         for channel in (1, 2):
             controller = ManualChannelController(channel, connection_controller, self)
             logging_controller = ChannelLoggingController(channel, connection_controller, self)
@@ -137,12 +141,14 @@ class MainWindow(QMainWindow):
                 channel, connection_controller, self
             )
             plot_controller = ChannelPlotController(channel, connection_controller, self)
+            lsv_plot_controller = LsvPlotController(channel, self)
             panel = ChannelPanel(channel)
             protocol_panel = ConstantCurrentPanel(channel)
             voltage_protocol_panel = ConstantVoltagePanel(channel)
             voltage_scan_panel = VoltageScanPanel(channel)
             current_scan_panel = CurrentScanPanel(channel)
             plot_panel = ChannelPlotPanel(channel)
+            lsv_plot_panel = LsvPlotPanel(channel)
             panel.refresh_requested.connect(controller.request_refresh)
             panel.voltage_requested.connect(controller.request_set_voltage)
             panel.current_requested.connect(controller.request_set_current)
@@ -201,6 +207,9 @@ class MainWindow(QMainWindow):
                 controller.accept_logging_readback
             )
             voltage_scan_controller.sample_received.connect(plot_controller.accept_sample)
+            voltage_scan_controller.point_result_received.connect(lsv_plot_controller.accept_point)
+            lsv_plot_controller.snapshot_changed.connect(lsv_plot_panel.apply_snapshot)
+            lsv_plot_panel.clear_requested.connect(lsv_plot_controller.reset)
             current_scan_controller.snapshot_changed.connect(
                 current_scan_panel.apply_snapshot
             )
@@ -247,9 +256,11 @@ class MainWindow(QMainWindow):
                 voltage_protocol_controller.stop
             )
             voltage_scan_panel.start_requested.connect(
-                lambda start, stop, step, current, dwell, interval,
+                lambda start, stop, step, rate, current, settling, measurements,
+                interval, area,
                 selected_channel=channel: self._start_voltage_scan(
-                    selected_channel, start, stop, step, current, dwell, interval
+                    selected_channel, start, stop, step, rate, current, settling,
+                    measurements, interval, area
                 )
             )
             voltage_scan_panel.pause_requested.connect(voltage_scan_controller.pause)
@@ -282,12 +293,14 @@ class MainWindow(QMainWindow):
             self.voltage_scan_controllers[channel] = voltage_scan_controller
             self.current_scan_controllers[channel] = current_scan_controller
             self.plot_controllers[channel] = plot_controller
+            self.lsv_plot_controllers[channel] = lsv_plot_controller
             self.channel_panels[channel] = panel
             self.protocol_panels[channel] = protocol_panel
             self.voltage_protocol_panels[channel] = voltage_protocol_panel
             self.voltage_scan_panels[channel] = voltage_scan_panel
             self.current_scan_panels[channel] = current_scan_panel
             self.plot_panels[channel] = plot_panel
+            self.lsv_plot_panels[channel] = lsv_plot_panel
             panels.addWidget(panel, 1)
         layout.addLayout(panels)
 
@@ -324,6 +337,12 @@ class MainWindow(QMainWindow):
         for channel in (1, 2):
             plot_panels.addWidget(self.plot_panels[channel], 1)
         layout.addLayout(plot_panels)
+
+        lsv_plot_panels = QHBoxLayout()
+        lsv_plot_panels.setSpacing(18)
+        for channel in (1, 2):
+            lsv_plot_panels.addWidget(self.lsv_plot_panels[channel], 1)
+        layout.addLayout(lsv_plot_panels)
 
         self._disconnect_pending = False
         self._close_pending = False
@@ -614,10 +633,13 @@ class MainWindow(QMainWindow):
         channel: int,
         start_voltage: str,
         stop_voltage: str,
-        voltage_step: str,
+        voltage_step_mv: str,
+        scan_rate_mv_per_s: str,
         current_limit: str,
-        dwell: str,
+        settling_time: str,
+        measurements_per_point: str,
         interval: str,
+        active_area_cm2: str,
     ) -> None:
         if (
             self.protocol_controllers[channel].snapshot.owns_channel
@@ -634,11 +656,14 @@ class MainWindow(QMainWindow):
         validation_error = scan.validate_inputs(
             start_voltage,
             stop_voltage,
-            voltage_step,
+            voltage_step_mv,
+            scan_rate_mv_per_s,
             current_limit,
-            dwell,
+            settling_time,
+            measurements_per_point,
             interval,
             manual.voltage_range_name,
+            active_area_cm2,
         )
         if validation_error is not None:
             self.voltage_scan_panels[channel].show_validation_error(validation_error)
@@ -652,18 +677,20 @@ class MainWindow(QMainWindow):
                 else f"new channel {channel} CSV in {self._data_directory}"
             )
             step_count = len(generate_inclusive_setpoints(
-                start_voltage, stop_voltage, voltage_step
+                start_voltage, stop_voltage, str(Decimal(voltage_step_mv) / Decimal("1000"))
             ))
             answer = QMessageBox.warning(
                 self,
                 f"Confirm REAL HARDWARE Voltage Scan - CH{channel}",
                 "REAL HARDWARE STEPPED-SCAN OUTPUT-ON AUTHORIZATION\n\n"
                 f"Channel: CH{channel}\n"
-                "Scan type: Voltage Scan\n"
-                f"Start / stop / step: {start_voltage} / {stop_voltage} / "
-                f"{voltage_step} V\n"
+                "Scan type: Voltage Sweep / Staircase LSV\n"
+                f"Start / end / step: {start_voltage} / {stop_voltage} / "
+                f"{voltage_step_mv} mV\n"
+                f"Scan rate: {scan_rate_mv_per_s} mV/s\n"
                 f"Current limit: {current_limit} A\n"
-                f"Dwell / interval: {dwell} / {interval} s\n"
+                f"Settling / measurements / interval: {settling_time} / "
+                f"{measurements_per_point} / {interval} s\n"
                 f"Total scan steps: {step_count}\n"
                 "Output-On writes for this Start: exactly one\n"
                 f"Current displayed output state: "
@@ -684,14 +711,17 @@ class MainWindow(QMainWindow):
         if not scan.start(
             start_voltage,
             stop_voltage,
-            voltage_step,
+            voltage_step_mv,
+            scan_rate_mv_per_s,
             current_limit,
-            dwell,
+            settling_time,
+            measurements_per_point,
             interval,
             manual.voltage_range_name,
             self._data_directory,
             logging_sink=logger if logger.snapshot.active else None,
             real_hardware_confirmation=confirmation,
+            active_area_cm2=active_area_cm2,
         ):
             self.voltage_scan_panels[channel].show_validation_error(scan.snapshot.message)
             self.statusBar().showMessage(scan.snapshot.message)
