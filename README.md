@@ -14,7 +14,7 @@ resistor-load acceptance, Milestone 12 independent Voltage Sweep / Staircase LSV
 Milestone 13 stepped current scans, and Milestone 14 steady-state power-supply
 polarisation.
 
-All current implementation and every future Milestone 14–20 target the Aim-TTi
+All current implementation and every future Milestone 15–20 target the Aim-TTi
 QPX600DP. CPX400DP references are retained only as historical context for the
 original Milestone 1–4 records and are not current or future requirements.
 
@@ -232,7 +232,8 @@ Pause/Resume, completion, CSV continuity and final OFF confirmation. The supplie
 CSVs contain a brief 0.189-0.201 A first loaded sample after startup/resume before
 stable readings; electrolyser and unattended use remain unapproved pending its
 assessment and later safety milestones. Milestone 10 adds downstream live plots;
-polarisation and custom-sequence protocols are not implemented. See
+the later M14 polarisation implementation reuses this guarded path, while custom
+sequences remain unimplemented. See
 [Milestone 9 verification](docs/verification/milestone9.md).
 
 ## Milestone 10 responsive real-time plotting
@@ -411,8 +412,23 @@ shows that exact path. Summary rows record mean voltage, population voltage
 standard deviation, mean current/density, sample count, and active-time bounds.
 Partial/stopped steps produce no summary. The bounded polarisation plot shows mean voltage against
 current density without extra polling. This is two-terminal power-supply
-polarisation, not potentiostat control. Simulation/fake-serial validation is
-implemented; supervised physical acceptance remains pending. See the
+polarisation, not potentiostat control. Simulation acceptance and supervised
+100-ohm resistor-load functional acceptance passed on CH1 and CH2. Guarded
+Start, Pause, Resume, natural completion and authoritative Output-Off cleanup
+passed; the raw CSV, exclusive companion summary, completed-step statistics and
+plots remained correct. The Pause/Resume averaging-window defect was fixed and
+then verified on the physical instrument.
+
+A 20-second-per-step CH1 run showed that the remaining approximately 20–40 mA
+low-current deviation was stable rather than a short-dwell artifact. The
+official Test Bridge produced the same result with the same QPX600DP, load and
+settings. The application command path and calculations are therefore accepted
+for supervised resistor-load functionality; the deviation belongs to the
+instrument's low-current regulation/readback or calibration domain. This is not
+quantitative low-current metrology or electrolyser scientific acceptance.
+Formal electrolyser polarisation requires externally verified current
+measurement or a more suitable low-current instrument, and unattended
+electrolyser operation is not approved. See the
 [Milestone 14 verification](docs/verification/milestone14.md).
 
 ## Milestone 5 offline physical backend
@@ -594,8 +610,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent Constant Voltage protocols | Simulation and guarded fake-serial validation passed; supervised CH1/CH2 100-ohm resistor-load acceptance passed, electrolyser and unattended use unapproved |
 | Voltage Sweep / Staircase LSV | Simulation/fake-serial and supervised 100-ohm functional acceptance passed; not metrology or electrolyser approval |
 | Independent stepped Current Scan | Simulation and supervised CH1/CH2 100-ohm Real Hardware functional acceptance passed; low-current readings are not calibration |
-| Steady-State Polarisation | Simulation and fake-serial validation implemented; supervised physical acceptance pending |
-| M14 Polarisation curve | Pending for QPX600DP |
+| Steady-State Polarisation | Simulation and supervised CH1/CH2 100-ohm resistor-load functional acceptance passed; quantitative low-current metrology, electrolyser science and unattended operation remain unapproved |
 | M15 Custom sequence editor | Pending for QPX600DP |
 | M16 Full safety/emergency system | Pending; existing channel cleanup is not global Emergency Off |
 | M17 persistence / M18 UI refinement | Pending for QPX600DP |

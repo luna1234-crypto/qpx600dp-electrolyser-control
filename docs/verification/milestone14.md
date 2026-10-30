@@ -49,6 +49,8 @@ data are unchanged.
 
 ## Validation status
 
+### Simulation acceptance
+
 - Decimal ascending, descending and inclusive non-divisible planning;
 - density/area conversion and derived-current grid validation;
 - averaging-window capacity/boundaries and population standard deviation;
@@ -61,8 +63,38 @@ data are unchanged.
 - fake-serial exact guarded start/cleanup order and channel isolation;
 - simultaneous Simulation Mode automated smoke and clean worker shutdown.
 
-Supervised physical polarisation acceptance remains pending. No COM port or real
-instrument was accessed during implementation or automated validation.
+Manual Simulation Mode acceptance passed. Companion
+`*_polarisation_summary.csv` creation, immediate per-step flush, Pause/Resume
+continuity and partial-step exclusion were verified together with raw CSV and
+plot continuity.
+
+### Supervised resistor-load hardware acceptance
+
+Supervised functional acceptance passed independently on CH1 and CH2 using a
+verified 100-ohm resistor load. Guarded Start, Pause, Resume, natural completion
+and authoritative Output-Off cleanup passed. Raw CSV data, the independent
+companion summary CSV, bounded plots and completed-step statistics remained
+consistent. Both selected-channel cleanup and final physical output state were
+confirmed OFF; the unselected channel remained isolated.
+
+The Pause/Resume averaging-window defect described below was fixed and the same
+workflow was subsequently verified on real hardware. A separate CH1 run using
+20 seconds per step showed that the observed low-current deviation remained
+stable and was not caused by insufficient dwell time. The official Aim-TTi Test
+Bridge produced the same result with the same QPX600DP, resistor load and
+settings. This independently supports acceptance of the application's command
+path, active-time scheduling, data reduction and calculations.
+
+The remaining approximately 20–40 mA deviation is assigned to QPX600DP
+low-current regulation/readback behaviour or instrument calibration, not the
+application. This is resistor-load functional acceptance only. It is not
+quantitative low-current metrology, calibration evidence, or electrolyser
+scientific acceptance.
+
+Formal electrolyser polarisation requires externally verified current
+measurement or a more suitable low-current instrument. Unattended electrolyser
+operation is not approved. No instrument serial number is retained in this
+record.
 
 The earlier Real Hardware failure reporting `completed step has no samples in its
 final averaging window` was traced to active time continuing through guarded

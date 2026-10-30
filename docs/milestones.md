@@ -4,7 +4,7 @@
 > CPX400DP assumption. Their claims are intentionally not rewritten as QPX600DP
 > results. The post-Milestone-4 model correction is recorded separately at the
 > end of this file and in `verification/model_correction_qpx600dp.md`.
-> All current implementation and every future Milestone 14–20 target the
+> All current implementation and every future Milestone 15–20 target the
 > QPX600DP. CPX400DP is retained only as historical context for Milestones 1–4.
 
 ## Milestone 1 - Project skeleton
@@ -546,15 +546,32 @@ Rows contain mean voltage, population voltage SD, mean current/density, count
 and active-time bounds; a partial step produces no summary. The bounded mean-voltage versus
 current-density plot consumes those results without polling.
 
-This is power-supply polarisation, not potentiostat control. Simulation and fake
-serial validation are complete; supervised physical acceptance is pending. See
+This is power-supply polarisation, not potentiostat control. Simulation
+acceptance passed, including companion-summary creation and immediate flush,
+Pause/Resume continuity and the exclusion of partial steps. Supervised
+100-ohm resistor-load functional acceptance then passed independently on CH1
+and CH2. Guarded Start, Pause, Resume, natural completion and authoritative
+Output-Off cleanup passed; raw CSV, independent summary CSV, plots and
+completed-step statistics were correct. The Pause/Resume averaging-window
+defect was fixed and subsequently verified on the physical instrument.
+
+A 20-second-per-step CH1 run showed that the approximately 20–40 mA low-current
+deviation was stable and not caused by short dwell time. The official Test
+Bridge reproduced the same result with the same QPX600DP, load and settings.
+The application command path and calculations are accepted for resistor-load
+functionality; the remaining deviation is attributed to QPX600DP low-current
+regulation/readback or instrument calibration. Quantitative low-current
+metrology and electrolyser scientific acceptance remain pending. Formal
+electrolyser polarisation requires an external verified current measurement or
+a more suitable low-current instrument. Unattended electrolyser operation is
+not approved. See
 [verification details](verification/milestone14.md).
 
 ## Milestone 15 - Custom sequence editor
 
 Original roadmap task: edit and execute custom sequences. This milestone is
 pending and will target QPX600DP. Sequence semantics, validation and acceptance
-remain future work; no custom-sequence behavior is claimed by Milestones 1–13.
+remain future work; no custom-sequence behavior is claimed by Milestones 1–14.
 
 ## Milestone 16 - Full safety and emergency system
 
