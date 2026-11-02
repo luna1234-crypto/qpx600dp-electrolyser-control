@@ -64,6 +64,25 @@ plan, a separate Pause/Resume run, and Stop during settling. `compileall`,
 `pip check`, the offscreen Simulation Mode smoke and `git diff --check` passed;
 the worker disconnected cleanly with both simulated outputs OFF.
 
+## Repeated Pause/Resume GUI correction
+
+Manual acceptance exposed a stale availability marker after an energized
+handoff: `sequence_handoff_state=completed` remained in the sequence snapshot
+after the next stage had entered ordinary RUNNING. The panel intentionally
+disables Pause while a handoff is active, so the stale marker incorrectly kept
+Pause disabled after a successful Pause/Resume. The controller now clears the
+handoff marker only when the next stage is activated; the GUI enablement rule
+remains state-derived rather than force-enabled.
+
+Regression coverage performs three Pause/Resume cycles for CH1 and CH2 under
+both Safe-Off and Continuous policies, including a pause near a Continuous
+boundary. It verifies exactly one simulated OFF/ON transition per valid cycle,
+inert early/double requests, unchanged stage and CSV/run identity, active-time
+continuity, channel isolation and authoritative final OFF. The full suite now
+passes 509 tests. The M11 real-hardware 1.0-second settling/Resume gate,
+exactly-once transitions, session/stale-callback rejection and all transition
+policy semantics are unchanged.
+
 ## Automated Simulation acceptance
 
 The acceptance test ran both plans simultaneously:

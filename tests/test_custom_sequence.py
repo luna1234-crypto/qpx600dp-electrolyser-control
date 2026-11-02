@@ -303,6 +303,119 @@ def test_pause_resume_continuous_sequence_uses_guarded_path_and_same_csv(
         controller.shutdown(); assert connection.shutdown(2)
 
 
+@pytest.mark.parametrize("channel", [1, 2])
+@pytest.mark.parametrize("policy", ["safe_off", "continuous"])
+def test_sequence_panel_supports_three_pause_resume_cycles_after_stage_transition(
+    qapp: QApplication,
+    tmp_path: Path,
+    channel: int,
+    policy: str,
+) -> None:
+    connection, backend = connected(qapp)
+    controller = CustomSequenceController(channel, connection)
+    panel = CustomSequencePanel(channel)
+    panel.set_context(available=True, simulation_mode=True)
+    controller.snapshot_changed.connect(panel.apply_snapshot)
+    panel.pause_requested.connect(controller.pause)
+    panel.resume_requested.connect(controller.resume)
+    panel.stop_requested.connect(controller.stop)
+    try:
+        assert controller.start(
+            "repeated pause",
+            (cv_values("1", "0.08", "0.3"), cc_values("0.03", "4", "4")),
+            "60 V",
+            tmp_path,
+            transition_policy=policy,
+            handoff_settling_s="0.05",
+        )
+        wait_until(
+            qapp,
+            lambda: controller.snapshot.stage_index == 2
+            and controller.snapshot.state is ProtocolState.RUNNING,
+        )
+        assert controller.snapshot.handoff_state == ""
+        path = controller.snapshot.file_path
+        stage_index = controller.snapshot.stage_index
+        initial_on = sum(
+            call[0] == "output_on" and call[1] == channel for call in backend.calls
+        )
+        initial_off = sum(
+            call[0] == "output_off" and call[1] == channel for call in backend.calls
+        )
+        for _cycle in range(3):
+            assert panel.pause_button.isEnabled()
+            assert not controller.resume()  # Early Resume while RUNNING is inert.
+            before = len(backend.calls)
+            panel.pause_button.click()
+            controller.pause()  # Repeated Pause while PAUSING/PAUSED is inert.
+            wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.PAUSED)
+            paused_elapsed = controller.snapshot.elapsed_active_s
+            qapp.processEvents()
+            assert controller.snapshot.stage_index == stage_index
+            assert controller.snapshot.file_path == path
+            assert panel.resume_button.isEnabled()
+            panel.resume_button.click()
+            assert not controller.resume()  # Double Resume cannot submit another ON.
+            wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING)
+            assert panel.pause_button.isEnabled()
+            assert controller.snapshot.elapsed_active_s >= paused_elapsed
+            assert len(backend.calls) > before
+        on_count = sum(
+            call[0] == "output_on" and call[1] == channel for call in backend.calls
+        )
+        off_count = sum(
+            call[0] == "output_off" and call[1] == channel for call in backend.calls
+        )
+        assert on_count - initial_on == 3
+        assert off_count - initial_off == 3
+        assert not any(
+            call[0].startswith("output_") and call[1] != channel
+            for call in backend.calls
+        )
+        controller.stop()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
+        rows = read_rows(path)  # type: ignore[arg-type]
+        assert len({row["sequence_run_id"] for row in rows}) == 1
+        assert controller.snapshot.file_path == path
+        assert backend.read_output_state(channel) is False
+    finally:
+        controller.shutdown(); assert connection.shutdown(2)
+
+
+def test_pause_near_continuous_handoff_cannot_leave_stale_gui_state(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, backend = connected(qapp)
+    controller = CustomSequenceController(1, connection)
+    panel = CustomSequencePanel(1)
+    panel.set_context(available=True, simulation_mode=True)
+    controller.snapshot_changed.connect(panel.apply_snapshot)
+    try:
+        assert controller.start(
+            "near handoff",
+            (cv_values("1", "0.08", "0.7"), cc_values("0.03", "4", "1.5")),
+            "60 V", tmp_path,
+            transition_policy="continuous", handoff_settling_s="0.05",
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING)
+        time.sleep(0.55); qapp.processEvents()
+        controller.pause()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.PAUSED)
+        assert controller.resume()
+        wait_until(
+            qapp,
+            lambda: controller.snapshot.stage_index == 2
+            and controller.snapshot.state is ProtocolState.RUNNING,
+        )
+        assert controller.snapshot.handoff_state == ""
+        assert panel.pause_button.isEnabled()
+        controller.stop()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
+        assert backend.read_output_state(1) is False
+    finally:
+        controller.shutdown(); assert connection.shutdown(2)
+
+
 def test_stop_during_continuous_handoff_settling_cleans_up_once(
     qapp: QApplication, tmp_path: Path,
 ) -> None:

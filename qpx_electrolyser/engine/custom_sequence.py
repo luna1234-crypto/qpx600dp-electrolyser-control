@@ -727,6 +727,7 @@ class CustomSequenceController(QObject):
             stage_state=ProtocolState.STARTING.value,
             stage_elapsed_active_s=0.0,
             stage_remaining_active_s=prepared.duration_s,
+            handoff_state="",
             message=f"Starting stage {self._stage_index + 1}/{len(self._prepared)}: "
                     f"{stage.stage_type.label}",
             error=False,
