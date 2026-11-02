@@ -35,7 +35,11 @@ from qpx_electrolyser.engine.constant_voltage import (
     REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION,
 )
 from qpx_electrolyser.engine.current_input import CurrentInputMode, CurrentInputSelection
-from qpx_electrolyser.engine.custom_sequence import CustomSequenceController, SequenceStage
+from qpx_electrolyser.engine.custom_sequence import (
+    CustomSequenceController,
+    REAL_HARDWARE_SEQUENCE_CONFIRMATION,
+    SequenceStage,
+)
 from qpx_electrolyser.engine.polarisation import PolarisationController
 from qpx_electrolyser.engine.stepped_scan import (
     CurrentScanController,
@@ -367,7 +371,10 @@ class MainWindow(QMainWindow):
                 self._start_custom_sequence(selected_channel, name, stages)
             )
             sequence_panel.pause_requested.connect(sequence_controller.pause)
-            sequence_panel.resume_requested.connect(sequence_controller.resume)
+            sequence_panel.resume_requested.connect(
+                lambda selected_channel=channel:
+                self._resume_custom_sequence(selected_channel)
+            )
             sequence_panel.stop_requested.connect(sequence_controller.stop)
             panel.apply_snapshot(controller.snapshot)
             plot_panel.apply_snapshot(plot_controller.snapshot)
@@ -1135,18 +1142,87 @@ class MainWindow(QMainWindow):
             self.sequence_panels[channel].show_validation_error(message)
             self.statusBar().showMessage(message)
             return
-        if not self._connection_controller.snapshot.simulation_mode:
-            message = "Milestone 15 Real Hardware acceptance is pending; Start is disabled."
-            self.sequence_panels[channel].show_validation_error(message)
-            self.statusBar().showMessage(message)
-            return
         manual = self.channel_controllers[channel].snapshot
+        confirmation = None
+        if not self._connection_controller.snapshot.simulation_mode:
+            try:
+                controller.validate_sequence(
+                    sequence_name, stages, manual.voltage_range_name
+                )
+            except ValueError as error:
+                message = str(error)
+                self.sequence_panels[channel].show_validation_error(message)
+                self.statusBar().showMessage(message)
+                return
+            stage_lines = "\n".join(
+                f"{index}. {stage.stage_type.label}: "
+                + ", ".join(f"{key}={value}" for key, value in stage.parameters)
+                for index, stage in enumerate(stages, start=1)
+            )
+            current_states = ", ".join(
+                f"CH{item.channel}={'ON' if item.output_enabled else 'OFF'}"
+                for item in self._connection_controller.snapshot.initial_readbacks
+            )
+            answer = QMessageBox.warning(
+                self,
+                f"Confirm REAL HARDWARE Custom Sequence - CH{channel}",
+                "REAL HARDWARE CUSTOM SEQUENCE OUTPUT AUTHORIZATION\n\n"
+                f"Channel: CH{channel}\n"
+                f"Sequence: {sequence_name.strip()}\n"
+                f"Stages ({len(stages)}):\n{stage_lines}\n\n"
+                f"Displayed output states: {current_states}\n"
+                f"CSV destination: new exclusive CH{channel} run file in "
+                f"{self._data_directory}\n\n"
+                "Start will first run a fresh QPX600DP identity and atomic two-channel "
+                "readback. The selected output must be OFF. Each stage will use its "
+                "existing guarded transition; no Output-On action is retried. Confirm "
+                "the 100-ohm load, limits and complete ordered stage list.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage(
+                    f"CH{channel} Real Hardware Custom Sequence cancelled; no command submitted."
+                )
+                return
+            confirmation = REAL_HARDWARE_SEQUENCE_CONFIRMATION
         if not controller.start(
             sequence_name,
             stages,
             manual.voltage_range_name,
             self._data_directory,
+            real_hardware_confirmation=confirmation,
         ):
+            self.sequence_panels[channel].show_validation_error(controller.snapshot.message)
+            self.statusBar().showMessage(controller.snapshot.message)
+
+    def _resume_custom_sequence(self, channel: int) -> None:
+        controller = self.sequence_controllers[channel]
+        confirmation = None
+        if not self._connection_controller.snapshot.simulation_mode:
+            snapshot = controller.snapshot
+            if not snapshot.resume_ready:
+                return
+            answer = QMessageBox.warning(
+                self,
+                f"Confirm REAL HARDWARE Custom Sequence Resume - CH{channel}",
+                "REAL HARDWARE CUSTOM SEQUENCE RESUME AUTHORIZATION\n\n"
+                f"Channel: CH{channel}\n"
+                f"Sequence: {snapshot.sequence_name}\n"
+                f"Current stage: {snapshot.stage_index}/{snapshot.stage_total} "
+                f"({snapshot.stage_type})\n"
+                "Resume reuses the existing guarded stage preflight and exactly one "
+                "Output-On attempt. It will not restart or skip the stage.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.statusBar().showMessage(
+                    f"CH{channel} Real Hardware Custom Sequence Resume cancelled."
+                )
+                return
+            confirmation = REAL_HARDWARE_SEQUENCE_CONFIRMATION
+        if not controller.resume(confirmation):
             self.sequence_panels[channel].show_validation_error(controller.snapshot.message)
             self.statusBar().showMessage(controller.snapshot.message)
 

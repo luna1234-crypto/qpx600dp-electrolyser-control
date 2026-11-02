@@ -367,7 +367,12 @@ One sequence-owned log sink wraps one raw CSV for the complete channel run.
 Child controllers append through it, avoiding a second writer or polling loop.
 Backward-compatible sequence name, run ID, stage index/total, type and state
 columns are appended. Existing sample and result signals feed the same plots.
-M15 Real Hardware Start remains disabled pending supervised acceptance.
+M15 Real Hardware Start requires a strong default-cancel confirmation. A single
+queued, atomic preflight then freshly identifies the backend and reads both
+channels before any CSV creation or mutation; the selected output must be OFF.
+Session/request generations reject late results. Successful preflight delegates
+each stage to its existing M11–M14 guarded path. Supervised physical acceptance
+remains pending.
 
 Keep immutable hardware capabilities separate from user-configured safety limits.
 `QPX600DP_CAPABILITIES` records 80 V, 50 A and 600 W ratings; none is an

@@ -8,7 +8,7 @@ import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 import pytest
 
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
@@ -69,6 +69,7 @@ class FakeSerial:
         self.voltage = {1: 0.0, 2: 0.0}
         self.current = {1: 0.1, 2: 0.1}
         self.output = {1: False, 2: False}
+        self.identification = b"THURLBY THANDAR,QPX600DP,REDACTED,1.00\r\n"
         self._query = ""
         self.is_open = True
 
@@ -93,7 +94,7 @@ class FakeSerial:
 
     def read_until(self, expected: bytes = b"\n", size: int | None = None) -> bytes:
         command = self._query
-        if command == "*IDN?": return b"THURLBY THANDAR,QPX600DP,REDACTED,1.00\r\n"
+        if command == "*IDN?": return self.identification
         if command == "*OPC?": return b"1\r\n"
         if command.startswith("VRANGE"): return b"1\r\n"
         if command.startswith("OP"):
@@ -354,8 +355,9 @@ def test_sequence_writer_failure_triggers_existing_safe_cleanup(
         controller.shutdown(); assert connection.shutdown(2)
 
 
+@pytest.mark.parametrize("channel", [1, 2])
 def test_fake_serial_sequence_reuses_exact_guarded_transition_order(
-    qapp: QApplication, tmp_path: Path,
+    qapp: QApplication, tmp_path: Path, channel: int,
 ) -> None:
     fake = FakeSerial()
 
@@ -369,7 +371,7 @@ def test_fake_serial_sequence_reuses_exact_guarded_transition_order(
     connection.request_connect()
     wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
     fake.writes.clear()
-    controller = CustomSequenceController(1, connection)
+    controller = CustomSequenceController(channel, connection)
     try:
         stage = SequenceStage.create(
             SequenceStageType.CONSTANT_CURRENT,
@@ -383,14 +385,231 @@ def test_fake_serial_sequence_reuses_exact_guarded_transition_order(
         wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING, 6)
         controller.stop()
         wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED, 6)
-        assert fake.writes.count(b"OP1 1\n") == 1
-        assert fake.writes.count(b"OP1 0\n") == 1
+        expected_preflight = [
+            b"*IDN?\n",
+            b"VRANGE1?\n", b"V1?\n", b"I1?\n", b"V1O?\n", b"I1O?\n", b"OP1?\n",
+            b"VRANGE2?\n", b"V2?\n", b"I2?\n", b"V2O?\n", b"I2O?\n", b"OP2?\n",
+        ]
+        assert fake.writes[:13] == expected_preflight
+        on = f"OP{channel} 1\n".encode()
+        off = f"OP{channel} 0\n".encode()
+        voltage = f"V{channel} 2.000\n".encode()
+        current = f"I{channel} 0.10\n".encode()
+        assert fake.writes.count(on) == 1
+        assert fake.writes.count(off) == 1
         assert fake.writes.count(b"*OPC?\n") == 2
-        assert fake.writes.index(b"V1 2.000\n") < fake.writes.index(b"OP1 1\n")
-        assert fake.writes.index(b"I1 0.10\n") < fake.writes.index(b"OP1 1\n")
+        assert fake.writes.index(voltage) < fake.writes.index(on)
+        assert fake.writes.index(current) < fake.writes.index(on)
         assert fake.output == {1: False, 2: False}
+        other = 2 if channel == 1 else 1
         assert not any(
-            item.startswith((b"V2 ", b"I2 ", b"OP2 ")) for item in fake.writes
+            item.startswith((f"V{other} ".encode(), f"I{other} ".encode(), f"OP{other} ".encode()))
+            for item in fake.writes
         )
+    finally:
+        controller.shutdown(); assert connection.shutdown(2)
+
+
+@pytest.mark.parametrize("channel", [1, 2])
+def test_fresh_preflight_rejects_selected_output_on_without_mutation(
+    qapp: QApplication, tmp_path: Path, channel: int,
+) -> None:
+    fake = FakeSerial()
+
+    def factory(port: str) -> QPX600DPDriver:
+        assert port == "COM11"
+        return QPX600DPDriver(SerialTransport(port, serial_factory=fake.open_with))
+
+    connection = ConnectionController(real_backend_factory=factory)
+    connection.set_simulation_mode(False); connection.set_port_name("COM11")
+    connection.request_connect()
+    wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+    fake.writes.clear()
+    fake.output[channel] = True  # Changes after the GUI's initial connection snapshot.
+    controller = CustomSequenceController(channel, connection)
+    try:
+        stage = SequenceStage.create(
+            SequenceStageType.CONSTANT_CURRENT,
+            current="0.10", voltage="2", duration="2", interval="1",
+            current_input_mode="current", active_area_cm2="1",
+        )
+        assert controller.start(
+            "fresh ON rejection", (stage,), "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_SEQUENCE_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.FAILED)
+        assert "output is ON" in controller.snapshot.message
+        assert not any(
+            item.startswith((b"V1 ", b"I1 ", b"OP1 ", b"V2 ", b"I2 ", b"OP2 "))
+            for item in fake.writes
+        )
+        assert not list(tmp_path.glob("*.csv"))
+    finally:
+        fake.output[channel] = False
+        controller.shutdown(); assert connection.shutdown(2)
+
+
+def test_real_pause_resume_continues_same_stage_with_exact_transitions(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    fake = FakeSerial()
+
+    def factory(port: str) -> QPX600DPDriver:
+        return QPX600DPDriver(SerialTransport(port, serial_factory=fake.open_with))
+
+    connection = ConnectionController(real_backend_factory=factory)
+    connection.set_simulation_mode(False); connection.set_port_name("COM11")
+    connection.request_connect()
+    wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+    fake.writes.clear()
+    controller = CustomSequenceController(1, connection)
+    try:
+        first = SequenceStage.create(
+            SequenceStageType.CONSTANT_CURRENT,
+            current="0.10", voltage="2", duration="10", interval="1",
+            current_input_mode="current", active_area_cm2="1",
+        )
+        second = SequenceStage.create(
+            SequenceStageType.CONSTANT_VOLTAGE,
+            voltage="1.8", current="0.20", duration="2", interval="1",
+        )
+        assert controller.start(
+            "pause resume", (first, second), "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_SEQUENCE_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING, 8)
+        controller.pause()
+        wait_until(
+            qapp,
+            lambda: controller.snapshot.state is ProtocolState.PAUSED
+            and controller.snapshot.resume_ready,
+            8,
+        )
+        assert controller.snapshot.stage_index == 1
+        assert controller.resume(REAL_HARDWARE_SEQUENCE_CONFIRMATION)
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING, 8)
+        assert controller.snapshot.stage_index == 1
+        controller.stop()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED, 8)
+        assert fake.writes.count(b"OP1 1\n") == 2
+        assert fake.writes.count(b"OP1 0\n") == 2
+        assert fake.output == {1: False, 2: False}
+        rows = read_rows(controller.snapshot.file_path)  # type: ignore[arg-type]
+        assert not any(row["sequence_stage_type"] == "constant_voltage" for row in rows)
+    finally:
+        controller.shutdown(); assert connection.shutdown(2)
+
+
+def test_fresh_identity_change_is_rejected_before_file_or_mutation(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    fake = FakeSerial()
+
+    def factory(port: str) -> QPX600DPDriver:
+        return QPX600DPDriver(SerialTransport(port, serial_factory=fake.open_with))
+
+    connection = ConnectionController(real_backend_factory=factory)
+    connection.set_simulation_mode(False); connection.set_port_name("COM11")
+    connection.request_connect()
+    wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+    fake.writes.clear()
+    fake.identification = b"OTHER,NOT-QPX,REDACTED,1.00\r\n"
+    controller = CustomSequenceController(1, connection)
+    stage = SequenceStage.create(
+        SequenceStageType.CONSTANT_CURRENT,
+        current="0.10", voltage="2", duration="2", interval="1",
+        current_input_mode="current", active_area_cm2="1",
+    )
+    try:
+        assert controller.start(
+            "identity", (stage,), "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_SEQUENCE_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.FAILED)
+        assert "not QPX600DP" in controller.snapshot.message
+        assert not any(
+            item.startswith((b"V1 ", b"I1 ", b"OP1 ")) for item in fake.writes
+        )
+        assert not list(tmp_path.glob("*.csv"))
+    finally:
+        controller.shutdown(); assert connection.shutdown(2)
+
+
+def test_real_confirmation_cancel_submits_no_preflight_or_file(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeSerial()
+
+    def factory(port: str) -> QPX600DPDriver:
+        return QPX600DPDriver(SerialTransport(port, serial_factory=fake.open_with))
+
+    connection = ConnectionController(real_backend_factory=factory)
+    connection.set_simulation_mode(False); connection.set_port_name("COM11")
+    window = MainWindow(tmp_path / "application.log", connection, data_directory=tmp_path)
+    window.show(); connection.request_connect()
+    wait_until(
+        qapp,
+        lambda: connection.snapshot.state is ConnectionState.CONNECTED
+        and all(item.snapshot.voltage_range_name for item in window.channel_controllers.values()),
+    )
+    try:
+        panel = window.sequence_panels[1]
+        panel.stage_type.setCurrentIndex(
+            panel.stage_type.findData(SequenceStageType.CONSTANT_CURRENT.value)
+        )
+        panel.field_inputs[2].setText("2")
+        panel.field_inputs[3].setText("1")
+        panel.add_button.click()
+        assert panel.start_button.isEnabled()
+        fake.writes.clear()
+        monkeypatch.setattr(
+            QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Cancel
+        )
+        panel.start_button.click(); qapp.processEvents()
+        assert fake.writes == []
+        assert window.sequence_controllers[1].snapshot.state is ProtocolState.IDLE
+        assert not list(tmp_path.glob("qpx600dp_ch1_*.csv"))
+    finally:
+        window.close(); assert connection.shutdown(2)
+
+
+def test_real_two_stage_transition_advances_once_and_finishes_off(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    fake = FakeSerial()
+
+    def factory(port: str) -> QPX600DPDriver:
+        return QPX600DPDriver(SerialTransport(port, serial_factory=fake.open_with))
+
+    connection = ConnectionController(real_backend_factory=factory)
+    connection.set_simulation_mode(False); connection.set_port_name("COM11")
+    connection.request_connect()
+    wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+    fake.writes.clear()
+    controller = CustomSequenceController(1, connection)
+    first = SequenceStage.create(
+        SequenceStageType.CONSTANT_CURRENT,
+        current="0.10", voltage="2", duration="1", interval="1",
+        current_input_mode="current", active_area_cm2="1",
+    )
+    second = SequenceStage.create(
+        SequenceStageType.CONSTANT_VOLTAGE,
+        voltage="1.8", current="0.20", duration="1", interval="1",
+    )
+    try:
+        assert controller.start(
+            "two stages", (first, second), "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_SEQUENCE_CONFIRMATION,
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED, 15)
+        rows = read_rows(controller.snapshot.file_path)  # type: ignore[arg-type]
+        completed = [
+            row["sequence_stage_type"] for row in rows
+            if row["sample_status"] == "stage_completed"
+        ]
+        assert completed == ["constant_current", "constant_voltage"]
+        assert fake.writes.count(b"OP1 1\n") == 2
+        assert fake.writes.count(b"OP1 0\n") == 2
+        assert fake.output == {1: False, 2: False}
     finally:
         controller.shutdown(); assert connection.shutdown(2)

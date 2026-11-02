@@ -277,7 +277,9 @@ class CustomSequencePanel(QGroupBox):
         self._available = available
         self._simulation_mode = simulation_mode
         if not simulation_mode and not self._snapshot.owns_channel:
-            self.message_label.setText("Milestone 15 Real Hardware acceptance pending; Start disabled.")
+            self.message_label.setText(
+                "Guarded Real Hardware Custom Sequence available; physical acceptance pending."
+            )
         self._update_enabled()
 
     def show_validation_error(self, message: str) -> None:
@@ -294,7 +296,7 @@ class CustomSequencePanel(QGroupBox):
         ):
             widget.setEnabled(editable)
         self.start_button.setEnabled(
-            editable and self._available and self._simulation_mode and bool(self._stages)
+            editable and self._available and bool(self._stages)
         )
         self.pause_button.setEnabled(state is ProtocolState.RUNNING)
         self.resume_button.setEnabled(

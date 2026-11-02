@@ -449,10 +449,14 @@ stale terminal callbacks cannot advance a stage twice.
 
 Automated Simulation acceptance covered the prescribed simultaneous CH1 and
 CH2 plans, CH1 Pause/Resume while CH2 continued, early Stop, CSV stage order
-and final simulated OFF states. Real Hardware M15 acceptance remains pending,
-so M15 Start is disabled outside Simulation Mode. Saved recipes are deferred to
-M17. Electrolyser scientific acceptance and unattended operation remain
-unapproved. See [Milestone 15 verification](docs/verification/milestone15.md).
+and final simulated OFF states. A guarded Real Hardware follow-up now adds a
+strong default-cancel stage-list confirmation and fresh atomic identity plus
+two-channel readback before file creation or mutation, then delegates every
+stage to the accepted M11–M14 transitions. Fake serial verifies both channels,
+exact order, cancellation, rejection and cleanup; supervised physical M15
+acceptance remains pending. Saved recipes are deferred to M17. Electrolyser
+scientific acceptance and unattended operation remain unapproved. See
+[Milestone 15 verification](docs/verification/milestone15.md).
 
 ## Milestone 5 offline physical backend
 
@@ -634,7 +638,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Voltage Sweep / Staircase LSV | Simulation/fake-serial and supervised 100-ohm functional acceptance passed; not metrology or electrolyser approval |
 | Independent stepped Current Scan | Simulation and supervised CH1/CH2 100-ohm Real Hardware functional acceptance passed; low-current readings are not calibration |
 | Steady-State Polarisation | Simulation and supervised CH1/CH2 100-ohm resistor-load functional acceptance passed; quantitative low-current metrology, electrolyser science and unattended operation remain unapproved |
-| M15 Custom sequence editor | Implemented and automatically accepted in Simulation Mode; Real Hardware acceptance pending |
+| M15 Custom sequence editor | Simulation accepted; guarded Real Hardware path fake-serial validated, supervised physical acceptance pending |
 | M16 Full safety/emergency system | Pending; existing channel cleanup is not global Emergency Off |
 | M17 persistence / M18 UI refinement | Pending for QPX600DP |
 | M19 Windows packaging | Pending; no packaged executable is claimed |

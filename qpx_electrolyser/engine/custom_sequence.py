@@ -37,6 +37,9 @@ from qpx_electrolyser.engine.stepped_scan import (
     VoltageScanController,
 )
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback
+from qpx_electrolyser.instrument.channel_readback import read_channel
+from qpx_electrolyser.instrument.connection_worker import CommandPriority
+from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
 
 
 REAL_HARDWARE_SEQUENCE_CONFIRMATION = "RUN-QPX600DP-CUSTOM-SEQUENCE"
@@ -85,6 +88,12 @@ class SequenceStage:
 class _PreparedStage:
     stage: SequenceStage
     duration_s: float
+
+
+@dataclass(frozen=True, slots=True)
+class _SequencePreflight:
+    identification: str
+    readbacks: tuple[ChannelReadback, ChannelReadback]
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +263,9 @@ class CustomSequenceController(QObject):
         self._active_controller = None
         self._active_config = None
         self._real_hardware = False
+        self._pending_request_id: int | None = None
+        self._pending_start: tuple[str, Path, str] | None = None
+        self._action_key = ("custom-sequence", channel, id(self))
         self._wait_started_at = 0.0
         self._wait_before_s = 0.0
         self._wait_timer = QTimer(self)
@@ -292,6 +304,8 @@ class CustomSequenceController(QObject):
             self.polarisation_point_received
         )
         connection.snapshot_changed.connect(self._connection_changed)
+        connection.command_completed.connect(self._command_completed)
+        connection.command_failed.connect(self._command_failed)
 
     @property
     def snapshot(self) -> SequenceSnapshot:
@@ -473,9 +487,51 @@ class CustomSequenceController(QObject):
             ))
             return False
         run_id = uuid4().hex
+        self._prepared = prepared
+        self._stage_index = 0
+        self._completed_active_s = 0.0
+        self._session_id = self._connection.snapshot.session_id
+        self._generation += 1
+        self._handled_terminal_generation = -1
+        self._transition_token += 1
+        self._stop_requested = False
+        self._active_controller = None
+        self._active_config = None
+        self._real_hardware = real_hardware
+        total = sum(item.duration_s for item in prepared)
+        if real_hardware:
+            self._pending_start = (sequence_name.strip(), Path(directory), run_id)
+            self._publish(SequenceSnapshot(
+                channel=self._channel,
+                state=ProtocolState.STARTING,
+                sequence_name=sequence_name.strip(),
+                run_id=run_id,
+                stage_total=len(prepared),
+                remaining_active_s=total,
+                output_enabled=False,
+                message="Running fresh QPX600DP identity and two-channel OFF-state preflight...",
+            ))
+            ticket = self._connection.submit_command(
+                f"ch{self._channel}-custom-sequence-preflight",
+                self._real_preflight_operation,
+                priority=CommandPriority.NORMAL,
+                cancellation_key=self._action_key,
+            )
+            if ticket is None:
+                self._pending_start = None
+                self._finish(
+                    ProtocolState.FAILED,
+                    "Shared command queue rejected Custom Sequence preflight.",
+                )
+                return False
+            self._pending_request_id = ticket.request_id
+            return True
+        return self._begin_sequence(sequence_name.strip(), Path(directory), run_id)
+
+    def _begin_sequence(self, sequence_name: str, directory: Path, run_id: str) -> bool:
         try:
             sink = self._sink_factory(
-                Path(directory), self._channel, sequence_name.strip(), run_id,
+                directory, self._channel, sequence_name, run_id,
                 self._connection.snapshot.session_id,
                 monotonic=self._monotonic,
             )
@@ -486,26 +542,14 @@ class CustomSequenceController(QObject):
                 error=True,
             ))
             return False
-
-        self._prepared = prepared
-        self._stage_index = 0
-        self._completed_active_s = 0.0
-        self._session_id = self._connection.snapshot.session_id
-        self._generation += 1
-        self._handled_terminal_generation = -1
-        self._transition_token += 1
-        self._stop_requested = False
         self._sink = sink
-        self._active_controller = None
-        self._active_config = None
-        self._real_hardware = real_hardware
-        total = sum(item.duration_s for item in prepared)
+        total = sum(item.duration_s for item in self._prepared)
         self._publish(SequenceSnapshot(
             channel=self._channel,
             state=ProtocolState.STARTING,
-            sequence_name=sequence_name.strip(),
+            sequence_name=sequence_name,
             run_id=run_id,
-            stage_total=len(prepared),
+            stage_total=len(self._prepared),
             remaining_active_s=total,
             file_path=sink.file_path,
             output_enabled=False,
@@ -518,6 +562,54 @@ class CustomSequenceController(QObject):
             return False
         self._start_stage(self._transition_token)
         return self._snapshot.owns_channel
+
+    def _real_preflight_operation(self, supply: PowerSupplyInterface) -> _SequencePreflight:
+        return _SequencePreflight(
+            identification=supply.identify(),
+            readbacks=(read_channel(supply, 1), read_channel(supply, 2)),
+        )
+
+    @Slot(int, str, object)
+    def _command_completed(self, request_id: int, _name: str, result: object) -> None:
+        if request_id != self._pending_request_id or self._pending_start is None:
+            return
+        self._pending_request_id = None
+        pending, self._pending_start = self._pending_start, None
+        if (
+            self._connection.snapshot.state is not ConnectionState.CONNECTED
+            or self._connection.snapshot.session_id != self._session_id
+            or not self._snapshot.owns_channel
+        ):
+            self._finish(ProtocolState.FAILED, "Custom Sequence session changed during preflight.")
+            return
+        if not isinstance(result, _SequencePreflight):
+            self._finish(ProtocolState.FAILED, "Custom Sequence preflight returned invalid data.")
+            return
+        parts = [part.strip() for part in result.identification.split(",")]
+        if len(parts) != 4 or parts[1].upper() != "QPX600DP":
+            self._finish(ProtocolState.FAILED, "Custom Sequence preflight identity is not QPX600DP.")
+            return
+        selected = next(item for item in result.readbacks if item.channel == self._channel)
+        if selected.output_enabled:
+            self._finish(
+                ProtocolState.FAILED,
+                f"CH{self._channel} output is ON; Custom Sequence Start refused without mutation.",
+            )
+            return
+        name, directory, run_id = pending
+        self._begin_sequence(name, directory, run_id)
+
+    @Slot(int, str, object)
+    def _command_failed(self, request_id: int, _name: str, error: object) -> None:
+        if request_id != self._pending_request_id:
+            return
+        self._pending_request_id = None
+        self._pending_start = None
+        self._finish(
+            ProtocolState.FAILED,
+            f"Custom Sequence preflight failed: {error}",
+            warning=True,
+        )
 
     def _start_stage(self, token: int) -> None:
         if token != self._transition_token or not self._snapshot.owns_channel:
@@ -851,6 +943,9 @@ class CustomSequenceController(QObject):
     ) -> None:
         self._wait_timer.stop()
         self._clock_timer.stop()
+        self._connection.cancel_commands(self._action_key)
+        self._pending_request_id = None
+        self._pending_start = None
         self._transition_token += 1
         sink, self._sink = self._sink, None
         close_error = None

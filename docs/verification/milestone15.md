@@ -43,15 +43,27 @@ file per channel. A separate early-Stop case confirmed that the next stage was
 not started. Both final simulator output states were OFF. GUI integration also
 confirmed editor operations, correct CH1 targeting and one explicit Start.
 
-Validation completed with 488 pytest tests passing, package compileall passing,
+Validation completed with 495 pytest tests passing, package compileall passing,
 `pip check` passing, the native/offscreen Simulation smoke passing through all
 M9–M15 protocols on both channels, and `git diff --check` passing. The command
 worker shut down cleanly without residual process or QThread warning.
 
 ## Pending acceptance and boundaries
 
-M15 Real Hardware Start is visibly disabled and supervised physical acceptance
-remains pending. No automatic launch, reconnect, retry, resume or subsequent run
-is performed. M16 global emergency behavior and M17 saved recipes are not
+The guarded Real Hardware follow-up enables Start only after a strong,
+default-cancel dialog shows channel and the complete ordered stage list. After
+confirmation, one atomic queued preflight freshly issues identity and complete
+CH1/CH2 readbacks. It rejects a non-QPX600DP identity or selected output ON
+before CSV creation or mutation. Session and request IDs reject stale results.
+Every successful stage still delegates to its M11–M14 exactly-once guarded
+Output transitions and authoritative cleanup; no serial state machine is
+duplicated.
+
+Fake serial covers CH1 and CH2 exact preflight order, cancellation with no
+command, a selected output changing ON after connection, identity change,
+two-stage advancement, Pause/Resume, Stop, writer failure, stale callbacks,
+channel isolation and final OFF. Supervised physical M15 acceptance remains
+pending. No automatic launch, reconnect, retry, restart, resume or subsequent
+run is performed. M16 global emergency behavior and M17 saved recipes are not
 implemented here. This milestone does not approve quantitative electrolyser
 science or unattended electrolyser operation.

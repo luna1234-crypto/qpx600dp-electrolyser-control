@@ -587,9 +587,16 @@ running unless the shared connection fails.
 Automated acceptance ran the requested simultaneous CH1 CC / Wait / CV and CH2
 CV / CC plans, paused/resumed CH1 while CH2 continued, exercised early Stop,
 inspected CSV order/metadata and confirmed both simulated outputs OFF. Real
-Hardware acceptance, saved recipes (M17), global emergency behavior (M16),
-electrolyser scientific acceptance and unattended operation remain pending.
-See [verification details](verification/milestone15.md).
+A guarded Real Hardware follow-up uses a default-cancel confirmation listing
+every stage, then one queued atomic QPX600DP identity and two-channel readback
+before file creation or mutation. Selected output ON, identity mismatch,
+communication failure, stale session or cancellation prevents all writes.
+Successful preflight delegates stages to the accepted M11–M14 transitions.
+CH1/CH2 fake serial covers exact order, Pause/Resume, Stop, stage transitions,
+failure cleanup, isolation and final OFF. Supervised physical acceptance, saved
+recipes (M17), global emergency behavior (M16), electrolyser scientific
+acceptance and unattended operation remain pending. See
+[verification details](verification/milestone15.md).
 
 ## Milestone 16 - Full safety and emergency system
 
