@@ -58,6 +58,12 @@ CSV_COLUMNS = (
     "polarisation_sample_count",
     "polarisation_active_start_s",
     "polarisation_active_end_s",
+    "sequence_name",
+    "sequence_run_id",
+    "sequence_stage_index",
+    "sequence_stage_total",
+    "sequence_stage_type",
+    "sequence_stage_state",
 )
 
 
@@ -97,6 +103,12 @@ class CsvWriter(Protocol):
         polarisation_sample_count: int | None = None,
         polarisation_active_start_s: float | None = None,
         polarisation_active_end_s: float | None = None,
+        sequence_name: str = "",
+        sequence_run_id: str = "",
+        sequence_stage_index: int | None = None,
+        sequence_stage_total: int | None = None,
+        sequence_stage_type: str = "",
+        sequence_stage_state: str = "",
     ) -> None: ...
 
     def close(self) -> None: ...
@@ -139,6 +151,12 @@ class ProtocolLogSink(Protocol):
         polarisation_sample_count: int | None = None,
         polarisation_active_start_s: float | None = None,
         polarisation_active_end_s: float | None = None,
+        sequence_name: str = "",
+        sequence_run_id: str = "",
+        sequence_stage_index: int | None = None,
+        sequence_stage_total: int | None = None,
+        sequence_stage_type: str = "",
+        sequence_stage_state: str = "",
     ) -> None: ...
 
     def suspend_sampling(self) -> None: ...
@@ -201,6 +219,12 @@ class CsvLogFile:
         polarisation_sample_count: int | None = None,
         polarisation_active_start_s: float | None = None,
         polarisation_active_end_s: float | None = None,
+        sequence_name: str = "",
+        sequence_run_id: str = "",
+        sequence_stage_index: int | None = None,
+        sequence_stage_total: int | None = None,
+        sequence_stage_type: str = "",
+        sequence_stage_state: str = "",
     ) -> None:
         stream = self._stream
         if stream is None:
@@ -280,6 +304,16 @@ class CsvLogFile:
                 "" if polarisation_active_end_s is None
                 else f"{polarisation_active_end_s:.12g}"
             ),
+            "sequence_name": sequence_name,
+            "sequence_run_id": sequence_run_id,
+            "sequence_stage_index": (
+                "" if sequence_stage_index is None else str(sequence_stage_index)
+            ),
+            "sequence_stage_total": (
+                "" if sequence_stage_total is None else str(sequence_stage_total)
+            ),
+            "sequence_stage_type": sequence_stage_type,
+            "sequence_stage_state": sequence_stage_state,
             "sample_status": status,
             "error": error,
         }
@@ -440,6 +474,12 @@ class ChannelLoggingController(QObject):
         polarisation_sample_count: int | None = None,
         polarisation_active_start_s: float | None = None,
         polarisation_active_end_s: float | None = None,
+        sequence_name: str = "",
+        sequence_run_id: str = "",
+        sequence_stage_index: int | None = None,
+        sequence_stage_total: int | None = None,
+        sequence_stage_type: str = "",
+        sequence_stage_state: str = "",
     ) -> None:
         """Append a protocol row through this logger's one open writer.
 
@@ -483,6 +523,12 @@ class ChannelLoggingController(QObject):
                 polarisation_sample_count=polarisation_sample_count,
                 polarisation_active_start_s=polarisation_active_start_s,
                 polarisation_active_end_s=polarisation_active_end_s,
+                sequence_name=sequence_name,
+                sequence_run_id=sequence_run_id,
+                sequence_stage_index=sequence_stage_index,
+                sequence_stage_total=sequence_stage_total,
+                sequence_stage_type=sequence_stage_type,
+                sequence_stage_state=sequence_stage_state,
             )
         except (OSError, ValueError) as append_error:
             self._fail_file(append_error)

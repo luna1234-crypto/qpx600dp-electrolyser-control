@@ -166,3 +166,23 @@ Resume and confirm the same step completes without duplication. Stop a later
 partial step and confirm it produces no completed summary row while CH2 continues.
 Both outputs must finish OFF. This is power-supply polarisation, not potentiostat
 control. Do not select Real Hardware: supervised physical acceptance is pending.
+
+## Milestone 15 Custom Sequence checks
+
+Keep Simulation Mode connected. In CH1 build Constant Current (`0.10 A`, `2 V`,
+`2 s`, `0.25 s`), Wait / Output-Off (`1 s`) and Constant Voltage (`1.8 V`,
+`0.20 A`, `2 s`, `0.25 s`). In CH2 build Constant Voltage (`1.5 V`, `0.20 A`,
+`2 s`, `0.25 s`) followed by Constant Current (`0.15 A`, `2 V`, `2 s`,
+`0.25 s`). Exercise add, duplicate, reorder and remove before restoring these
+exact plans.
+
+Start both once. Pause CH1 during its first active stage and confirm CH1 alone
+is OFF, active time freezes and CH2 continues. Resume CH1 and confirm the same
+stage continues. Verify each stage advances once, Wait remains OFF, one raw CSV
+covers each channel run and sequence metadata matches the displayed order. Run
+a separate longer plan, Stop during its first stage and confirm no later stage
+starts. Disconnect and close only after both simulated outputs are OFF and no
+worker warning appears.
+
+Do not select Real Hardware: M15 physical acceptance is pending. Custom
+Sequences do not approve unattended electrolyser operation.

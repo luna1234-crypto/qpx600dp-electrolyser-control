@@ -4,7 +4,7 @@
 > CPX400DP assumption. Their claims are intentionally not rewritten as QPX600DP
 > results. The post-Milestone-4 model correction is recorded separately at the
 > end of this file and in `verification/model_correction_qpx600dp.md`.
-> All current implementation and every future Milestone 15–20 target the
+> All current implementation and every future Milestone 16–20 target the
 > QPX600DP. CPX400DP is retained only as historical context for Milestones 1–4.
 
 ## Milestone 1 - Project skeleton
@@ -569,9 +569,27 @@ not approved. See
 
 ## Milestone 15 - Custom sequence editor
 
-Original roadmap task: edit and execute custom sequences. This milestone is
-pending and will target QPX600DP. Sequence semantics, validation and acceptance
-remain future work; no custom-sequence behavior is claimed by Milestones 1–14.
+Implemented independent CH1/CH2 ordered Custom Sequence editors in Simulation
+Mode. The M15 stage set is Constant Current, Constant Voltage, Voltage Sweep /
+Staircase LSV, Current Scan, Steady-State Polarisation and explicit Wait /
+Output-Off. Add, update, duplicate, remove and reorder are available before
+Start; the full list is validated before ownership, CSV creation or mutation.
+
+Execution orchestrates the existing M9–M14 controllers and shared M6 queue; it
+does not duplicate protocol, serial, timing, output-cleanup, logging or plotting
+logic. One raw CSV covers the channel run and appends sequence name/run ID,
+stage index/total, type and state. Pause freezes stage and sequence active time;
+Resume continues that stage. Exactly one authoritative terminal callback
+advances each stage. Stop, failure, disconnect and shutdown retain delegated
+bounded Output-Off behavior, and channel-local failure leaves the other channel
+running unless the shared connection fails.
+
+Automated acceptance ran the requested simultaneous CH1 CC / Wait / CV and CH2
+CV / CC plans, paused/resumed CH1 while CH2 continued, exercised early Stop,
+inspected CSV order/metadata and confirmed both simulated outputs OFF. Real
+Hardware acceptance, saved recipes (M17), global emergency behavior (M16),
+electrolyser scientific acceptance and unattended operation remain pending.
+See [verification details](verification/milestone15.md).
 
 ## Milestone 16 - Full safety and emergency system
 

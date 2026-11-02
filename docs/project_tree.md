@@ -27,6 +27,7 @@ QPX 600 DP/
             constant_current.py
             constant_voltage.py
             current_input.py
+            custom_sequence.py
             polarisation.py
             stepped_scan.py
             protocols/
@@ -46,6 +47,7 @@ QPX 600 DP/
             constant_current_panel.py
             constant_voltage_panel.py
             current_scan_panel.py
+            custom_sequence_panel.py
             polarisation_panel.py
             voltage_scan_panel.py
             main_window.py
@@ -95,6 +97,7 @@ QPX 600 DP/
             milestone12.md
             milestone13.md
             milestone14.md
+            milestone15.md
             model_correction_qpx600dp.md
         architecture.md
         qpx600dp_commands.md
@@ -121,6 +124,7 @@ QPX 600 DP/
         test_polarisation.py
         test_voltage_scan.py
         test_csv_logging.py
+        test_custom_sequence.py
         test_hardware_check.py
         test_logging_config.py
         test_model_identity.py

@@ -102,6 +102,12 @@ def test_csv_schema_values_flush_exclusive_creation_and_close(tmp_path: Path) ->
             "polarisation_sample_count": "",
             "polarisation_active_start_s": "",
             "polarisation_active_end_s": "",
+            "sequence_name": "",
+            "sequence_run_id": "",
+            "sequence_stage_index": "",
+            "sequence_stage_total": "",
+            "sequence_stage_type": "",
+            "sequence_stage_state": "",
         "sample_status": "ok",
         "error": "",
     }

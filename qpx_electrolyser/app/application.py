@@ -16,12 +16,13 @@ from qpx_electrolyser.app.connection_controller import ConnectionController, Con
 from qpx_electrolyser.app.logging_config import configure_logging
 from qpx_electrolyser.app.paths import default_paths
 from qpx_electrolyser.engine.constant_current import ProtocolState
+from qpx_electrolyser.engine.custom_sequence import SequenceStage, SequenceStageType
 from qpx_electrolyser.gui.main_window import MainWindow
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a normal window, or briefly exercise its event loop for validation."""
-    parser = argparse.ArgumentParser(description="QPX600DP Milestone 13 stepped scans")
+    parser = argparse.ArgumentParser(description="QPX600DP Milestone 15 custom sequences")
     parser.add_argument("--log-dir", type=Path, help="Override the project's logs directory")
     parser.add_argument(
         "--smoke-test", action="store_true", help="Show the window, process events, then close"
@@ -91,7 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         window.show()
 
         if args.smoke_test:
-            smoke_deadline = time.monotonic() + 10
+            smoke_deadline = time.monotonic() + 15
 
             def fail_smoke_test(message: str) -> None:
                 raise RuntimeError(message)
@@ -278,17 +279,63 @@ def main(argv: Sequence[str] | None = None) -> int:
                         fail_smoke_test("Polarisation did not reach its inclusive endpoint.")
                     if window.polarisation_plot_controllers[channel].snapshot.total_points != 1:
                         fail_smoke_test("Polarisation did not emit one summary per step.")
+                    window.logging_controllers[channel].stop(
+                        "Standalone logging stopped before Custom Sequence smoke test"
+                    )
+                ch1_stages = (
+                    SequenceStage.create(
+                        SequenceStageType.CONSTANT_CURRENT,
+                        current="0.1", voltage="2", duration="0.3", interval="0.1",
+                        current_input_mode="current", active_area_cm2="1",
+                    ),
+                    SequenceStage.create(SequenceStageType.WAIT_OUTPUT_OFF, duration="0.1"),
+                    SequenceStage.create(
+                        SequenceStageType.CONSTANT_VOLTAGE,
+                        voltage="1.8", current="0.2", duration="0.3", interval="0.1",
+                    ),
+                )
+                ch2_stages = (
+                    SequenceStage.create(
+                        SequenceStageType.CONSTANT_VOLTAGE,
+                        voltage="1.5", current="0.2", duration="0.3", interval="0.1",
+                    ),
+                    SequenceStage.create(
+                        SequenceStageType.CONSTANT_CURRENT,
+                        current="0.15", voltage="2", duration="0.3", interval="0.1",
+                        current_input_mode="current", active_area_cm2="1",
+                    ),
+                )
+                if not window.sequence_controllers[1].start(
+                    "Smoke CH1", ch1_stages,
+                    window.channel_controllers[1].snapshot.voltage_range_name,
+                    window.data_directory,
+                ):
+                    fail_smoke_test(window.sequence_controllers[1].snapshot.message)
+                if not window.sequence_controllers[2].start(
+                    "Smoke CH2", ch2_stages,
+                    window.channel_controllers[2].snapshot.voltage_range_name,
+                    window.data_directory,
+                ):
+                    fail_smoke_test(window.sequence_controllers[2].snapshot.message)
+                QTimer.singleShot(25, verify_sequence_smoke_test)
+
+            def verify_sequence_smoke_test() -> None:
+                snapshots = [item.snapshot for item in window.sequence_controllers.values()]
+                if any(item.state is ProtocolState.FAILED for item in snapshots):
+                    fail_smoke_test("Simulation Mode Custom Sequence smoke test failed.")
+                if any(item.state is not ProtocolState.COMPLETED for item in snapshots):
+                    if time.monotonic() >= smoke_deadline:
+                        fail_smoke_test("Custom Sequences did not complete in time.")
+                    QTimer.singleShot(25, verify_sequence_smoke_test)
+                    return
+                if any(item.file_path is None or not item.file_path.is_file() for item in snapshots):
+                    fail_smoke_test("Custom Sequence CSV is unavailable.")
                 QTimer.singleShot(25, verify_logging_smoke_test)
 
             def verify_logging_smoke_test() -> None:
                 snapshots = [item.snapshot for item in window.logging_controllers.values()]
-                if any(item.error for item in snapshots):
-                    fail_smoke_test("Simulation Mode smoke-test CSV logging failed.")
-                if any(item.sample_count < 1 for item in snapshots):
-                    if time.monotonic() >= smoke_deadline:
-                        fail_smoke_test("Simulation Mode smoke test did not log both channels.")
-                    QTimer.singleShot(25, verify_logging_smoke_test)
-                    return
+                if any(item.error or item.active for item in snapshots):
+                    fail_smoke_test("Simulation Mode standalone loggers did not close cleanly.")
                 plot_snapshots = [item.snapshot for item in window.plot_controllers.values()]
                 if any(item.total_samples < 1 for item in plot_snapshots):
                     fail_smoke_test("Simulation Mode smoke test did not plot both channels.")
@@ -309,7 +356,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "Smoke test: window visible=%s; Qt event loop processed events; "
                     "simulator connected, both-channel Constant Current, Constant Voltage, "
                     "Voltage Scan, Current Scan and Steady-State Polarisation protocols "
-                    "completed and "
+                    "and both-channel Custom Sequences completed and "
                     "shared their independently active channel CSV logs while updating "
                     "bounded live plots",
                     window.isVisible(),

@@ -1,6 +1,6 @@
 # Application and communication architecture
 
-All current code and every future implementation target Milestone 14–20 is for
+All current code and every future implementation target Milestone 16–20 is for
 the Aim-TTi **QPX600DP**. CPX400DP appears only in historical Milestone 1–4
 records retained to explain the post-Milestone-4 model correction; it is not a
 current or future implementation target.
@@ -13,8 +13,9 @@ the Milestone 5 `SerialTransport` / `QPX600DPDriver`, the Milestone 6 shared
 priority command worker, Milestone 7 per-channel controllers, Milestone 8
 independent CSV loggers, Milestone 9 Constant Current state machines, Milestone
 10 bounded live-plot models, Milestone 11 Constant Voltage state machines,
-the Milestone 12 reusable stepped-scan engine, Milestone 13 Current Scan and
-Milestone 14 Steady-State Polarisation controllers.
+the Milestone 12 reusable stepped-scan engine, Milestone 13 Current Scan,
+Milestone 14 Steady-State Polarisation controllers and Milestone 15 Custom
+Sequence orchestrators.
 The guarded follow-up connects the physical backend
 through that same worker only after an explicit mode, port and Connect action.
 See [simulator behaviour](simulator.md).
@@ -344,14 +345,29 @@ protocol fault should stop only its own output if the transport is still healthy
 
 ## Protocols, safety, data and plotting
 
-Constant Current, Constant Voltage, stepped Voltage/Current Scan and bounded
-time plots are implemented. Later milestones add polarisation and custom
-sequence. Use explicit V, A, s, cm2
+Constant Current, Constant Voltage, stepped Voltage/Current Scan, polarisation,
+Custom Sequence orchestration and bounded time plots are implemented. Use
+explicit V, A, s, cm2
 and A/cm2 fields internally. Convert `I = j * area` at the boundary, reject
 non-finite values, and validate every step before arming. Scheduling and final
 polarisation-window averaging must be testable with a fake monotonic clock.
 The shared typed current-input component now performs this conversion for
-Constant Current and Current Scan and is the reuse point for future Milestone 14.
+Constant Current, Current Scan, Steady-State Polarisation and their M15 stages.
+
+Milestone 15 is a channel-local orchestration layer, not another protocol state
+machine. It validates an immutable stage list first and delegates one stage at
+a time to the existing M9–M14 controller. Generation and transition tokens
+reject stale callbacks; only an authoritative child terminal state advances the
+index. Pause, Resume, Stop, failure, disconnect and shutdown retain the existing
+guarded transition and cleanup paths. Wait / Output-Off begins only after the
+preceding stage completed its authoritative OFF transition; it uses a monotonic
+Qt timer, freezes while paused and never polls the backend.
+
+One sequence-owned log sink wraps one raw CSV for the complete channel run.
+Child controllers append through it, avoiding a second writer or polling loop.
+Backward-compatible sequence name, run ID, stage index/total, type and state
+columns are appended. Existing sample and result signals feed the same plots.
+M15 Real Hardware Start remains disabled pending supervised acceptance.
 
 Keep immutable hardware capabilities separate from user-configured safety limits.
 `QPX600DP_CAPABILITIES` records 80 V, 50 A and 600 W ratings; none is an

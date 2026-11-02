@@ -2,7 +2,7 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.14.0 preserves those historical records, the Milestone 5
+assumption. Version 0.15.0 preserves those historical records, the Milestone 5
 QPX600DP serial backend and completed two-channel standard-load Windows
 validation, the Milestone 6 shared
 asynchronous command queue, Milestone 7 dual-channel manual controls with a
@@ -11,10 +11,10 @@ Milestone 9 independent Constant Current protocols with an offline-tested,
 guarded Real Hardware follow-up, Milestone 10 bounded real-time plots, and
 Milestone 11 independent Constant Voltage protocols with supervised two-channel
 resistor-load acceptance, Milestone 12 independent Voltage Sweep / Staircase LSV,
-Milestone 13 stepped current scans, and Milestone 14 steady-state power-supply
-polarisation.
+Milestone 13 stepped current scans, Milestone 14 steady-state power-supply
+polarisation, and Milestone 15 per-channel Custom Sequences.
 
-All current implementation and every future Milestone 15–20 target the Aim-TTi
+All current implementation and every future Milestone 16–20 target the Aim-TTi
 QPX600DP. CPX400DP references are retained only as historical context for the
 original Milestone 1–4 records and are not current or future requirements.
 
@@ -232,8 +232,7 @@ Pause/Resume, completion, CSV continuity and final OFF confirmation. The supplie
 CSVs contain a brief 0.189-0.201 A first loaded sample after startup/resume before
 stable readings; electrolyser and unattended use remain unapproved pending its
 assessment and later safety milestones. Milestone 10 adds downstream live plots;
-the later M14 polarisation implementation reuses this guarded path, while custom
-sequences remain unimplemented. See
+M14 polarisation and M15 Custom Sequences reuse this guarded path. See
 [Milestone 9 verification](docs/verification/milestone9.md).
 
 ## Milestone 10 responsive real-time plotting
@@ -431,6 +430,30 @@ measurement or a more suitable low-current instrument, and unattended
 electrolyser operation is not approved. See the
 [Milestone 14 verification](docs/verification/milestone14.md).
 
+## Milestone 15 Custom Sequences
+
+CH1 and CH2 have independent ordered sequence editors. A run can combine the
+existing Constant Current, Constant Voltage, Voltage Sweep / Staircase LSV,
+Current Scan and Steady-State Polarisation controllers plus an explicit
+Wait / Output-Off stage. Stages can be added, edited, duplicated, removed and
+reordered before Start. The complete sequence is validated before channel
+ownership, CSV creation or instrument mutation.
+
+The orchestration layer delegates every active stage to its accepted M9–M14
+controller, shared command queue, guarded output transitions, sampling, plots
+and CSV flow. Exactly one raw CSV is created per channel/run and retains
+appended sequence name/run/stage/state metadata. Wait / Output-Off starts only
+after authoritative OFF completion and uses a monotonic timer without backend
+polling. Pause/Resume continues the same stage, early Stop never advances, and
+stale terminal callbacks cannot advance a stage twice.
+
+Automated Simulation acceptance covered the prescribed simultaneous CH1 and
+CH2 plans, CH1 Pause/Resume while CH2 continued, early Stop, CSV stage order
+and final simulated OFF states. Real Hardware M15 acceptance remains pending,
+so M15 Start is disabled outside Simulation Mode. Saved recipes are deferred to
+M17. Electrolyser scientific acceptance and unattended operation remain
+unapproved. See [Milestone 15 verification](docs/verification/milestone15.md).
+
 ## Milestone 5 offline physical backend
 
 `SerialTransport` opens only an explicitly supplied port. It never enumerates
@@ -611,7 +634,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Voltage Sweep / Staircase LSV | Simulation/fake-serial and supervised 100-ohm functional acceptance passed; not metrology or electrolyser approval |
 | Independent stepped Current Scan | Simulation and supervised CH1/CH2 100-ohm Real Hardware functional acceptance passed; low-current readings are not calibration |
 | Steady-State Polarisation | Simulation and supervised CH1/CH2 100-ohm resistor-load functional acceptance passed; quantitative low-current metrology, electrolyser science and unattended operation remain unapproved |
-| M15 Custom sequence editor | Pending for QPX600DP |
+| M15 Custom sequence editor | Implemented and automatically accepted in Simulation Mode; Real Hardware acceptance pending |
 | M16 Full safety/emergency system | Pending; existing channel cleanup is not global Emergency Off |
 | M17 persistence / M18 UI refinement | Pending for QPX600DP |
 | M19 Windows packaging | Pending; no packaged executable is claimed |
@@ -638,6 +661,7 @@ not control potential against a reference electrode.
 - [Milestone 12 Voltage Sweep / Staircase LSV verification](docs/verification/milestone12.md)
 - [Milestone 13 Current Scan verification](docs/verification/milestone13.md)
 - [Milestone 14 Steady-State Polarisation verification](docs/verification/milestone14.md)
+- [Milestone 15 Custom Sequence verification](docs/verification/milestone15.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 
@@ -646,5 +670,5 @@ The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption; the model-correction and Milestones 5–13 work record the
+CPX400DP assumption; the model-correction and Milestones 5–15 work record the
 current QPX600DP basis.

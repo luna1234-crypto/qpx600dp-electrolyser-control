@@ -1,3 +1,3 @@
-"""QPX600DP electrolyser application: milestones 1-12."""
+"""QPX600DP electrolyser application: milestones 1-15."""
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
