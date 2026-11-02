@@ -45,6 +45,18 @@ from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
 REAL_HARDWARE_SEQUENCE_CONFIRMATION = "RUN-QPX600DP-CUSTOM-SEQUENCE"
 
 
+class SequenceTransitionPolicy(str, Enum):
+    SAFE_OFF = "safe_off"
+    CONTINUOUS = "continuous"
+
+    @property
+    def label(self) -> str:
+        return {
+            self.SAFE_OFF: "Safe Off between stages",
+            self.CONTINUOUS: "Continuous handoff",
+        }[self]
+
+
 class SequenceStageType(str, Enum):
     CONSTANT_CURRENT = "constant_current"
     CONSTANT_VOLTAGE = "constant_voltage"
@@ -88,12 +100,18 @@ class SequenceStage:
 class _PreparedStage:
     stage: SequenceStage
     duration_s: float
+    config: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class _SequencePreflight:
     identification: str
     readbacks: tuple[ChannelReadback, ChannelReadback]
+
+
+@dataclass(frozen=True, slots=True)
+class _HandoffFailure:
+    message: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +136,9 @@ class SequenceSnapshot:
     error: bool = False
     operator_warning: bool = False
     resume_ready: bool = False
+    transition_policy: str = SequenceTransitionPolicy.SAFE_OFF.value
+    handoff_state: str = ""
+    handoff_settling_s: float = 1.0
 
     @property
     def owns_channel(self) -> bool:
@@ -144,6 +165,7 @@ class SequenceLogSink(ProtocolLogSink):
         *,
         monotonic: Callable[[], float] = time.monotonic,
         writer_factory=CsvLogFile,
+        transition_policy: SequenceTransitionPolicy = SequenceTransitionPolicy.SAFE_OFF,
     ) -> None:
         self._channel = channel
         self._sequence_name = sequence_name
@@ -155,6 +177,8 @@ class SequenceLogSink(ProtocolLogSink):
         self._stage_index = 0
         self._stage_total = 0
         self._stage_type = ""
+        self._transition_policy = SequenceTransitionPolicy(transition_policy)
+        self._handoff_state = ""
 
     @property
     def active(self) -> bool:
@@ -169,6 +193,9 @@ class SequenceLogSink(ProtocolLogSink):
         self._stage_index = index
         self._stage_total = total
         self._stage_type = stage_type
+
+    def set_handoff_state(self, state: str) -> None:
+        self._handoff_state = state
 
     def append_protocol(
         self,
@@ -202,6 +229,8 @@ class SequenceLogSink(ProtocolLogSink):
             sequence_stage_total=self._stage_total,
             sequence_stage_type=self._stage_type,
             sequence_stage_state=protocol_state,
+            sequence_transition_policy=self._transition_policy.value,
+            sequence_handoff_state=self._handoff_state,
             **metadata,
         )
 
@@ -265,7 +294,14 @@ class CustomSequenceController(QObject):
         self._real_hardware = False
         self._pending_request_id: int | None = None
         self._pending_start: tuple[str, Path, str] | None = None
+        self._pending_action = ""
         self._action_key = ("custom-sequence", channel, id(self))
+        self._transition_policy = SequenceTransitionPolicy.SAFE_OFF
+        self._handoff_settling_s = 1.0
+        self._handoff_controller: ConstantCurrentController | None = None
+        self._handoff_target: _PreparedStage | None = None
+        self._handoff_readback: ChannelReadback | None = None
+        self._handoff_token = 0
         self._wait_started_at = 0.0
         self._wait_before_s = 0.0
         self._wait_timer = QTimer(self)
@@ -274,6 +310,9 @@ class CustomSequenceController(QObject):
         self._clock_timer = QTimer(self)
         self._clock_timer.setInterval(100)
         self._clock_timer.timeout.connect(self._update_clock)
+        self._handoff_timer = QTimer(self)
+        self._handoff_timer.setSingleShot(True)
+        self._handoff_timer.timeout.connect(self._complete_handoff_settling)
 
         self._controllers: Mapping[SequenceStageType, object] = {
             SequenceStageType.CONSTANT_CURRENT: ConstantCurrentController(
@@ -297,6 +336,12 @@ class CustomSequenceController(QObject):
                 lambda snapshot, selected=controller: self._child_snapshot(selected, snapshot)
             )
             controller.sample_received.connect(self.sample_received)
+            if isinstance(controller, (ConstantCurrentController, ConstantVoltageController)):
+                controller.handoff_ready.connect(
+                    lambda config, selected=controller: self._child_handoff_ready(
+                        selected, config
+                    )
+                )
         self._controllers[SequenceStageType.VOLTAGE_SCAN].point_result_received.connect(
             self.lsv_point_received
         )
@@ -452,7 +497,7 @@ class CustomSequenceController(QObject):
                     raise ValueError("Wait duration must be finite and positive.")
                 if duration > DEFAULT_CONSTANT_CURRENT_LIMITS.max_duration_s:
                     raise ValueError("Wait duration exceeds the project duration limit.")
-                return _PreparedStage(stage, duration)
+                return _PreparedStage(stage, duration, None)
             else:
                 raise ValueError("Unsupported sequence stage type.")
         except (TypeError, ValueError) as validation_error:
@@ -460,7 +505,21 @@ class CustomSequenceController(QObject):
         if error is not None:
             raise ValueError(f"Stage {index} ({stage.stage_type.label}): {error}")
         assert config is not None
-        return _PreparedStage(stage, float(config.duration_s))
+        return _PreparedStage(stage, float(config.duration_s), config)
+
+    def sequence_maxima(
+        self, prepared: tuple[_PreparedStage, ...]
+    ) -> tuple[float, float]:
+        """Return validated maximum programmed voltage/current for confirmation text."""
+        voltages: list[float] = []
+        currents: list[float] = []
+        for item in prepared:
+            controller = self._controllers.get(item.stage.stage_type)
+            if item.config is None or controller is None:
+                continue
+            voltages.append(float(controller._requested_voltage(item.config)))
+            currents.append(float(controller._requested_current(item.config)))
+        return (max(voltages, default=0.0), max(currents, default=0.0))
 
     def start(
         self,
@@ -470,12 +529,20 @@ class CustomSequenceController(QObject):
         directory: Path,
         *,
         real_hardware_confirmation: str | None = None,
+        transition_policy: SequenceTransitionPolicy | str = SequenceTransitionPolicy.SAFE_OFF,
+        handoff_settling_s: str | float = "1.0",
     ) -> bool:
         if self._snapshot.owns_channel:
             return False
         try:
+            policy = SequenceTransitionPolicy(transition_policy)
+            settling = float(handoff_settling_s)
+            if not math.isfinite(settling) or not 0 <= settling <= 60:
+                raise ValueError(
+                    "Continuous handoff settling time must be finite and between 0 and 60 seconds."
+                )
             prepared = self.validate_sequence(sequence_name, stages, voltage_range_name)
-        except ValueError as error:
+        except (TypeError, ValueError) as error:
             self._publish(replace(self._snapshot, message=str(error), error=True))
             return False
         real_hardware = not self._connection.snapshot.simulation_mode
@@ -498,6 +565,9 @@ class CustomSequenceController(QObject):
         self._active_controller = None
         self._active_config = None
         self._real_hardware = real_hardware
+        self._transition_policy = policy
+        self._handoff_settling_s = settling
+        self._reset_handoff()
         total = sum(item.duration_s for item in prepared)
         if real_hardware:
             self._pending_start = (sequence_name.strip(), Path(directory), run_id)
@@ -509,6 +579,8 @@ class CustomSequenceController(QObject):
                 stage_total=len(prepared),
                 remaining_active_s=total,
                 output_enabled=False,
+                transition_policy=policy.value,
+                handoff_settling_s=settling,
                 message="Running fresh QPX600DP identity and two-channel OFF-state preflight...",
             ))
             ticket = self._connection.submit_command(
@@ -525,6 +597,7 @@ class CustomSequenceController(QObject):
                 )
                 return False
             self._pending_request_id = ticket.request_id
+            self._pending_action = "preflight"
             return True
         return self._begin_sequence(sequence_name.strip(), Path(directory), run_id)
 
@@ -534,6 +607,7 @@ class CustomSequenceController(QObject):
                 directory, self._channel, sequence_name, run_id,
                 self._connection.snapshot.session_id,
                 monotonic=self._monotonic,
+                transition_policy=self._transition_policy,
             )
         except (OSError, ValueError) as error:
             self._publish(replace(
@@ -553,6 +627,8 @@ class CustomSequenceController(QObject):
             remaining_active_s=total,
             file_path=sink.file_path,
             output_enabled=False,
+            transition_policy=self._transition_policy.value,
+            handoff_settling_s=self._handoff_settling_s,
             message="Starting Custom Sequence stage 1...",
         ))
         try:
@@ -571,9 +647,17 @@ class CustomSequenceController(QObject):
 
     @Slot(int, str, object)
     def _command_completed(self, request_id: int, _name: str, result: object) -> None:
-        if request_id != self._pending_request_id or self._pending_start is None:
+        if request_id != self._pending_request_id:
+            return
+        if self._pending_action == "handoff":
+            self._pending_request_id = None
+            self._pending_action = ""
+            self._handoff_command_completed(result)
+            return
+        if self._pending_start is None:
             return
         self._pending_request_id = None
+        self._pending_action = ""
         pending, self._pending_start = self._pending_start, None
         if (
             self._connection.snapshot.state is not ConnectionState.CONNECTED
@@ -604,6 +688,10 @@ class CustomSequenceController(QObject):
         if request_id != self._pending_request_id:
             return
         self._pending_request_id = None
+        action, self._pending_action = self._pending_action, ""
+        if action == "handoff":
+            self._fail_handoff(f"Continuous handoff queue operation failed: {error}")
+            return
         self._pending_start = None
         self._finish(
             ProtocolState.FAILED,
@@ -611,7 +699,9 @@ class CustomSequenceController(QObject):
             warning=True,
         )
 
-    def _start_stage(self, token: int) -> None:
+    def _start_stage(
+        self, token: int, energized_readback: ChannelReadback | None = None
+    ) -> None:
         if token != self._transition_token or not self._snapshot.owns_channel:
             return
         if self._stop_requested:
@@ -627,6 +717,8 @@ class CustomSequenceController(QObject):
             self._finish(ProtocolState.FAILED, "Custom Sequence CSV writer is unavailable")
             return
         sink.set_stage(self._stage_index + 1, len(self._prepared), stage.stage_type.value)
+        if energized_readback is None:
+            sink.set_handoff_state("")
         self._publish(replace(
             self._snapshot,
             state=ProtocolState.STARTING,
@@ -660,7 +752,11 @@ class CustomSequenceController(QObject):
             self._clock_timer.start()
             self._schedule_wait()
             return
-        self._start_protocol_stage(prepared)
+        if energized_readback is not None:
+            sink.set_handoff_state("")
+            self._start_energized_protocol_stage(prepared, energized_readback)
+        else:
+            self._start_protocol_stage(prepared)
 
     def _start_protocol_stage(self, prepared: _PreparedStage) -> None:
         stage = prepared.stage
@@ -677,6 +773,7 @@ class CustomSequenceController(QObject):
             if item.channel == self._channel
         )
         directory = sink.file_path.parent if sink.file_path is not None else Path.cwd()
+        retain_output = self._continuous_boundary(self._stage_index)
         confirmation = REAL_HARDWARE_SCAN_CONFIRMATION if self._real_hardware else None
         if stage.stage_type is SequenceStageType.CONSTANT_CURRENT:
             confirmation = REAL_HARDWARE_PROTOCOL_CONFIRMATION if self._real_hardware else None
@@ -687,6 +784,7 @@ class CustomSequenceController(QObject):
                 current_input_mode=values.get("current_input_mode", CurrentInputMode.CURRENT.value),
                 active_area_cm2=values.get("active_area_cm2", ""),
                 logging_sink=sink, real_hardware_confirmation=confirmation,
+                retain_output_on_completion=retain_output,
             )
         elif stage.stage_type is SequenceStageType.CONSTANT_VOLTAGE:
             confirmation = (
@@ -697,6 +795,7 @@ class CustomSequenceController(QObject):
                 values.get("duration", ""), values.get("interval", ""),
                 range_name, directory, logging_sink=sink,
                 real_hardware_confirmation=confirmation,
+                retain_output_on_completion=retain_output,
             )
         elif stage.stage_type is SequenceStageType.VOLTAGE_SCAN:
             started = controller.start(
@@ -736,6 +835,234 @@ class CustomSequenceController(QObject):
                 f"Stage {self._stage_index + 1} failed to start: {controller.snapshot.message}",
                 warning=controller.snapshot.operator_warning,
             )
+
+    def _start_energized_protocol_stage(
+        self, prepared: _PreparedStage, readback: ChannelReadback
+    ) -> None:
+        controller = self._controllers.get(prepared.stage.stage_type)
+        sink = self._sink
+        if (
+            not isinstance(controller, (ConstantCurrentController, ConstantVoltageController))
+            or prepared.config is None
+            or sink is None
+            or sink.file_path is None
+        ):
+            self._finish(
+                ProtocolState.FAILED,
+                "Continuous handoff target is not an energized CC/CV stage.",
+            )
+            return
+        self._active_controller = controller
+        self._active_config = prepared.config
+        self._handled_terminal_generation = -1
+        started = controller.begin_energized_handoff_stage(
+            prepared.config,
+            sink.file_path.parent,
+            sink,
+            readback,
+            retain_output_on_completion=self._continuous_boundary(self._stage_index),
+        )
+        if not started:
+            self._finish(
+                ProtocolState.FAILED,
+                f"Stage {self._stage_index + 1} could not acquire the verified energized handoff.",
+                warning=True,
+            )
+
+    def _continuous_boundary(self, index: int) -> bool:
+        compatible = {
+            SequenceStageType.CONSTANT_CURRENT,
+            SequenceStageType.CONSTANT_VOLTAGE,
+        }
+        return (
+            self._transition_policy is SequenceTransitionPolicy.CONTINUOUS
+            and 0 <= index < len(self._prepared) - 1
+            and self._prepared[index].stage.stage_type in compatible
+            and self._prepared[index + 1].stage.stage_type in compatible
+        )
+
+    @Slot(object)
+    def _child_handoff_ready(
+        self, controller: ConstantCurrentController, config: object
+    ) -> None:
+        if (
+            controller is not self._active_controller
+            or not self._snapshot.owns_channel
+            or not self._continuous_boundary(self._stage_index)
+            or self._pending_request_id is not None
+            or self._handoff_controller is not None
+            or self._active_config is not config
+        ):
+            return
+        target = self._prepared[self._stage_index + 1]
+        target_controller = self._controllers[target.stage.stage_type]
+        if not isinstance(target_controller, (ConstantCurrentController, ConstantVoltageController)):
+            controller.fail_with_cleanup("Unsupported continuous handoff target.")
+            return
+        self._handoff_controller = controller
+        self._handoff_target = target
+        self._handoff_token = self._transition_token
+        sink = self._sink
+        if sink is None:
+            controller.fail_with_cleanup("Custom Sequence CSV writer is unavailable.")
+            return
+        sink.set_handoff_state("started")
+        try:
+            sink.append_event("stage_handoff_started", "HANDOFF")
+        except (OSError, ValueError) as error:
+            self._fail_handoff(f"Custom Sequence CSV write failed: {error}")
+            return
+        self._publish(replace(
+            self._snapshot,
+            handoff_state="started",
+            message="Applying verified continuous stage handoff; output remains ON",
+            resume_ready=False,
+        ))
+        ticket = self._connection.submit_command(
+            f"ch{self._channel}-custom-sequence-continuous-handoff",
+            lambda supply: self._continuous_handoff_operation(
+                supply, controller, config, target_controller, target.config
+            ),
+            priority=CommandPriority.NORMAL,
+            cancellation_key=self._action_key,
+        )
+        if ticket is None:
+            self._fail_handoff("Shared command queue rejected continuous handoff.")
+            return
+        self._pending_request_id = ticket.request_id
+        self._pending_action = "handoff"
+
+    def _continuous_handoff_operation(
+        self,
+        supply: PowerSupplyInterface,
+        previous_controller: ConstantCurrentController,
+        previous_config: object,
+        target_controller: ConstantCurrentController,
+        target_config: object,
+    ) -> ChannelReadback | _HandoffFailure:
+        try:
+            old_voltage = previous_controller._requested_voltage(previous_config)
+            old_current = previous_controller._requested_current(previous_config)
+            new_voltage = target_controller._requested_voltage(target_config)
+            new_current = target_controller._requested_current(target_config)
+            updates: list[tuple[str, float]] = []
+            if new_voltage < old_voltage:
+                updates.append(("voltage", new_voltage))
+            if new_current < old_current:
+                updates.append(("current", new_current))
+            if new_voltage > old_voltage:
+                updates.append(("voltage", new_voltage))
+            if new_current > old_current:
+                updates.append(("current", new_current))
+            for setting, value in updates:
+                if setting == "voltage":
+                    supply.set_voltage(self._channel, value)
+                else:
+                    supply.set_current(self._channel, value)
+            voltage = supply.read_set_voltage(self._channel)
+            current = supply.read_set_current(self._channel)
+            target_controller._verify_settings(voltage, current, target_config)
+            if not supply.read_output_state(self._channel):
+                raise RuntimeError("Selected output unexpectedly reported OFF during handoff.")
+            readback = read_channel(supply, self._channel)
+            if not readback.output_enabled:
+                raise RuntimeError("Authoritative handoff readback reported Output OFF.")
+            return readback
+        except Exception as error:
+            return _HandoffFailure(str(error) or type(error).__name__)
+
+    def _handoff_command_completed(self, result: object) -> None:
+        controller = self._handoff_controller
+        if (
+            controller is None
+            or self._handoff_token != self._transition_token
+            or not self._snapshot.owns_channel
+            or self._connection.snapshot.session_id != self._session_id
+        ):
+            return
+        if isinstance(result, _HandoffFailure):
+            self._fail_handoff(result.message)
+            return
+        if not isinstance(result, ChannelReadback) or not result.output_enabled:
+            self._fail_handoff("Continuous handoff returned malformed or OFF readback.")
+            return
+        self._handoff_readback = result
+        sink = self._sink
+        if sink is None:
+            self._fail_handoff("Custom Sequence CSV writer became unavailable.")
+            return
+        sink.set_handoff_state("settling")
+        try:
+            sink.append_protocol(
+                result,
+                status="stage_handoff_settling",
+                protocol_state="HANDOFF",
+                protocol_name="custom_sequence",
+            )
+        except (OSError, ValueError) as error:
+            self._fail_handoff(f"Custom Sequence CSV write failed: {error}")
+            return
+        self._publish(replace(
+            self._snapshot,
+            handoff_state="settling",
+            measured_voltage_v=result.measured_voltage_v,
+            measured_current_a=result.measured_current_a,
+            output_enabled=True,
+            message=(
+                f"Continuous handoff settling for {self._handoff_settling_s:g} s; "
+                "output remains ON"
+            ),
+        ))
+        self._handoff_timer.start(max(0, math.ceil(self._handoff_settling_s * 1000)))
+
+    @Slot()
+    def _complete_handoff_settling(self) -> None:
+        controller = self._handoff_controller
+        readback = self._handoff_readback
+        if (
+            controller is None
+            or readback is None
+            or self._handoff_token != self._transition_token
+            or not self._snapshot.owns_channel
+            or self._connection.snapshot.session_id != self._session_id
+        ):
+            return
+        sink = self._sink
+        if sink is None:
+            self._fail_handoff("Custom Sequence CSV writer became unavailable.")
+            return
+        sink.set_handoff_state("completed")
+        try:
+            sink.append_protocol(
+                readback,
+                status="stage_handoff_completed",
+                protocol_state="HANDOFF",
+                protocol_name="custom_sequence",
+            )
+        except (OSError, ValueError) as error:
+            self._fail_handoff(f"Custom Sequence CSV write failed: {error}")
+            return
+        self._publish(replace(
+            self._snapshot,
+            handoff_state="completed",
+            message="Continuous handoff verified; starting the next stage",
+        ))
+        controller.release_energized_handoff()
+
+    def _fail_handoff(self, message: str) -> None:
+        controller = self._handoff_controller
+        self._handoff_timer.stop()
+        if controller is not None and controller.snapshot.owns_channel:
+            controller.fail_with_cleanup(message)
+            return
+        self._finish(ProtocolState.FAILED, message, warning=True)
+
+    def _reset_handoff(self) -> None:
+        self._handoff_timer.stop()
+        self._handoff_controller = None
+        self._handoff_target = None
+        self._handoff_readback = None
+        self._handoff_token = 0
 
     @Slot(object)
     def _child_snapshot(self, controller: object, snapshot: ProtocolSnapshot) -> None:
@@ -780,6 +1107,7 @@ class CustomSequenceController(QObject):
 
     def _complete_stage(self) -> None:
         prepared = self._prepared[self._stage_index]
+        energized_readback = self._handoff_readback
         self._completed_active_s += prepared.duration_s
         sink = self._sink
         if sink is not None:
@@ -790,6 +1118,7 @@ class CustomSequenceController(QObject):
                 return
         self._active_controller = None
         self._active_config = None
+        self._reset_handoff()
         self._stage_index += 1
         self._generation += 1
         self._transition_token += 1
@@ -802,10 +1131,16 @@ class CustomSequenceController(QObject):
             state=ProtocolState.STARTING,
             elapsed_active_s=self._completed_active_s,
             remaining_active_s=sum(item.duration_s for item in self._prepared) - self._completed_active_s,
-            output_enabled=False,
+            output_enabled=(
+                energized_readback.output_enabled
+                if energized_readback is not None
+                else False
+            ),
             message=f"Advancing to stage {self._stage_index + 1}/{len(self._prepared)}...",
         ))
-        QTimer.singleShot(0, lambda: self._start_stage(token))
+        QTimer.singleShot(
+            0, lambda: self._start_stage(token, energized_readback=energized_readback)
+        )
 
     def _wait_elapsed(self) -> float:
         if self._wait_started_at:
@@ -836,6 +1171,8 @@ class CustomSequenceController(QObject):
     @Slot()
     def pause(self) -> None:
         if self._snapshot.state is not ProtocolState.RUNNING:
+            return
+        if self._handoff_controller is not None:
             return
         if self._active_controller is not None:
             self._active_controller.pause()
@@ -891,6 +1228,7 @@ class CustomSequenceController(QObject):
             return
         self._stop_requested = True
         self._transition_token += 1
+        self._handoff_timer.stop()
         self._wait_timer.stop()
         self._clock_timer.stop()
         if self._active_controller is not None and self._active_controller.snapshot.owns_channel:
@@ -945,6 +1283,7 @@ class CustomSequenceController(QObject):
         self._clock_timer.stop()
         self._connection.cancel_commands(self._action_key)
         self._pending_request_id = None
+        self._pending_action = ""
         self._pending_start = None
         self._transition_token += 1
         sink, self._sink = self._sink, None
@@ -964,6 +1303,7 @@ class CustomSequenceController(QObject):
             message = f"{message}; Custom Sequence CSV close failed: {close_error}"
         self._active_controller = None
         self._active_config = None
+        self._reset_handoff()
         self._publish(replace(
             self._snapshot,
             state=state,

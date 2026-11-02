@@ -19,6 +19,7 @@ from qpx_electrolyser.engine.custom_sequence import (
     SequenceLogSink,
     SequenceStage,
     SequenceStageType,
+    SequenceTransitionPolicy,
 )
 from qpx_electrolyser.instrument.simulator import SimulatedPowerSupply
 from qpx_electrolyser.instrument.simulator_config import SimulatorConfig
@@ -139,6 +140,21 @@ def cv(duration: str = "0.3") -> SequenceStage:
     )
 
 
+def cc_values(current: str, voltage: str, duration: str = "0.25") -> SequenceStage:
+    return SequenceStage.create(
+        SequenceStageType.CONSTANT_CURRENT,
+        current=current, voltage=voltage, duration=duration, interval="0.1",
+        current_input_mode="current", active_area_cm2="1",
+    )
+
+
+def cv_values(voltage: str, current: str, duration: str = "0.25") -> SequenceStage:
+    return SequenceStage.create(
+        SequenceStageType.CONSTANT_VOLTAGE,
+        voltage=voltage, current=current, duration=duration, interval="0.1",
+    )
+
+
 def wait(duration: str = "0.1") -> SequenceStage:
     return SequenceStage.create(SequenceStageType.WAIT_OUTPUT_OFF, duration=duration)
 
@@ -189,6 +205,175 @@ def test_order_exactly_once_metadata_wait_and_single_writer(
         assert all(call[1] == 1 for call in backend.calls)
     finally:
         controller.shutdown(); assert connection.shutdown(2)
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (cv_values("1", "0.08"), cc_values("0.03", "4")),
+        (cc_values("0.03", "4"), cv_values("2", "0.08")),
+        (cv_values("1", "0.08"), cv_values("2", "0.08")),
+        (cc_values("0.03", "4"), cc_values("0.05", "4")),
+    ],
+)
+def test_continuous_handoff_has_one_on_one_off_and_no_boundary_output_write(
+    qapp: QApplication,
+    tmp_path: Path,
+    first: SequenceStage,
+    second: SequenceStage,
+) -> None:
+    connection, backend = connected(qapp)
+    controller = CustomSequenceController(1, connection)
+    try:
+        assert controller.start(
+            "continuous",
+            (first, second),
+            "60 V",
+            tmp_path,
+            transition_policy=SequenceTransitionPolicy.CONTINUOUS,
+            handoff_settling_s="0.05",
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
+        names = [call[0] for call in backend.calls]
+        assert names.count("output_on") == 1
+        assert names.count("output_off") == 1
+        assert names.index("output_on") < names.index("output_off")
+        rows = read_rows(controller.snapshot.file_path)  # type: ignore[arg-type]
+        statuses = [row["sample_status"] for row in rows]
+        assert statuses.count("stage_handoff_started") == 1
+        assert statuses.count("stage_handoff_settling") == 1
+        assert statuses.count("stage_handoff_completed") == 1
+        assert all(
+            row["sequence_transition_policy"] == "continuous" for row in rows
+        )
+        assert not any(
+            row["sample_status"] == "ok"
+            and row["sequence_handoff_state"] == "settling"
+            for row in rows
+        )
+        assert backend.read_output_state(1) is False
+    finally:
+        controller.shutdown(); assert connection.shutdown(2)
+
+
+def test_continuous_handoff_applies_decreasing_constraint_before_increase(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, backend = connected(qapp)
+    controller = CustomSequenceController(1, connection)
+    try:
+        assert controller.start(
+            "ordered handoff",
+            (cv_values("1", "0.08"), cc_values("0.03", "4")),
+            "60 V",
+            tmp_path,
+            transition_policy="continuous",
+            handoff_settling_s="0",
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
+        decrease = backend.calls.index(("set_current", 1, 0.03))
+        increase = backend.calls.index(("set_voltage", 1, 4.0))
+        assert decrease < increase
+    finally:
+        controller.shutdown(); assert connection.shutdown(2)
+
+
+def test_pause_resume_continuous_sequence_uses_guarded_path_and_same_csv(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, backend = connected(qapp)
+    controller = CustomSequenceController(1, connection)
+    try:
+        assert controller.start(
+            "continuous pause", (cv_values("1", "0.08", "0.8"), cc_values("0.03", "4")),
+            "60 V", tmp_path, transition_policy="continuous", handoff_settling_s="0.05",
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING)
+        path = controller.snapshot.file_path
+        controller.pause()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.PAUSED)
+        assert controller.resume()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.RUNNING)
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
+        assert controller.snapshot.file_path == path
+        assert [call[0] for call in backend.calls].count("output_on") == 2
+        assert [call[0] for call in backend.calls].count("output_off") == 2
+        assert backend.read_output_state(1) is False
+    finally:
+        controller.shutdown(); assert connection.shutdown(2)
+
+
+def test_stop_during_continuous_handoff_settling_cleans_up_once(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, backend = connected(qapp)
+    controller = CustomSequenceController(1, connection)
+    try:
+        assert controller.start(
+            "stop settling", (cv_values("1", "0.08"), cc_values("0.03", "4")),
+            "60 V", tmp_path, transition_policy="continuous", handoff_settling_s="1",
+        )
+        wait_until(qapp, lambda: controller.snapshot.handoff_state == "settling")
+        controller.stop()
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED)
+        assert [call[0] for call in backend.calls].count("output_on") == 1
+        assert [call[0] for call in backend.calls].count("output_off") == 1
+        assert backend.read_output_state(1) is False
+    finally:
+        controller.shutdown(); assert connection.shutdown(2)
+
+
+def test_requested_continuous_simulation_acceptance_and_channel_isolation(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, backend = connected(qapp)
+    ch1 = CustomSequenceController(1, connection)
+    ch2 = CustomSequenceController(2, connection)
+    ch1_plan = (
+        cv_values("1.0", "0.08", "5"),
+        cc_values("0.03", "4.0", "5"),
+        cv_values("2.0", "0.08", "5"),
+    )
+    ch2_plan = (
+        cv_values("1.5", "0.08", "5"),
+        cc_values("0.02", "3.0", "5"),
+    )
+    try:
+        assert ch1.start(
+            "CH1 continuous acceptance", ch1_plan, "60 V", tmp_path,
+            transition_policy="continuous", handoff_settling_s="1.0",
+        )
+        assert ch2.start(
+            "CH2 continuous isolation", ch2_plan, "60 V", tmp_path,
+            transition_policy="continuous", handoff_settling_s="1.0",
+        )
+        wait_until(
+            qapp,
+            lambda: ch1.snapshot.state is ProtocolState.COMPLETED
+            and ch2.snapshot.state is ProtocolState.COMPLETED,
+            22,
+        )
+        for channel, controller, expected in (
+            (1, ch1, ["constant_voltage", "constant_current", "constant_voltage"]),
+            (2, ch2, ["constant_voltage", "constant_current"]),
+        ):
+            rows = read_rows(controller.snapshot.file_path)  # type: ignore[arg-type]
+            completed = [
+                row["sequence_stage_type"] for row in rows
+                if row["sample_status"] == "stage_completed"
+            ]
+            assert completed == expected
+            assert not any(
+                row["sample_status"] == "ok"
+                and row["sequence_handoff_state"] == "settling"
+                for row in rows
+            )
+            calls = [call for call in backend.calls if call[1] == channel]
+            assert [call[0] for call in calls].count("output_on") == 1
+            assert [call[0] for call in calls].count("output_off") == 1
+            assert backend.read_output_state(channel) is False
+    finally:
+        ch1.shutdown(); ch2.shutdown(); assert connection.shutdown(2)
 
 
 def test_pause_resume_same_stage_and_early_stop_no_advancement(
@@ -406,6 +591,51 @@ def test_fake_serial_sequence_reuses_exact_guarded_transition_order(
             item.startswith((f"V{other} ".encode(), f"I{other} ".encode(), f"OP{other} ".encode()))
             for item in fake.writes
         )
+    finally:
+        controller.shutdown(); assert connection.shutdown(2)
+
+
+def test_fake_serial_continuous_handoff_has_no_boundary_output_write(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    fake = FakeSerial()
+
+    def factory(port: str) -> QPX600DPDriver:
+        assert port == "COM11"
+        return QPX600DPDriver(SerialTransport(port, serial_factory=fake.open_with))
+
+    connection = ConnectionController(real_backend_factory=factory)
+    connection.set_simulation_mode(False); connection.set_port_name("COM11")
+    connection.request_connect()
+    wait_until(qapp, lambda: connection.snapshot.state is ConnectionState.CONNECTED)
+    fake.writes.clear()
+    controller = CustomSequenceController(1, connection)
+    try:
+        stages = (
+            SequenceStage.create(
+                SequenceStageType.CONSTANT_VOLTAGE,
+                voltage="1", current="0.08", duration="1.1", interval="1",
+            ),
+            SequenceStage.create(
+                SequenceStageType.CONSTANT_CURRENT,
+                current="0.03", voltage="4", duration="1.1", interval="1",
+                current_input_mode="current", active_area_cm2="1",
+            ),
+        )
+        assert controller.start(
+            "real continuous", stages, "60 V", tmp_path,
+            real_hardware_confirmation=REAL_HARDWARE_SEQUENCE_CONFIRMATION,
+            transition_policy="continuous", handoff_settling_s="0.01",
+        )
+        wait_until(qapp, lambda: controller.snapshot.state is ProtocolState.COMPLETED, 12)
+        assert fake.writes.count(b"OP1 1\n") == 1
+        assert fake.writes.count(b"OP1 0\n") == 1
+        assert fake.writes.count(b"*OPC?\n") == 2
+        decrease = fake.writes.index(b"I1 0.03\n")
+        increase = fake.writes.index(b"V1 4.000\n")
+        assert decrease < increase
+        assert not any(item.startswith((b"OP2 ", b"V2 ", b"I2 ")) for item in fake.writes)
+        assert fake.output == {1: False, 2: False}
     finally:
         controller.shutdown(); assert connection.shutdown(2)
 

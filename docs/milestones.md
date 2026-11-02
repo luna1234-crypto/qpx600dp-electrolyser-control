@@ -598,6 +598,15 @@ recipes (M17), global emergency behavior (M16), electrolyser scientific
 acceptance and unattended operation remain pending. See
 [verification details](verification/milestone15.md).
 
+Continuous Stage Handoff is an M15 follow-up. Safe Off remains the default;
+explicit Continuous mode keeps the selected output ON only between adjacent
+CC/CV stages, atomically verifies safely ordered setpoint changes, waits a
+query-free 1.0-second default settling period, then starts the next stage clock.
+It issues no boundary output write and retains one CSV writer. Wait/Output-Off
+and unsupported boundaries fall back to Safe Off. Simulation and fake-serial
+acceptance are complete; supervised Continuous Real Hardware acceptance is
+pending and unattended electrolyser operation remains unapproved.
+
 ## Milestone 16 - Full safety and emergency system
 
 Original roadmap task: Emergency All Outputs Off and complete fault handling.

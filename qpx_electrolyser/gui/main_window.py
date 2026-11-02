@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from decimal import Decimal
+import math
 import time
 
 from PySide6.QtCore import QTimer
@@ -39,6 +40,7 @@ from qpx_electrolyser.engine.custom_sequence import (
     CustomSequenceController,
     REAL_HARDWARE_SEQUENCE_CONFIRMATION,
     SequenceStage,
+    SequenceTransitionPolicy,
 )
 from qpx_electrolyser.engine.polarisation import PolarisationController
 from qpx_electrolyser.engine.stepped_scan import (
@@ -367,8 +369,10 @@ class MainWindow(QMainWindow):
             )
             polarisation_panel.stop_requested.connect(polarisation_controller.stop)
             sequence_panel.start_requested.connect(
-                lambda name, stages, selected_channel=channel:
-                self._start_custom_sequence(selected_channel, name, stages)
+                lambda name, stages, policy, settling, selected_channel=channel:
+                self._start_custom_sequence(
+                    selected_channel, name, stages, policy, settling
+                )
             )
             sequence_panel.pause_requested.connect(sequence_controller.pause)
             sequence_panel.resume_requested.connect(
@@ -1117,7 +1121,12 @@ class MainWindow(QMainWindow):
             )
 
     def _start_custom_sequence(
-        self, channel: int, sequence_name: str, stages: tuple[SequenceStage, ...]
+        self,
+        channel: int,
+        sequence_name: str,
+        stages: tuple[SequenceStage, ...],
+        transition_policy: str = SequenceTransitionPolicy.SAFE_OFF.value,
+        handoff_settling_s: str = "1.0",
     ) -> None:
         controller = self.sequence_controllers[channel]
         if any(
@@ -1144,9 +1153,18 @@ class MainWindow(QMainWindow):
             return
         manual = self.channel_controllers[channel].snapshot
         confirmation = None
+        try:
+            policy = SequenceTransitionPolicy(transition_policy)
+            settling = float(handoff_settling_s)
+            if not math.isfinite(settling) or not 0 <= settling <= 60:
+                raise ValueError
+        except (TypeError, ValueError):
+            message = "Select a valid transition policy and finite handoff settling time."
+            self.sequence_panels[channel].show_validation_error(message)
+            return
         if not self._connection_controller.snapshot.simulation_mode:
             try:
-                controller.validate_sequence(
+                prepared = controller.validate_sequence(
                     sequence_name, stages, manual.voltage_range_name
                 )
             except ValueError as error:
@@ -1154,6 +1172,7 @@ class MainWindow(QMainWindow):
                 self.sequence_panels[channel].show_validation_error(message)
                 self.statusBar().showMessage(message)
                 return
+            maximum_voltage, maximum_current = controller.sequence_maxima(prepared)
             stage_lines = "\n".join(
                 f"{index}. {stage.stage_type.label}: "
                 + ", ".join(f"{key}={value}" for key, value in stage.parameters)
@@ -1163,6 +1182,11 @@ class MainWindow(QMainWindow):
                 f"CH{item.channel}={'ON' if item.output_enabled else 'OFF'}"
                 for item in self._connection_controller.snapshot.initial_readbacks
             )
+            transition_warning = (
+                "Compatible CC/CV boundaries remain energized during handoff.\n"
+                if policy is SequenceTransitionPolicy.CONTINUOUS
+                else "Output is confirmed OFF between stages.\n"
+            )
             answer = QMessageBox.warning(
                 self,
                 f"Confirm REAL HARDWARE Custom Sequence - CH{channel}",
@@ -1170,6 +1194,11 @@ class MainWindow(QMainWindow):
                 f"Channel: CH{channel}\n"
                 f"Sequence: {sequence_name.strip()}\n"
                 f"Stages ({len(stages)}):\n{stage_lines}\n\n"
+                f"Transition policy: {policy.label}\n"
+                f"Continuous handoff settling: {settling:g} s\n"
+                f"Maximum programmed voltage/current: "
+                f"{maximum_voltage:g} V / {maximum_current:g} A\n"
+                f"{transition_warning}"
                 f"Displayed output states: {current_states}\n"
                 f"CSV destination: new exclusive CH{channel} run file in "
                 f"{self._data_directory}\n\n"
@@ -1192,6 +1221,8 @@ class MainWindow(QMainWindow):
             manual.voltage_range_name,
             self._data_directory,
             real_hardware_confirmation=confirmation,
+            transition_policy=policy,
+            handoff_settling_s=handoff_settling_s,
         ):
             self.sequence_panels[channel].show_validation_error(controller.snapshot.message)
             self.statusBar().showMessage(controller.snapshot.message)

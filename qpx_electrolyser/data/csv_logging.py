@@ -64,6 +64,8 @@ CSV_COLUMNS = (
     "sequence_stage_total",
     "sequence_stage_type",
     "sequence_stage_state",
+    "sequence_transition_policy",
+    "sequence_handoff_state",
 )
 
 
@@ -109,6 +111,8 @@ class CsvWriter(Protocol):
         sequence_stage_total: int | None = None,
         sequence_stage_type: str = "",
         sequence_stage_state: str = "",
+        sequence_transition_policy: str = "",
+        sequence_handoff_state: str = "",
     ) -> None: ...
 
     def close(self) -> None: ...
@@ -157,6 +161,8 @@ class ProtocolLogSink(Protocol):
         sequence_stage_total: int | None = None,
         sequence_stage_type: str = "",
         sequence_stage_state: str = "",
+        sequence_transition_policy: str = "",
+        sequence_handoff_state: str = "",
     ) -> None: ...
 
     def suspend_sampling(self) -> None: ...
@@ -225,6 +231,8 @@ class CsvLogFile:
         sequence_stage_total: int | None = None,
         sequence_stage_type: str = "",
         sequence_stage_state: str = "",
+        sequence_transition_policy: str = "",
+        sequence_handoff_state: str = "",
     ) -> None:
         stream = self._stream
         if stream is None:
@@ -314,6 +322,8 @@ class CsvLogFile:
             ),
             "sequence_stage_type": sequence_stage_type,
             "sequence_stage_state": sequence_stage_state,
+            "sequence_transition_policy": sequence_transition_policy,
+            "sequence_handoff_state": sequence_handoff_state,
             "sample_status": status,
             "error": error,
         }
@@ -480,6 +490,8 @@ class ChannelLoggingController(QObject):
         sequence_stage_total: int | None = None,
         sequence_stage_type: str = "",
         sequence_stage_state: str = "",
+        sequence_transition_policy: str = "",
+        sequence_handoff_state: str = "",
     ) -> None:
         """Append a protocol row through this logger's one open writer.
 
@@ -529,6 +541,8 @@ class ChannelLoggingController(QObject):
                 sequence_stage_total=sequence_stage_total,
                 sequence_stage_type=sequence_stage_type,
                 sequence_stage_state=sequence_stage_state,
+                sequence_transition_policy=sequence_transition_policy,
+                sequence_handoff_state=sequence_handoff_state,
             )
         except (OSError, ValueError) as append_error:
             self._fail_file(append_error)

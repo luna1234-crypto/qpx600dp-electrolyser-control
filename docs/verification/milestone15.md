@@ -28,6 +28,42 @@ Pause/Resume retains the writer and current stage. Stop closes the writer and
 does not start a later stage. Existing samples and point results feed the
 existing time, LSV and polarisation plots without extra polling.
 
+## Continuous Stage Handoff follow-up
+
+Each sequence now selects **Safe Off between stages** (the unchanged safety
+default) or explicit **Continuous handoff**. Continuous handoff is limited to
+adjacent Constant Current and Constant Voltage stages. The initial guarded Start
+sends Output On once. At a compatible boundary the completing child retains
+channel ownership and ON state; one serialized operation applies decreasing
+voltage/current constraints before increases, reads both programmed settings
+back and verifies the selected output remains ON. It sends neither Output Off
+nor Output On. Wait/Output-Off and unsupported boundaries retain the accepted
+Safe-Off behavior.
+
+After verification, output remains energized through a query-free handoff
+settling period (default 1.0 s). The next stage's active clock and normal
+`ok/RUNNING` samples begin only after settling. The shared CSV appends optional
+`sequence_transition_policy` and `sequence_handoff_state` fields and records
+`stage_handoff_started`, `stage_handoff_settling` and
+`stage_handoff_completed`; it does not create artificial zero-current boundary
+rows. Pause/Resume uses the existing guarded OFF/ON path. Stop, completion,
+failure, disconnect, shutdown and file failure retain the existing authoritative
+single Output-Off cleanup attempt. A mismatch, malformed reply, unexpected OFF,
+stale callback or session replacement cannot advance the stage or retry ON.
+
+Simulation/fake-serial coverage verifies CV→CC, CC→CV, CV→CV and CC→CC order,
+decreasing-before-increasing constraints, one initial ON and one final OFF,
+no boundary output writes, Stop during settling, metadata, channel isolation,
+and unchanged Safe-Off behavior. Continuous Real Hardware acceptance remains
+pending; unattended electrolyser operation remains unapproved.
+
+Follow-up validation passed with 504 tests, including the requested simultaneous
+CH1 CV 1.0 V / 0.08 A / 5 s → CC 0.03 A / 4.0 V / 5 s → CV 2.0 V /
+0.08 A / 5 s plan at 1.0 s handoff settling, an independent simultaneous CH2
+plan, a separate Pause/Resume run, and Stop during settling. `compileall`,
+`pip check`, the offscreen Simulation Mode smoke and `git diff --check` passed;
+the worker disconnected cleanly with both simulated outputs OFF.
+
 ## Automated Simulation acceptance
 
 The acceptance test ran both plans simultaneously:

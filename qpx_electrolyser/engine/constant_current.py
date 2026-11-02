@@ -158,6 +158,7 @@ class ConstantCurrentController(QObject):
 
     snapshot_changed = Signal(object)
     sample_received = Signal(object)
+    handoff_ready = Signal(object)
 
     def __init__(
         self,
@@ -222,6 +223,8 @@ class ConstantCurrentController(QObject):
         self._output_settling_expected: bool | None = None
         self._output_settling_voltage_v = 0.0
         self._output_settling_current_a = 0.0
+        self._retain_output_on_completion = False
+        self._handoff_waiting = False
 
         self._sample_timer = QTimer(self)
         self._sample_timer.setSingleShot(True)
@@ -319,6 +322,7 @@ class ConstantCurrentController(QObject):
         active_area_cm2: str = "",
         logging_sink: ProtocolLogSink | None = None,
         real_hardware_confirmation: str | None = None,
+        retain_output_on_completion: bool = False,
     ) -> bool:
         if self._snapshot.owns_channel:
             return False
@@ -354,7 +358,12 @@ class ConstantCurrentController(QObject):
             )
         except (ValueError, InstrumentValueError) as error:
             return self._reject(str(error))
-        return self._begin_validated_start(config, directory, logging_sink=logging_sink)
+        return self._begin_validated_start(
+            config,
+            directory,
+            logging_sink=logging_sink,
+            retain_output_on_completion=retain_output_on_completion,
+        )
 
     def _begin_validated_start(
         self,
@@ -362,6 +371,7 @@ class ConstantCurrentController(QObject):
         directory: Path,
         *,
         logging_sink: ProtocolLogSink | None = None,
+        retain_output_on_completion: bool = False,
     ) -> bool:
         """Acquire logging and submit the common guarded start sequence."""
         writer: CsvWriter | None = None
@@ -395,6 +405,8 @@ class ConstantCurrentController(QObject):
         self._next_sample_slot = 0
         self._output_off_attempted = False
         self._real_hardware_run = not self._connection.snapshot.simulation_mode
+        self._retain_output_on_completion = retain_output_on_completion
+        self._handoff_waiting = False
         self._publish(ProtocolSnapshot(
             channel=self._channel,
             state=ProtocolState.STARTING,
@@ -477,6 +489,77 @@ class ConstantCurrentController(QObject):
         if not self._snapshot.owns_channel:
             return
         self._begin_cleanup(ProtocolState.COMPLETED, message)
+
+    def fail_with_cleanup(self, message: str) -> None:
+        """Fail an M15-owned energized stage through the normal single cleanup path."""
+        if self._snapshot.owns_channel:
+            self._begin_cleanup(ProtocolState.FAILED, message)
+
+    def release_energized_handoff(self) -> None:
+        """Release a completed M15 stage without changing the energized output."""
+        if not self._handoff_waiting or self._snapshot.state is not ProtocolState.RUNNING:
+            return
+        self._handoff_waiting = False
+        self._retain_output_on_completion = False
+        self._logging_sink = None
+        self._finish_terminal_without_cleanup(
+            ProtocolState.COMPLETED,
+            "Stage completed; energized handoff verified",
+        )
+
+    def begin_energized_handoff_stage(
+        self,
+        config: ConstantCurrentConfig,
+        directory: Path,
+        logging_sink: ProtocolLogSink,
+        readback: ChannelReadback,
+        *,
+        retain_output_on_completion: bool,
+    ) -> bool:
+        """Begin an M15 CC/CV stage after a verified, continuously-ON handoff."""
+        if self._snapshot.owns_channel or not logging_sink.active:
+            return False
+        if self._connection.snapshot.state is not ConnectionState.CONNECTED:
+            return False
+        if readback.channel != self._channel or not readback.output_enabled:
+            return False
+        file_path = logging_sink.file_path
+        if file_path is None:
+            return False
+        try:
+            self._prepare_protocol_resources(file_path)
+        except (OSError, ValueError):
+            return False
+        self._writer = None
+        self._logging_sink = logging_sink
+        self._session_id = self._connection.snapshot.session_id
+        self._active_before_run_s = 0.0
+        self._run_started_at = self._monotonic()
+        self._sample_epoch_active_s = 0.0
+        self._next_sample_slot = 0
+        self._output_off_attempted = False
+        self._real_hardware_run = not self._connection.snapshot.simulation_mode
+        self._retain_output_on_completion = retain_output_on_completion
+        self._handoff_waiting = False
+        self._publish(ProtocolSnapshot(
+            channel=self._channel,
+            state=ProtocolState.RUNNING,
+            config=config,
+            remaining_active_s=config.duration_s,
+            measured_voltage_v=readback.measured_voltage_v,
+            measured_current_a=readback.measured_current_a,
+            output_enabled=True,
+            file_path=file_path,
+            message=f"{self._display_name} protocol running after continuous handoff",
+            **self._initial_snapshot_fields(config),
+        ))
+        self._clock_timer.start()
+        if self._real_hardware_run:
+            self._rebase_sample_schedule()
+            self._schedule_next_sample()
+        else:
+            self._sample_timer.start(0)
+        return True
 
     def shutdown(self) -> None:
         if self._snapshot.owns_channel:
@@ -794,7 +877,7 @@ class ConstantCurrentController(QObject):
             return
         elapsed = self._elapsed_active()
         if elapsed >= self._snapshot.config.duration_s:
-            self._begin_cleanup(ProtocolState.COMPLETED, "Protocol duration completed")
+            self._complete_duration()
             return
         segment_elapsed = max(0.0, elapsed - self._sample_epoch_active_s)
         current_slot = math.floor(segment_elapsed / self._snapshot.config.interval_s)
@@ -1069,6 +1152,63 @@ class ConstantCurrentController(QObject):
             return
         self._submit_output_off_action("stop", message)
 
+    def _complete_duration(self) -> None:
+        """Complete normally, or hold the existing ON lifetime for an M15 handoff."""
+        if not self._retain_output_on_completion:
+            self._begin_cleanup(ProtocolState.COMPLETED, "Protocol duration completed")
+            return
+        if self._handoff_waiting:
+            return
+        self._sample_timer.stop()
+        self._clock_timer.stop()
+        self._connection.cancel_commands(self._sample_key)
+        config = self._snapshot.config
+        if config is None or self._snapshot.output_enabled is not True:
+            self._begin_cleanup(
+                ProtocolState.FAILED,
+                "Continuous handoff requires the selected output to remain ON.",
+            )
+            return
+        self._active_before_run_s = config.duration_s
+        self._run_started_at = 0.0
+        self._handoff_waiting = True
+        self._publish(replace(
+            self._snapshot,
+            elapsed_active_s=config.duration_s,
+            remaining_active_s=0.0,
+            message="Stage complete; retaining energized output for continuous handoff",
+        ))
+        self.handoff_ready.emit(config)
+
+    def _finish_terminal_without_cleanup(
+        self, state: ProtocolState, message: str
+    ) -> None:
+        """Finish one child stage while ownership transfers within the same M15 run."""
+        self._cancel_resume_quiescence()
+        self._cancel_output_settling()
+        self._sample_timer.stop()
+        self._clock_timer.stop()
+        self._connection.cancel_commands(self._sample_key)
+        self._pending_request_id = None
+        self._pending_action = ""
+        try:
+            self._close_protocol_resources()
+        except (OSError, ValueError) as error:
+            self._publish(replace(
+                self._snapshot,
+                state=ProtocolState.FAILED,
+                message=f"Continuous handoff resource close failed: {error}",
+                error=True,
+            ))
+            return
+        self._publish(replace(
+            self._snapshot,
+            state=state,
+            resume_ready=False,
+            message=message,
+            error=state is ProtocolState.FAILED,
+        ))
+
     def _finish_terminal(
         self,
         state: ProtocolState,
@@ -1077,6 +1217,8 @@ class ConstantCurrentController(QObject):
         warning: bool = False,
     ) -> None:
         self._cancel_resume_quiescence()
+        self._handoff_waiting = False
+        self._retain_output_on_completion = False
         self._cancel_output_settling()
         self._resume_logging_sampling()
         self._sample_timer.stop()
@@ -1117,7 +1259,7 @@ class ConstantCurrentController(QObject):
             return
         elapsed = self._elapsed_active()
         if elapsed >= self._snapshot.config.duration_s:
-            self._begin_cleanup(ProtocolState.COMPLETED, "Protocol duration completed")
+            self._complete_duration()
             return
         segment_elapsed = max(0.0, elapsed - self._sample_epoch_active_s)
         due_slot = math.floor(segment_elapsed / self._snapshot.config.interval_s) + 1
@@ -1275,7 +1417,7 @@ class ConstantCurrentController(QObject):
             and self._snapshot.config is not None
             and elapsed >= self._snapshot.config.duration_s
         ):
-            self._begin_cleanup(ProtocolState.COMPLETED, "Protocol duration completed")
+            self._complete_duration()
 
     def _elapsed_active(self) -> float:
         if self._run_started_at:

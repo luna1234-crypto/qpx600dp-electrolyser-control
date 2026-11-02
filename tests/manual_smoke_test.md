@@ -1,5 +1,22 @@
 # Windows visual smoke test (milestone 12)
 
+## Milestone 15 Continuous Stage Handoff (Simulation Mode)
+
+1. Connect in Simulation Mode and add CH1 stages: CV 1.0 V / 0.08 A / 5 s,
+   CC 0.03 A / 4.0 V / 5 s, then CV 2.0 V / 0.08 A / 5 s. Use a valid sample
+   interval, select **Continuous handoff**, and leave settling at 1.0 s.
+2. Start once. Confirm the output remains ON across both boundaries, the GUI
+   shows `Continuous handoff settling`, stages advance exactly 1→2→3, and the
+   final output is OFF.
+3. Inspect the one raw CSV: each boundary has started/settling/completed evidence,
+   no ordinary `ok` sample is marked settling, and no artificial OFF/zero row was
+   added merely to mark the boundary.
+4. Run CH2 simultaneously with a short CC/CV plan and confirm channel isolation.
+5. In a separate run, Pause and Resume during a stage; confirm the existing
+   guarded OFF/ON behavior, CSV continuity and final OFF.
+6. Repeat with **Safe Off between stages** and confirm the established default
+   behavior is unchanged.
+
 This procedure checks the simulation connection GUI. Do not connect a power supply.
 
 1. Follow the virtual-environment steps in the README.

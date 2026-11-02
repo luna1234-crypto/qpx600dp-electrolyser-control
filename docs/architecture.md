@@ -374,6 +374,22 @@ Session/request generations reject late results. Successful preflight delegates
 each stage to its existing M11–M14 guarded path. Supervised physical acceptance
 remains pending.
 
+M15 also offers a per-run transition policy. **Safe Off between stages** remains
+the default and preserves the accepted delegated behavior. Explicit
+**Continuous handoff** applies only at adjacent Constant Current/Constant
+Voltage boundaries. The completing child retains its already-authorized ON
+lifetime while one atomic queue operation applies all decreasing constraints
+before increases, verifies both setpoints, and authoritatively confirms ON. No
+output write is issued at that boundary. A query-free, configurable settling
+period (default 1.0 s) follows; only then is ownership transferred to the next
+child and its active duration and ordinary sampling begin. Wait/Output-Off and
+all other boundaries fall back to Safe Off. Generation/session tokens cancel
+late handoffs, and every mismatch or failure delegates one existing
+safety-priority Output-Off cleanup attempt without retrying Output On. Optional
+CSV columns record the transition policy and handoff state; transition evidence
+uses `stage_handoff_started`, `stage_handoff_settling` and
+`stage_handoff_completed` without adding a polling loop or a second writer.
+
 Keep immutable hardware capabilities separate from user-configured safety limits.
 `QPX600DP_CAPABILITIES` records 80 V, 50 A and 600 W ratings; none is an
 experiment default. `UserSafetyLimits` is a separate optional simulation object,

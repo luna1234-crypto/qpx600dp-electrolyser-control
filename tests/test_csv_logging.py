@@ -108,6 +108,8 @@ def test_csv_schema_values_flush_exclusive_creation_and_close(tmp_path: Path) ->
             "sequence_stage_total": "",
             "sequence_stage_type": "",
             "sequence_stage_state": "",
+            "sequence_transition_policy": "",
+            "sequence_handoff_state": "",
         "sample_status": "ok",
         "error": "",
     }

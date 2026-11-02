@@ -105,6 +105,7 @@ class ConstantVoltageController(ConstantCurrentController):
         *,
         logging_sink: ProtocolLogSink | None = None,
         real_hardware_confirmation: str | None = None,
+        retain_output_on_completion: bool = False,
     ) -> bool:
         return super().start(
             current_limit,
@@ -115,6 +116,7 @@ class ConstantVoltageController(ConstantCurrentController):
             directory,
             logging_sink=logging_sink,
             real_hardware_confirmation=real_hardware_confirmation,
+            retain_output_on_completion=retain_output_on_completion,
         )
 
     def _validate_config(

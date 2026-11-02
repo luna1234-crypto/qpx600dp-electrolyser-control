@@ -458,6 +458,13 @@ acceptance remains pending. Saved recipes are deferred to M17. Electrolyser
 scientific acceptance and unattended operation remain unapproved. See
 [Milestone 15 verification](docs/verification/milestone15.md).
 
+The M15 transition selector defaults to **Safe Off between stages**. Explicit
+**Continuous handoff** keeps the selected output energized only across adjacent
+CC/CV stages, applies decreasing constraints before increases in one serialized
+operation, verifies settings and ON state, and begins the next stage after a
+query-free settling period. It adds no boundary Output On/Off command, polling
+loop or CSV writer. Physical Continuous-handoff acceptance remains pending.
+
 ## Milestone 5 offline physical backend
 
 `SerialTransport` opens only an explicitly supplied port. It never enumerates

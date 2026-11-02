@@ -20,6 +20,7 @@ from qpx_electrolyser.engine.custom_sequence import (
     SequenceSnapshot,
     SequenceStage,
     SequenceStageType,
+    SequenceTransitionPolicy,
 )
 
 
@@ -76,7 +77,7 @@ _FIELDS: dict[SequenceStageType, tuple[tuple[str, str, str], ...]] = {
 
 
 class CustomSequencePanel(QGroupBox):
-    start_requested = Signal(str, object)
+    start_requested = Signal(str, object, str, str)
     pause_requested = Signal()
     resume_requested = Signal()
     stop_requested = Signal()
@@ -91,6 +92,12 @@ class CustomSequencePanel(QGroupBox):
 
         self.name_input = QLineEdit(f"CH{channel} custom sequence")
         self.name_input.setObjectName(f"channel{channel}SequenceName")
+        self.transition_policy = QComboBox()
+        for policy in SequenceTransitionPolicy:
+            self.transition_policy.addItem(policy.label, policy.value)
+        self.transition_policy.setObjectName(f"channel{channel}SequenceTransitionPolicy")
+        self.handoff_settling_input = QLineEdit("1.0")
+        self.handoff_settling_input.setObjectName(f"channel{channel}SequenceHandoffSettling")
         self.stage_list = QListWidget()
         self.stage_list.setObjectName(f"channel{channel}SequenceStages")
         self.stage_list.currentRowChanged.connect(self._load_selected)
@@ -138,7 +145,12 @@ class CustomSequencePanel(QGroupBox):
         for button in (self.start_button, self.pause_button, self.resume_button, self.stop_button):
             controls.addWidget(button)
         self.start_button.clicked.connect(
-            lambda: self.start_requested.emit(self.name_input.text(), tuple(self._stages))
+            lambda: self.start_requested.emit(
+                self.name_input.text(),
+                tuple(self._stages),
+                str(self.transition_policy.currentData()),
+                self.handoff_settling_input.text(),
+            )
         )
         self.pause_button.clicked.connect(self.pause_requested)
         self.resume_button.clicked.connect(self.resume_requested)
@@ -147,13 +159,15 @@ class CustomSequencePanel(QGroupBox):
         self.state_value = QLabel("IDLE")
         self.stage_value = QLabel("0/0")
         self.type_value = QLabel("Unavailable")
+        self.policy_value = QLabel(SequenceTransitionPolicy.SAFE_OFF.label)
         self.progress_value = QLabel("0.000 s active; 0.000 s remaining")
         self.path_value = QLabel("Unavailable")
         self.path_value.setWordWrap(True)
         status = QGridLayout()
         for row, (label, widget) in enumerate((
             ("State:", self.state_value), ("Stage:", self.stage_value),
-            ("Stage type:", self.type_value), ("Progress:", self.progress_value),
+            ("Stage type:", self.type_value), ("Transition policy:", self.policy_value),
+            ("Progress:", self.progress_value),
             ("Raw CSV:", self.path_value),
         )):
             status.addWidget(QLabel(label), row, 0)
@@ -166,6 +180,12 @@ class CustomSequencePanel(QGroupBox):
         names.addWidget(QLabel("Sequence name:"))
         names.addWidget(self.name_input, 1)
         layout.addLayout(names)
+        policy_row = QHBoxLayout()
+        policy_row.addWidget(QLabel("Transition policy:"))
+        policy_row.addWidget(self.transition_policy, 1)
+        policy_row.addWidget(QLabel("Handoff settling (s):"))
+        policy_row.addWidget(self.handoff_settling_input)
+        layout.addLayout(policy_row)
         layout.addWidget(self.stage_list)
         layout.addLayout(editor)
         layout.addLayout(edits)
@@ -261,12 +281,22 @@ class CustomSequencePanel(QGroupBox):
         self.state_value.setText(snapshot.state.value)
         self.stage_value.setText(f"{snapshot.stage_index}/{snapshot.stage_total}")
         self.type_value.setText(snapshot.stage_type or "Unavailable")
+        try:
+            self.policy_value.setText(
+                SequenceTransitionPolicy(snapshot.transition_policy).label
+            )
+        except ValueError:
+            self.policy_value.setText(snapshot.transition_policy)
         self.progress_value.setText(
             f"{snapshot.elapsed_active_s:.3f} s active; "
             f"{snapshot.remaining_active_s:.3f} s remaining"
         )
         self.path_value.setText("Unavailable" if snapshot.file_path is None else str(snapshot.file_path))
         self.message_label.setText(snapshot.message)
+        if snapshot.handoff_state:
+            self.type_value.setText(
+                f"{snapshot.stage_type or 'Unavailable'} — Continuous handoff {snapshot.handoff_state}"
+            )
         self.message_label.setStyleSheet(
             "font-weight: 800; color: white; background: #b42318; padding: 4px;"
             if snapshot.operator_warning else ("color: #a61b1b;" if snapshot.error else "")
@@ -291,6 +321,7 @@ class CustomSequencePanel(QGroupBox):
         editable = state in {ProtocolState.IDLE, ProtocolState.COMPLETED, ProtocolState.FAILED}
         for widget in (
             self.name_input, self.stage_list, self.stage_type, *self.field_inputs,
+            self.transition_policy, self.handoff_settling_input,
             self.add_button, self.update_button, self.remove_button,
             self.duplicate_button, self.up_button, self.down_button,
         ):
@@ -298,7 +329,9 @@ class CustomSequencePanel(QGroupBox):
         self.start_button.setEnabled(
             editable and self._available and bool(self._stages)
         )
-        self.pause_button.setEnabled(state is ProtocolState.RUNNING)
+        self.pause_button.setEnabled(
+            state is ProtocolState.RUNNING and not self._snapshot.handoff_state
+        )
         self.resume_button.setEnabled(
             state is ProtocolState.PAUSED and self._snapshot.resume_ready and self._available
         )
