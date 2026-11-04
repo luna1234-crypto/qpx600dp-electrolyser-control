@@ -30,6 +30,7 @@ from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback, read_channel
 from qpx_electrolyser.instrument.connection_worker import CommandPriority
 from qpx_electrolyser.instrument.exceptions import InstrumentValueError
+from qpx_electrolyser.safety.model import SafetyValidator
 
 
 REAL_HARDWARE_SCAN_CONFIRMATION = "RUN-QPX600DP-STEPPED-SCAN"
@@ -137,6 +138,7 @@ class SteppedScanController(ConstantCurrentController):
         monotonic=None,
         utc_now=None,
         writer_factory=CsvLogFile,
+        safety_validator: SafetyValidator | None = None,
     ) -> None:
         if axis_name not in {"voltage", "current"}:
             raise ValueError("scan axis must be voltage or current")
@@ -149,6 +151,7 @@ class SteppedScanController(ConstantCurrentController):
             "current_label": "Current limit" if axis_name == "voltage" else "Scan current",
             "voltage_label": "Scan voltage" if axis_name == "voltage" else "Voltage compliance",
             "real_hardware_confirmation_token": REAL_HARDWARE_SCAN_CONFIRMATION,
+            "safety_validator": safety_validator,
         }
         if monotonic is not None:
             kwargs["monotonic"] = monotonic
@@ -551,6 +554,7 @@ class VoltageScanController(SteppedScanController):
         monotonic=None,
         utc_now=None,
         writer_factory=CsvLogFile,
+        safety_validator: SafetyValidator | None = None,
     ) -> None:
         super().__init__(
             channel,
@@ -561,6 +565,7 @@ class VoltageScanController(SteppedScanController):
             monotonic=monotonic,
             utc_now=utc_now,
             writer_factory=writer_factory,
+            safety_validator=safety_validator,
         )
         self._point_samples: list[ChannelReadback] = []
         self._point_metadata: dict[str, object] | None = None
@@ -764,6 +769,13 @@ class VoltageScanController(SteppedScanController):
                 raise ValueError(
                     "Requested scan point is outside the conservative power envelope."
                 )
+            self._safety_validator.validate_operating_point(
+                self._channel,
+                voltage,
+                current,
+                voltage_range_name,
+                active_area_cm2=area,
+            )
             setpoints.append(voltage)
         duration_s = len(setpoints) * dwell_s
         if duration_s > limits.max_duration_s:
@@ -931,6 +943,7 @@ class CurrentScanController(SteppedScanController):
         monotonic=None,
         utc_now=None,
         writer_factory=CsvLogFile,
+        safety_validator: SafetyValidator | None = None,
     ) -> None:
         super().__init__(
             channel,
@@ -941,6 +954,7 @@ class CurrentScanController(SteppedScanController):
             monotonic=monotonic,
             utc_now=utc_now,
             writer_factory=writer_factory,
+            safety_validator=safety_validator,
         )
 
     def validate_inputs(
@@ -1119,6 +1133,21 @@ class CurrentScanController(SteppedScanController):
                 raise ValueError(
                     "Requested scan point is outside the conservative power envelope."
                 )
+            density = (
+                float(density_setpoints[len(setpoints)])
+                if density_setpoints else None
+            )
+            self._safety_validator.validate_operating_point(
+                self._channel,
+                voltage,
+                current,
+                voltage_range_name,
+                active_area_cm2=(
+                    None if selection.active_area_cm2 is None
+                    else float(selection.active_area_cm2)
+                ),
+                current_density_a_cm2=density,
+            )
             setpoints.append(current)
         duration_s = len(setpoints) * dwell_s
         if duration_s > limits.max_duration_s:

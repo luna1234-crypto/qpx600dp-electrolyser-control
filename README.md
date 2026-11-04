@@ -14,7 +14,7 @@ resistor-load acceptance, Milestone 12 independent Voltage Sweep / Staircase LSV
 Milestone 13 stepped current scans, Milestone 14 steady-state power-supply
 polarisation, and Milestone 15 per-channel Custom Sequences.
 
-All current implementation and every future Milestone 16–20 target the Aim-TTi
+All current implementation and every future Milestone 17–20 target the Aim-TTi
 QPX600DP. CPX400DP references are retained only as historical context for the
 original Milestone 1–4 records and are not current or future requirements.
 
@@ -605,10 +605,23 @@ The QPX600DP hardware has two voltage ranges per output (60 V and 80 V), a
 capabilities, not safe defaults for an electrolyser experiment.
 
 `QPX600DP_CAPABILITIES` contains immutable manual-derived hardware facts.
-`UserSafetyLimits` is a separate optional simulator configuration object. It is
-`None` by default because this checkpoint has no user safety configuration or
-experiment controls; future work must obtain explicit limits rather than copy
-80 V, 50 A or 600 W into experiment defaults.
+Milestone 16 adds one shared `SafetyValidator` with independent, session-local
+CH1/CH2 maxima for voltage, current, power and (when active area is known)
+current density. The effective limit is always the strictest user, project and
+verified QPX600DP capability/grid constraint. Values are rejected before
+ownership, file creation, setting mutation or Output On; they are never clamped.
+The simulator's separate optional `UserSafetyLimits` remains a backend test
+facility and is not the GUI experiment policy. Persisting GUI limits is deferred
+to Milestone 17.
+
+The prominent **Emergency All Outputs Off** action cancels queued manual/logger
+work, stops both owned protocols, then uses the existing safety-priority guarded
+transition and authoritative readback independently for CH1 and CH2. The result
+names each channel and never reports success while either state is unconfirmed.
+An unconfirmed state closes the session and requires immediate front-panel
+intervention. Safety events append to `logs/safety_events.csv` without instrument
+serial numbers. Normal channel-local Stop/failure remains isolated; only this
+global action, shared connection loss or shutdown affects both channels.
 
 Issue 14 gives two guaranteed power-envelope points, 10 V / 50 A and
 80 V / 7.5 A, but no complete mathematical expression for the graph. The
@@ -675,7 +688,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Steady-State Polarisation | Simulation and supervised CH1/CH2 100-ohm resistor-load functional acceptance passed; quantitative low-current metrology, electrolyser science and unattended operation remain unapproved |
 | M15 Custom sequence editor | Simulation, guarded fake-serial and supervised Safe-Off/Continuous resistor-load acceptance passed; unattended electrolyser operation unapproved |
 | M15B Results / Scientific Plotter | Optional isolated offline M15 CSV analysis and scientific export implemented; no hardware-control access |
-| M16 Full safety/emergency system | Pending; existing channel cleanup is not global Emergency Off |
+| M16 Unified safety/emergency system | Implemented and Simulation/FakeSerial tested; physical Emergency All-Off acceptance remains pending |
 | M17 persistence / M18 UI refinement | Pending for QPX600DP |
 | M19 Windows packaging | Pending; no packaged executable is claimed |
 | M20 final regression/stress testing | Pending; no 24-hour final-system result is claimed |
@@ -703,6 +716,7 @@ not control potential against a reference electrode.
 - [Milestone 14 Steady-State Polarisation verification](docs/verification/milestone14.md)
 - [Milestone 15 Custom Sequence verification](docs/verification/milestone15.md)
 - [Milestone 15B Results / Scientific Plotter verification](docs/verification/milestone15b.md)
+- [Milestone 16 Unified Safety verification](docs/verification/milestone16.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 
@@ -711,5 +725,5 @@ The authoritative QPX Issue 14 manual and Issue 1 addendum are preserved under
 `docs/reference/superseded/`; it must not be used for QPX implementation.
 
 Git history is left intact. Milestone 1-4 commits continue to show the original
-CPX400DP assumption; the model-correction and Milestones 5–15 work record the
+CPX400DP assumption; the model-correction and Milestones 5–16 work record the
 current QPX600DP basis.

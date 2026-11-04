@@ -15,6 +15,7 @@ from qpx_electrolyser.engine.constant_current import (
     ConstantCurrentController,
     ConstantCurrentSafetyLimits,
 )
+from qpx_electrolyser.safety.model import SafetyValidator
 
 
 REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION = "RUN-QPX600DP-CONSTANT-VOLTAGE"
@@ -53,6 +54,7 @@ class ConstantVoltageController(ConstantCurrentController):
         sleep=None,
         utc_now=None,
         writer_factory=CsvLogFile,
+        safety_validator: SafetyValidator | None = None,
     ) -> None:
         kwargs = {
             "safety_limits": safety_limits,
@@ -69,6 +71,7 @@ class ConstantVoltageController(ConstantCurrentController):
             "real_hardware_confirmation_token": (
                 REAL_HARDWARE_CONSTANT_VOLTAGE_CONFIRMATION
             ),
+            "safety_validator": safety_validator,
         }
         if monotonic is not None:
             kwargs["monotonic"] = monotonic

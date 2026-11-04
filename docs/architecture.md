@@ -1,6 +1,6 @@
 # Application and communication architecture
 
-All current code and every future implementation target Milestone 16–20 is for
+All current code and every future implementation target Milestone 17–20 is for
 the Aim-TTi **QPX600DP**. CPX400DP appears only in historical Milestone 1–4
 records retained to explain the post-Milestone-4 model correction; it is not a
 current or future implementation target.
@@ -304,8 +304,8 @@ Recovery must explicitly re-establish framing and ownership with outputs off.
 
 The implemented Constant Current enum is `IDLE`, `STARTING`, `RUNNING`,
 `PAUSING`, `PAUSED`, `RESUMING`, `STOPPING`, `COMPLETED` and `FAILED`. Only its
-channel controller changes this state. Later protocols may add separate outcomes;
-Emergency behavior remains deferred.
+channel controller changes this state. Milestone 16 coordinates those existing
+controllers without adding another protocol state machine.
 
 | Request/event | Required transition or result |
 | --- | --- |
@@ -326,11 +326,14 @@ no alternative is silently enabled. WAIT and OUTPUT_OFF custom steps will need
 explicit output semantics before milestone 15 validation is accepted.
 
 Channel Stop never emits `OPALL`, changes CONFIG, resets the instrument or
-invalidates the other channel's generation. Global emergency first latches the
-controller and invalidates both runs, then requests `OPALL 0`, explicit `OP1 0`
-and `OP2 0` as appropriate, and reads back both states where communication permits.
-An OFF failure for one output must not prevent attempting the other. Retain data
-and display a conspicuous unresolved fault if shutdown cannot be verified.
+invalidates the other channel's generation. Global emergency latches one shared
+coordinator, rejects repeated clicks, cancels pending manual/logger queue work and
+asks both owning protocol controllers to run their established cleanup. One final
+safety-priority operation independently reads each channel, sends at most one
+channel-specific Output-Off write only if still required, and authoritatively
+reads it back. No `OPALL`, reset or retry is used. An OFF failure for one output
+does not prevent attempting the other. Any unconfirmed result closes the shared
+session and displays a conspicuous physical-front-panel warning.
 
 Disconnect and application exit coordinate a deliberate session shutdown:
 invalidate work, request/confirm both outputs OFF, finalise loggers, release the
@@ -410,9 +413,20 @@ exclusive sanitized export paths.
 
 Keep immutable hardware capabilities separate from user-configured safety limits.
 `QPX600DP_CAPABILITIES` records 80 V, 50 A and 600 W ratings; none is an
-experiment default. `UserSafetyLimits` is a separate optional simulation object,
-and future persistent configuration must require explicit operator values rather
-than copying the hardware maxima.
+experiment default. Milestone 16 composes one `SafetyValidator` into manual and
+M9-M15 controllers. Its independent session-local CH1/CH2 maxima intersect with
+the 10 V / 5 A / 50 W project policy, hardware envelope and programming grids;
+current density is also limited whenever active area is known. Validation occurs
+before ownership, logging, mutation or Output On and never clamps. Persistence
+is deliberately deferred to M17. The simulator's older `UserSafetyLimits` stays
+an independent backend test policy rather than becoming a GUI default.
+
+`EmergencyAllOffController` is orchestration, not an instrument owner: it only
+submits through the shared `ConnectionController` queue, reuses protocol Stop and
+guarded Output-Off behavior, and records independent CH1/CH2 outcomes through
+`SafetyEventLog`. The append-only event schema is timestamp, channel, cause,
+requested action and confirmed/unconfirmed final state; identity serial fields
+are redacted. The M15B analysis boundary imports none of these control objects.
 
 Milestone 9 uses separate Simulation and Real Hardware Constant Current policy
 objects, both 10 V, 5 A, 50 W and at most 24 hours. Simulation permits intervals
@@ -425,9 +439,8 @@ at preserved active time, with its first ordinary sample one full interval later
 A stale or duplicate request cannot cross that boundary. Physical protocol
 acceptance is not implied by fake-serial validation.
 
-Apply basic capability/output safeguards before the first real manual control;
-milestone 16 completes the safety system, rather than postponing every safeguard
-until then. Validate voltage/current, their programming grids and worst-case
+Apply capability and M16 safety safeguards before the first real manual control.
+Validate voltage/current, their programming grids and worst-case
 setpoint/compliance power. Issue 14 states guaranteed points of 10 V / 50 A and
 80 V / 7.5 A but gives no complete equation for the graph. The current simulator
 therefore uses a documented conservative segment: at most 50 A through 10 V and
@@ -464,7 +477,7 @@ queue into the existing single-owner boundary without adding a second backend
 owner. Milestone 7 adds manual control and a guarded explicit-port follow-up;
 Milestone 8 adds queue-fed CSV logging, Milestone 9 adds Constant Current,
 Milestone 10 adds bounded plotting and Milestone 11 adds Constant Voltage
-protocols without port discovery, plotting or global emergency control. Its
+protocols without port discovery. Its
 guarded Real Hardware follow-up is fake-serial tested, and supervised resistor-load
 functional acceptance later passed on both channels. Electrolyser and unattended
 use remain unapproved pending transient assessment and later safety milestones.
@@ -473,10 +486,12 @@ logging acceptance are complete. Milestones 10/11 add live plots and Constant
 Voltage without extra polling or another worker. Milestones 12 and 13 add
 Staircase LSV and Current Scan through the same reusable stepped-scan core. Their
 shared guarded Real Hardware follow-up and supervised resistor-load functional
-acceptance are complete. Later protocol types remain out of scope until their
-roadmap milestones; all will target QPX600DP.
-Later concurrency tests must cover cancellation just before ON, stale replies,
-interleaved queries, independent channel shutdown and in-flight emergency latency.
+acceptance are complete. Milestones 14/15 add polarisation and Custom Sequence;
+M15B is isolated offline analysis. Milestone 16 adds shared per-channel safety
+limits, event records and independently confirmed global Emergency All-Off.
+Physical Emergency All-Off acceptance remains pending; all work targets QPX600DP.
+Final M20 concurrency/stress testing must extend cancellation, stale-reply,
+interleaved-query, independent shutdown and emergency-latency evidence.
 Logging tests cover unwritable files, interruption and bounded in-flight work.
 Windows hardware and 24-hour accelerated simulator acceptance belong to their
 specified later milestones; they are not claimed by the current test suite.

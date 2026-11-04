@@ -53,6 +53,7 @@ QPX 600 DP/
             custom_sequence_panel.py
             polarisation_panel.py
             results_plotter.py
+            safety_panel.py
             voltage_scan_panel.py
             main_window.py
         instrument/
@@ -72,6 +73,9 @@ QPX 600 DP/
             simulator_config.py
         safety/
             __init__.py
+            emergency.py
+            event_log.py
+            model.py
         __init__.py
         __main__.py
     Data/
@@ -141,6 +145,7 @@ QPX 600 DP/
         test_remote_output_diagnostic.py
         test_realtime_plot.py
         test_serial_transport.py
+        test_safety.py
         test_simulator.py
     .gitattributes
     .gitignore

@@ -25,6 +25,7 @@ from qpx_electrolyser.engine.stepped_scan import (
     SteppedScanConfig,
     _decimal,
 )
+from qpx_electrolyser.safety.model import SafetyValidator
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback
 from qpx_electrolyser.instrument.exceptions import InstrumentValueError
 
@@ -158,6 +159,7 @@ class PolarisationController(CurrentScanController):
         utc_now=None,
         writer_factory=CsvLogFile,
         summary_writer_factory=PolarisationSummaryFile,
+        safety_validator: SafetyValidator | None = None,
     ) -> None:
         super().__init__(
             channel,
@@ -167,6 +169,7 @@ class PolarisationController(CurrentScanController):
             monotonic=monotonic,
             utc_now=utc_now,
             writer_factory=writer_factory,
+            safety_validator=safety_validator,
         )
         self._protocol_name = "steady_state_polarisation"
         self._display_name = "Steady-State Polarisation"

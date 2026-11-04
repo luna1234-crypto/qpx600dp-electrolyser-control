@@ -40,6 +40,7 @@ from qpx_electrolyser.instrument.channel_readback import ChannelReadback
 from qpx_electrolyser.instrument.channel_readback import read_channel
 from qpx_electrolyser.instrument.connection_worker import CommandPriority
 from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
+from qpx_electrolyser.safety.model import SafetyValidator
 
 
 REAL_HARDWARE_SEQUENCE_CONFIRMATION = "RUN-QPX600DP-CUSTOM-SEQUENCE"
@@ -271,6 +272,7 @@ class CustomSequenceController(QObject):
         *,
         monotonic: Callable[[], float] = time.monotonic,
         sink_factory=SequenceLogSink,
+        safety_validator: SafetyValidator | None = None,
     ) -> None:
         super().__init__(parent)
         if channel not in (1, 2):
@@ -279,6 +281,7 @@ class CustomSequenceController(QObject):
         self._connection = connection
         self._monotonic = monotonic
         self._sink_factory = sink_factory
+        self._safety_validator = safety_validator or SafetyValidator()
         self._snapshot = SequenceSnapshot(channel=channel)
         self._prepared: tuple[_PreparedStage, ...] = ()
         self._stage_index = 0
@@ -316,19 +319,24 @@ class CustomSequenceController(QObject):
 
         self._controllers: Mapping[SequenceStageType, object] = {
             SequenceStageType.CONSTANT_CURRENT: ConstantCurrentController(
-                channel, connection, self, monotonic=monotonic
+                channel, connection, self, monotonic=monotonic,
+                safety_validator=self._safety_validator,
             ),
             SequenceStageType.CONSTANT_VOLTAGE: ConstantVoltageController(
-                channel, connection, self, monotonic=monotonic
+                channel, connection, self, monotonic=monotonic,
+                safety_validator=self._safety_validator,
             ),
             SequenceStageType.VOLTAGE_SCAN: VoltageScanController(
-                channel, connection, self, monotonic=monotonic
+                channel, connection, self, monotonic=monotonic,
+                safety_validator=self._safety_validator,
             ),
             SequenceStageType.CURRENT_SCAN: CurrentScanController(
-                channel, connection, self, monotonic=monotonic
+                channel, connection, self, monotonic=monotonic,
+                safety_validator=self._safety_validator,
             ),
             SequenceStageType.POLARISATION: PolarisationController(
-                channel, connection, self, monotonic=monotonic
+                channel, connection, self, monotonic=monotonic,
+                safety_validator=self._safety_validator,
             ),
         }
         for controller in self._controllers.values():

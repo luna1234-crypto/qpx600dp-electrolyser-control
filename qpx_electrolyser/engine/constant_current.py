@@ -28,6 +28,7 @@ from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback, read_channel
 from qpx_electrolyser.instrument.connection_worker import CommandPriority
 from qpx_electrolyser.instrument.exceptions import InstrumentValueError
+from qpx_electrolyser.safety.model import SafetyValidator
 
 
 class ProtocolState(str, Enum):
@@ -180,6 +181,7 @@ class ConstantCurrentController(QObject):
         current_label: str = "Target current",
         voltage_label: str = "Voltage compliance",
         real_hardware_confirmation_token: str = REAL_HARDWARE_PROTOCOL_CONFIRMATION,
+        safety_validator: SafetyValidator | None = None,
     ) -> None:
         super().__init__(parent)
         QPX600DP_CAPABILITIES.validate_channel(channel)
@@ -197,6 +199,7 @@ class ConstantCurrentController(QObject):
         self._current_label = current_label
         self._voltage_label = voltage_label
         self._real_hardware_confirmation_token = real_hardware_confirmation_token
+        self._safety_validator = safety_validator or SafetyValidator()
         self._snapshot = ProtocolSnapshot(
             channel=channel,
             message=f"{display_name} protocol idle",
@@ -607,6 +610,20 @@ class ConstantCurrentController(QObject):
             raise ValueError(f"Requested V*I exceeds the {limits.max_power_w:g} W project limit.")
         if not QPX600DP_CAPABILITIES.power_envelope.contains(voltage, current):
             raise ValueError("Requested operating point is outside the conservative power envelope.")
+        self._safety_validator.validate_operating_point(
+            self._channel,
+            voltage,
+            current,
+            voltage_range_name,
+            active_area_cm2=(
+                None if current_input.active_area_cm2 is None
+                else float(current_input.active_area_cm2)
+            ),
+            current_density_a_cm2=(
+                None if current_input.current_density_a_cm2 is None
+                else float(current_input.current_density_a_cm2)
+            ),
+        )
         if not 0 < duration_s <= limits.max_duration_s:
             raise ValueError(
                 f"Duration must be positive and no greater than {limits.max_duration_s:g} seconds."

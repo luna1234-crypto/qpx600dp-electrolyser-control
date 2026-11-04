@@ -4,7 +4,7 @@
 > CPX400DP assumption. Their claims are intentionally not rewritten as QPX600DP
 > results. The post-Milestone-4 model correction is recorded separately at the
 > end of this file and in `verification/model_correction_qpx600dp.md`.
-> All current implementation and every future Milestone 16–20 target the
+> All current implementation and every future Milestone 17–20 target the
 > QPX600DP. CPX400DP is retained only as historical context for Milestones 1–4.
 
 ## Milestone 1 - Project skeleton
@@ -634,8 +634,21 @@ their original numbering.
 ## Milestone 16 - Full safety and emergency system
 
 Original roadmap task: Emergency All Outputs Off and complete fault handling.
-This milestone is pending for QPX600DP. Existing channel-local guarded cleanup
-is not a substitute for the planned global emergency/fault system.
+Implemented for QPX600DP as one shared, session-local safety policy and global
+Emergency All-Off coordinator. Independent CH1/CH2 user maxima for voltage,
+current, power and current density intersect with project limits and immutable
+capability/grid facts. Manual controls and M9-M15 validate before ownership,
+logging, setting mutation or Output On; no value is silently clamped.
+
+Emergency All-Off cancels pending manual/logger work, asks every owning protocol
+to use its existing bounded safety cleanup, and then independently reads each
+channel. A channel still ON receives at most one guarded safety-priority Output
+Off before authoritative readback. CH1 and CH2 results remain separate; any
+unconfirmed state closes the session and presents a physical-front-panel warning.
+Normal channel-local failures stay isolated. Events append without instrument
+serial numbers to the safety-event log. Offline Plotter behavior is unchanged.
+Simulation and fake-backend acceptance is complete; supervised physical global
+Emergency All-Off acceptance and unattended electrolyser use are not approved.
 
 ## Milestone 17 - Persistence
 

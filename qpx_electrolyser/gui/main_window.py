@@ -62,7 +62,11 @@ from qpx_electrolyser.gui.plots.polarisation import (
     PolarisationPlotPanel,
 )
 from qpx_electrolyser.gui.polarisation_panel import PolarisationPanel
+from qpx_electrolyser.gui.safety_panel import SafetyPanel
 from qpx_electrolyser.gui.voltage_scan_panel import VoltageScanPanel
+from qpx_electrolyser.safety.emergency import EmergencyAllOffController, EmergencySnapshot
+from qpx_electrolyser.safety.event_log import SafetyEventLog
+from qpx_electrolyser.safety.model import SafetyLimits, SafetyValidationError, SafetyValidator
 
 
 class MainWindow(QMainWindow):
@@ -77,6 +81,9 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self._connection_controller = connection_controller
+        self.safety_validator = SafetyValidator()
+        self.safety_event_log = SafetyEventLog(Path(log_file).parent / "safety_events.csv")
+        self._logged_safety_events: set[tuple[object, ...]] = set()
         self.setWindowTitle("QPX600DP Electrolyser - Custom Sequences")
         self.resize(1280, 960)
         self.setMinimumSize(760, 540)
@@ -104,6 +111,10 @@ class MainWindow(QMainWindow):
         connection_controller.error_reported.connect(self._show_connection_error)
         self.connection_panel.apply_snapshot(connection_controller.snapshot)
         layout.addWidget(self.connection_panel)
+
+        self.safety_panel = SafetyPanel(self.safety_validator)
+        self.safety_panel.limits_changed.connect(self._apply_safety_limits)
+        layout.addWidget(self.safety_panel)
 
         logging_row = QHBoxLayout()
         logging_row.addWidget(QLabel("CSV output directory:"))
@@ -148,23 +159,36 @@ class MainWindow(QMainWindow):
         self.lsv_plot_panels: dict[int, LsvPlotPanel] = {}
         self.polarisation_plot_panels: dict[int, PolarisationPlotPanel] = {}
         for channel in (1, 2):
-            controller = ManualChannelController(channel, connection_controller, self)
+            controller = ManualChannelController(
+                channel,
+                connection_controller,
+                self,
+                safety_validator=self.safety_validator,
+            )
             logging_controller = ChannelLoggingController(channel, connection_controller, self)
-            protocol_controller = ConstantCurrentController(channel, connection_controller, self)
+            protocol_controller = ConstantCurrentController(
+                channel, connection_controller, self,
+                safety_validator=self.safety_validator,
+            )
             voltage_protocol_controller = ConstantVoltageController(
-                channel, connection_controller, self
+                channel, connection_controller, self,
+                safety_validator=self.safety_validator,
             )
             voltage_scan_controller = VoltageScanController(
-                channel, connection_controller, self
+                channel, connection_controller, self,
+                safety_validator=self.safety_validator,
             )
             current_scan_controller = CurrentScanController(
-                channel, connection_controller, self
+                channel, connection_controller, self,
+                safety_validator=self.safety_validator,
             )
             polarisation_controller = PolarisationController(
-                channel, connection_controller, self
+                channel, connection_controller, self,
+                safety_validator=self.safety_validator,
             )
             sequence_controller = CustomSequenceController(
-                channel, connection_controller, self
+                channel, connection_controller, self,
+                safety_validator=self.safety_validator,
             )
             plot_controller = ChannelPlotController(channel, connection_controller, self)
             lsv_plot_controller = LsvPlotController(channel, self)
@@ -406,6 +430,27 @@ class MainWindow(QMainWindow):
             panels.addWidget(panel, 1)
         layout.addLayout(panels)
 
+        self.emergency_controller = EmergencyAllOffController(
+            connection_controller, self.safety_event_log, self
+        )
+        self.emergency_controller.register(
+            {
+                channel: (
+                    self.protocol_controllers[channel],
+                    self.voltage_protocol_controllers[channel],
+                    self.voltage_scan_controllers[channel],
+                    self.current_scan_controllers[channel],
+                    self.polarisation_controllers[channel],
+                    self.sequence_controllers[channel],
+                )
+                for channel in (1, 2)
+            },
+            self.channel_controllers,
+            self.logging_controllers,
+        )
+        self.safety_panel.emergency_requested.connect(self.emergency_controller.request)
+        self.emergency_controller.snapshot_changed.connect(self._apply_emergency_snapshot)
+
         protocol_panels = QHBoxLayout()
         protocol_panels.setSpacing(18)
         for channel in (1, 2):
@@ -515,13 +560,13 @@ class MainWindow(QMainWindow):
             self,
             "About QPX600DP Electrolyser",
             f"QPX600DP Electrolyser {__version__}\n\n"
-            "Milestone 13 automatic stepped voltage/current scan build.\n\n"
+            "Milestone 16 unified safety build.\n\n"
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
             "Simulation is the default. Real Hardware uses only a manually entered COM port. "
-            "Independent CSV logging and guarded Constant Current/Constant Voltage "
-            "protocols are available. Voltage and Current Scan have guarded Real Hardware "
-            "paths, but supervised physical scan acceptance remains pending. Live plotting uses "
-            "existing queued samples; emergency-all-off remains future work.",
+            "Independent logging, guarded protocols and scans retain the shared command queue. "
+            "Session-local CH1/CH2 safety limits and Emergency All-Off add validation and "
+            "authoritative per-channel OFF reporting. The optional Results / Plotter remains "
+            "offline and cannot control the instrument.",
         )
 
     def _open_results_plotter(self) -> None:
@@ -547,6 +592,52 @@ class MainWindow(QMainWindow):
 
     def _results_plotter_closed(self, *_args) -> None:  # type: ignore[no-untyped-def]
         self._results_plotter_window = None
+
+    def _apply_safety_limits(self, channel: int, limits: SafetyLimits) -> None:
+        manual = self.channel_controllers[channel].snapshot
+        if self._channel_protocol_owned(channel) or manual.output_enabled or manual.pending:
+            self.safety_panel.show_message(
+                f"CH{channel} must be idle, command-free and Output OFF before changing "
+                "its safety limits.",
+                error=True,
+            )
+            return
+        try:
+            self.safety_validator.set_user_limits(channel, limits)
+        except (TypeError, ValueError, SafetyValidationError) as error:
+            self.safety_panel.show_message(str(error), error=True)
+            return
+        self.safety_panel.show_message(self.safety_validator.summary(channel))
+
+    def _apply_emergency_snapshot(self, snapshot: EmergencySnapshot) -> None:
+        self.safety_panel.set_emergency_pending(snapshot.active)
+        self.safety_panel.show_message(snapshot.message, error=snapshot.warning)
+        self.statusBar().showMessage(snapshot.message)
+        if snapshot.warning:
+            QMessageBox.critical(
+                self,
+                "Emergency All-Off — physical OFF unconfirmed",
+                snapshot.message
+                + "\n\nUse the QPX600DP front-panel controls immediately and verify both outputs OFF.",
+            )
+
+    def _safety_confirmation_details(
+        self, channel: int, *, file_path: Path | None = None
+    ) -> str:
+        manual = self.channel_controllers[channel].snapshot
+        logger = self.logging_controllers[channel].snapshot
+        csv_target = file_path or logger.file_path
+        if csv_target is None:
+            csv_description = f"new exclusive CH{channel} CSV in {self._data_directory}"
+        else:
+            csv_description = str(csv_target)
+        return (
+            "\n"
+            f"Voltage range: {manual.voltage_range_name or 'unavailable'}\n"
+            f"CSV path: {csv_description}\n"
+            + self.safety_validator.summary(channel)
+            + "\nThe request has passed capability/grid, project and user-limit validation."
+        )
 
     def _choose_logging_directory(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -636,7 +727,8 @@ class MainWindow(QMainWindow):
                 f"CSV destination: {log_target}\n\n"
                 "Confirm the intended load and wiring are connected to this channel, the other "
                 "channel is safe, and energizing this output is authorized. The application will "
-                "perform a fresh OFF/settings preflight before one Output-On attempt.",
+                "perform a fresh OFF/settings preflight before one Output-On attempt."
+                + self._safety_confirmation_details(channel),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -673,8 +765,19 @@ class MainWindow(QMainWindow):
                 "REAL HARDWARE OUTPUT-ON AUTHORIZATION\n\n"
                 f"Resume CH{channel} at {config.target_current_a:g} A with "
                 f"{config.voltage_compliance_v:g} V compliance?\n\n"
+                + (
+                    f"Current density / active area: "
+                    f"{config.commanded_current_density_a_cm2:g} A/cm² / "
+                    f"{config.active_area_cm2:g} cm²\n"
+                    if config.commanded_current_density_a_cm2 is not None
+                    and config.active_area_cm2 is not None else ""
+                )
+                + f"Remaining active duration: {protocol.snapshot.remaining_active_s:g} s\n"
                 "Confirm the load and wiring remain safe. A fresh OFF/settings preflight will "
-                "precede one Output-On attempt.",
+                "precede one Output-On attempt."
+                + self._safety_confirmation_details(
+                    channel, file_path=protocol.snapshot.file_path
+                ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -735,7 +838,8 @@ class MainWindow(QMainWindow):
                 f"CSV destination: {log_target}\n\n"
                 "Confirm the intended load and wiring are connected to this channel, the other "
                 "channel is safe, and energizing this output is authorized. The application will "
-                "perform a fresh OFF/range/settings preflight before one Output-On attempt.",
+                "perform a fresh OFF/range/settings preflight before one Output-On attempt."
+                + self._safety_confirmation_details(channel),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -770,8 +874,12 @@ class MainWindow(QMainWindow):
                 "REAL HARDWARE OUTPUT-ON AUTHORIZATION\n\n"
                 f"Resume CH{channel} at {config.target_voltage_v:g} V with "
                 f"{config.current_limit_a:g} A current limit?\n\n"
+                f"Remaining active duration: {protocol.snapshot.remaining_active_s:g} s\n"
                 "Confirm the load and wiring remain safe. A fresh OFF/range/settings preflight "
-                "will precede one Output-On attempt.",
+                "will precede one Output-On attempt."
+                + self._safety_confirmation_details(
+                    channel, file_path=protocol.snapshot.file_path
+                ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -856,7 +964,8 @@ class MainWindow(QMainWindow):
                 f"CSV destination: {logger_path}\n\n"
                 "Confirm the intended 100-ohm load and wiring are safe. The other channel "
                 "will not be modified. A fresh identity/OFF/range/settings preflight will "
-                "precede one guarded Output-On attempt.",
+                "precede one guarded Output-On attempt."
+                + self._safety_confirmation_details(channel),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -947,6 +1056,13 @@ class MainWindow(QMainWindow):
                 f"Channel: CH{channel}\n"
                 "Scan type: Current Scan\n"
                 f"Current input mode: {current_input_mode}\n"
+                + (
+                    f"Current density start / stop / step: {start_current} / "
+                    f"{stop_current} / {current_step} A/cm²\n"
+                    f"Active area: {active_area_cm2} cm²\n"
+                    if current_input_mode == CurrentInputMode.CURRENT_DENSITY.value else ""
+                )
+                +
                 f"Start / stop / step: {float(start_a):g} / {float(stop_a):g} / "
                 f"{float(step_a):g} A\n"
                 f"Voltage compliance: {voltage_compliance} V\n"
@@ -958,7 +1074,8 @@ class MainWindow(QMainWindow):
                 f"CSV destination: {logger_path}\n\n"
                 "Confirm the intended 100-ohm load and wiring are safe. The other channel "
                 "will not be modified. A fresh identity/OFF/range/settings preflight will "
-                "precede one guarded Output-On attempt.",
+                "precede one guarded Output-On attempt."
+                + self._safety_confirmation_details(channel),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -1019,7 +1136,10 @@ class MainWindow(QMainWindow):
                 "Output-On writes for this Resume: exactly one\n"
                 f"CSV path: {scan.snapshot.file_path}\n\n"
                 "Confirm the same load and wiring remain safe. A fresh OFF/range/settings "
-                "preflight will precede one guarded Output-On attempt.",
+                "preflight will precede one guarded Output-On attempt."
+                + self._safety_confirmation_details(
+                    channel, file_path=scan.snapshot.file_path
+                ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -1110,7 +1230,8 @@ class MainWindow(QMainWindow):
                 f"CSV destination: {logger_path}\n\n"
                 "This is power-supply polarisation, not potentiostat control. Confirm "
                 "the supervised load and wiring are safe. One guarded Output-On attempt "
-                "will follow fresh identity/OFF/range/setpoint checks.",
+                "will follow fresh identity/OFF/range/setpoint checks."
+                + self._safety_confirmation_details(channel),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -1144,6 +1265,27 @@ class MainWindow(QMainWindow):
             self._channel_protocol_owned(channel)
         )
         self._update_protocol_context(channel)
+        # Input/authorization rejection happens before ownership, file creation
+        # or any output transition and is not a safety cleanup event.  Record
+        # only runs which reached an owned/output-aware lifecycle.
+        if (
+            snapshot.state.value in {"COMPLETED", "FAILED"}
+            and (snapshot.file_path is not None or snapshot.output_enabled is not None)
+        ):
+            fingerprint = (
+                channel,
+                snapshot.state.value,
+                snapshot.message,
+                str(snapshot.file_path),
+            )
+            if fingerprint not in self._logged_safety_events:
+                self._logged_safety_events.add(fingerprint)
+                self.safety_event_log.append(
+                    channel=channel,
+                    cause=snapshot.message,
+                    requested_action="Protocol terminal Output-Off cleanup",
+                    confirmed_off=snapshot.output_enabled is False,
+                )
         if snapshot.operator_warning:
             QMessageBox.critical(
                 self,
@@ -1236,7 +1378,8 @@ class MainWindow(QMainWindow):
                 "Start will first run a fresh QPX600DP identity and atomic two-channel "
                 "readback. The selected output must be OFF. Each stage will use its "
                 "existing guarded transition; no Output-On action is retried. Confirm "
-                "the 100-ohm load, limits and complete ordered stage list.",
+                "the 100-ohm load, limits and complete ordered stage list."
+                + self._safety_confirmation_details(channel),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -1274,7 +1417,10 @@ class MainWindow(QMainWindow):
                 f"Current stage: {snapshot.stage_index}/{snapshot.stage_total} "
                 f"({snapshot.stage_type})\n"
                 "Resume reuses the existing guarded stage preflight and exactly one "
-                "Output-On attempt. It will not restart or skip the stage.",
+                "Output-On attempt. It will not restart or skip the stage."
+                + self._safety_confirmation_details(
+                    channel, file_path=snapshot.file_path
+                ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -1457,4 +1603,11 @@ class MainWindow(QMainWindow):
 
     def _show_connection_error(self, message: str) -> None:
         self.statusBar().showMessage(message)
+        for channel in (1, 2):
+            self.safety_event_log.append(
+                channel=channel,
+                cause=message,
+                requested_action="Shared-session failure cleanup",
+                confirmed_off=False,
+            )
         QMessageBox.warning(self, "Connection problem", message)

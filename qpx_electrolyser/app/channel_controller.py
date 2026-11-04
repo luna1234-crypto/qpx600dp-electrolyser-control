@@ -15,6 +15,7 @@ from qpx_electrolyser.instrument.capabilities import QPX600DP_CAPABILITIES
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback, read_channel
 from qpx_electrolyser.instrument.connection_worker import BackendOperation, CommandPriority
 from qpx_electrolyser.instrument.exceptions import InstrumentValueError
+from qpx_electrolyser.safety.model import SafetyValidationError, SafetyValidator
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,11 +58,14 @@ class ManualChannelController(QObject):
         channel: int,
         connection_controller: ConnectionController,
         parent: QObject | None = None,
+        *,
+        safety_validator: SafetyValidator | None = None,
     ) -> None:
         super().__init__(parent)
         QPX600DP_CAPABILITIES.validate_channel(channel)
         self._channel = channel
         self._connection = connection_controller
+        self._safety_validator = safety_validator or SafetyValidator()
         self._cancellation_key = f"manual-channel-{channel}"
         self._pending_request_id: int | None = None
         self._snapshot = ChannelSnapshot(channel=channel)
@@ -91,7 +95,13 @@ class ManualChannelController(QObject):
             return
         try:
             voltage = QPX600DP_CAPABILITIES.validate_voltage(value, voltage_range)
-        except InstrumentValueError as error:
+            current = self._snapshot.current_limit_a
+            if current is None:
+                raise SafetyValidationError("Refresh the current limit before setting voltage.")
+            self._safety_validator.validate_operating_point(
+                self._channel, voltage, current, voltage_range
+            )
+        except (InstrumentValueError, SafetyValidationError) as error:
             self._validation_failed(str(error))
             return
 
@@ -108,7 +118,14 @@ class ManualChannelController(QObject):
             return
         try:
             current = QPX600DP_CAPABILITIES.validate_current(value)
-        except InstrumentValueError as error:
+            voltage = self._snapshot.programmed_voltage_v
+            voltage_range = self._snapshot.voltage_range_name
+            if voltage is None or voltage_range is None:
+                raise SafetyValidationError("Refresh voltage and range before setting current.")
+            self._safety_validator.validate_operating_point(
+                self._channel, voltage, current, voltage_range
+            )
+        except (InstrumentValueError, SafetyValidationError) as error:
             self._validation_failed(str(error))
             return
 
@@ -122,6 +139,19 @@ class ManualChannelController(QObject):
     def request_output_on(self, confirmed: bool = False) -> None:
         if not confirmed:
             self._validation_failed("Output On was not confirmed; no command was submitted.")
+            return
+        voltage = self._snapshot.programmed_voltage_v
+        current = self._snapshot.current_limit_a
+        voltage_range = self._snapshot.voltage_range_name
+        if voltage is None or current is None or voltage_range is None:
+            self._validation_failed("Refresh the complete channel state before Output On.")
+            return
+        try:
+            self._safety_validator.validate_operating_point(
+                self._channel, voltage, current, voltage_range
+            )
+        except SafetyValidationError as error:
+            self._validation_failed(str(error))
             return
 
         def operation(supply: PowerSupplyInterface) -> ChannelSnapshot:

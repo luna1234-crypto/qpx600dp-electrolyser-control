@@ -222,3 +222,34 @@ worker warning appears.
 This remains a Simulation procedure; do not select Real Hardware here.
 Supervised Safe-Off and Continuous resistor-load acceptance has passed, but
 Custom Sequences do not approve unattended electrolyser operation.
+
+## Milestone 16 Unified Safety checks
+
+Keep Simulation Mode selected and disconnected initially:
+
+1. Confirm the Unified Safety panel shows independent CH1/CH2 voltage, current,
+   power and current-density maxima and a prominent Emergency All Outputs Off.
+2. Connect Simulation Mode. Set CH1 maximum voltage to `1.5 V`; attempt a `2 V`
+   manual setting and one `2 V` Constant Voltage/scan/sequence stage. Confirm
+   each is rejected in the affected panel before any Output On or CSV creation.
+   Confirm CH2 remains usable with its own unchanged limits.
+3. Restore CH1 to the project limit. Start a short CH1 protocol and a different
+   CH2 protocol simultaneously, then press Emergency All Outputs Off once (and
+   repeatedly while pending). Confirm both finish independently as OFF, neither
+   receives a duplicate Output-Off action, both CSV writers close cleanly and
+   separate CH1/CH2 results appear.
+4. Repeat with only CH1 active and CH2 idle. Confirm CH2 is authoritatively read
+   but is not unnecessarily written, while CH1 stops and confirms OFF.
+5. Confirm normal CH1 Stop/failure does not stop an active CH2 run. Open Results /
+   Plotter during a run and confirm it remains offline and cannot trigger any
+   safety or instrument action.
+6. Inspect `logs/safety_events.csv`: it must be append-only, contain timestamp,
+   channel, cause, requested action and confirmed/unconfirmed final state, and
+   contain no instrument serial identity.
+7. Disconnect and close the GUI. Confirm both simulated outputs are OFF, no
+   residual process/QThread warning appears, and a disconnected emergency action
+   warns that physical OFF cannot be authoritatively confirmed rather than
+   claiming success.
+
+This checklist is Simulation Mode only. Physical Emergency All-Off acceptance,
+electrolyser scientific acceptance and unattended operation remain pending.
