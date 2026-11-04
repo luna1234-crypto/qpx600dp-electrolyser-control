@@ -494,6 +494,13 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        tools_menu = self.menuBar().addMenu("&Tools")
+        results_action = QAction("Results / Plotter...", self)
+        results_action.setToolTip("Offline analysis — does not control the instrument")
+        results_action.triggered.connect(self._open_results_plotter)
+        tools_menu.addAction(results_action)
+        self._results_plotter_window = None
+
         help_menu = self.menuBar().addMenu("&Help")
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
@@ -516,6 +523,30 @@ class MainWindow(QMainWindow):
             "paths, but supervised physical scan acceptance remains pending. Live plotting uses "
             "existing queued samples; emergency-all-off remains future work.",
         )
+
+    def _open_results_plotter(self) -> None:
+        """Lazily open the optional analysis extension without control coupling."""
+        try:
+            if self._results_plotter_window is None:
+                from qpx_electrolyser.gui.results_plotter import ResultsPlotterWindow
+
+                window = ResultsPlotterWindow(self._data_directory, self)
+                window.destroyed.connect(self._results_plotter_closed)
+                self._results_plotter_window = window
+            self._results_plotter_window.show()
+            self._results_plotter_window.raise_()
+            self._results_plotter_window.activateWindow()
+        except Exception as error:
+            self._results_plotter_window = None
+            QMessageBox.warning(
+                self,
+                "Results / Plotter unavailable",
+                "The optional offline-analysis extension could not be opened. "
+                f"Experiment control is unaffected.\n\n{error}",
+            )
+
+    def _results_plotter_closed(self, *_args) -> None:  # type: ignore[no-untyped-def]
+        self._results_plotter_window = None
 
     def _choose_logging_directory(self) -> None:
         selected = QFileDialog.getExistingDirectory(

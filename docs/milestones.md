@@ -586,16 +586,17 @@ running unless the shared connection fails.
 
 Automated acceptance ran the requested simultaneous CH1 CC / Wait / CV and CH2
 CV / CC plans, paused/resumed CH1 while CH2 continued, exercised early Stop,
-inspected CSV order/metadata and confirmed both simulated outputs OFF. Real
-A guarded Real Hardware follow-up uses a default-cancel confirmation listing
+inspected CSV order/metadata and confirmed both simulated outputs OFF. A guarded
+Real Hardware follow-up uses a default-cancel confirmation listing
 every stage, then one queued atomic QPX600DP identity and two-channel readback
 before file creation or mutation. Selected output ON, identity mismatch,
 communication failure, stale session or cancellation prevents all writes.
 Successful preflight delegates stages to the accepted M11–M14 transitions.
 CH1/CH2 fake serial covers exact order, Pause/Resume, Stop, stage transitions,
-failure cleanup, isolation and final OFF. Supervised physical acceptance, saved
-recipes (M17), global emergency behavior (M16), electrolyser scientific
-acceptance and unattended operation remain pending. See
+failure cleanup, isolation and final OFF. Supervised Safe-Off and Continuous
+resistor-load acceptance subsequently passed. Saved recipes (M17), global
+emergency behavior (M16), electrolyser scientific acceptance and unattended
+operation remain pending. See
 [verification details](verification/milestone15.md).
 
 Continuous Stage Handoff is an M15 follow-up. Safe Off remains the default;
@@ -604,8 +605,31 @@ CC/CV stages, atomically verifies safely ordered setpoint changes, waits a
 query-free 1.0-second default settling period, then starts the next stage clock.
 It issues no boundary output write and retains one CSV writer. Wait/Output-Off
 and unsupported boundaries fall back to Safe Off. Simulation and fake-serial
-acceptance are complete; supervised Continuous Real Hardware acceptance is
-pending and unattended electrolyser operation remains unapproved.
+acceptance are complete. Supervised resistor-load acceptance subsequently passed
+for Safe-Off and Continuous Real Hardware transitions. This does not approve
+electrolyser science or unattended operation.
+
+## Milestone 15B - Results / Scientific Plotter (optional extension)
+
+Implemented a strictly isolated offline Results / Plotter window for existing
+M15 stage-aware raw CSV files. It imports and compares multiple experiments,
+accepts material/legend/style edits and an explicit active-area override, and
+produces voltage-versus-current and voltage-versus-current-density previews with
+optional population-voltage-SD error bars.
+
+Only completed stages with a final continuous 30 seconds of valid RUNNING,
+Output-ON measurements produce a point. Pause, Resume, OFF, handoff/settling,
+starting/stopping/cleanup, error and invalid rows break or are excluded from the
+window. Short stages visibly report `Insufficient stable 30-second window`.
+Exports include a combined processed CSV, PNG/SVG/PDF plots, plot configuration
+and processing metadata, all through exclusive sanitized filenames.
+
+M15B is read-only and optional: it imports no transport, driver, queue, channel
+engine, protocol controller or safety transition and submits no instrument
+operation. Its asynchronous workers and exceptions are local, and experiment
+control starts and runs without opening or loading it. Old Test Bridge files,
+M14 summaries, GEIS parsing and iR correction remain deferred. M16–M20 retain
+their original numbering.
 
 ## Milestone 16 - Full safety and emergency system
 

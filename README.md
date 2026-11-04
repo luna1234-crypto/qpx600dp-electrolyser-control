@@ -454,7 +454,8 @@ strong default-cancel stage-list confirmation and fresh atomic identity plus
 two-channel readback before file creation or mutation, then delegates every
 stage to the accepted M11–M14 transitions. Fake serial verifies both channels,
 exact order, cancellation, rejection and cleanup; supervised physical M15
-acceptance remains pending. Saved recipes are deferred to M17. Electrolyser
+acceptance subsequently passed for both the Safe-Off and explicit Continuous
+handoff policies. Saved recipes are deferred to M17. Electrolyser
 scientific acceptance and unattended operation remain unapproved. See
 [Milestone 15 verification](docs/verification/milestone15.md).
 
@@ -463,7 +464,34 @@ The M15 transition selector defaults to **Safe Off between stages**. Explicit
 CC/CV stages, applies decreasing constraints before increases in one serialized
 operation, verifies settings and ON state, and begins the next stage after a
 query-free settling period. It adds no boundary Output On/Off command, polling
-loop or CSV writer. Physical Continuous-handoff acceptance remains pending.
+loop or CSV writer. Supervised Continuous-handoff acceptance passed; it remains
+operator-supervised resistor-load evidence, not unattended electrolyser approval.
+
+## Milestone 15B Results / Scientific Plotter
+
+The optional **Tools → Results / Plotter** window performs offline, read-only
+analysis of existing M15 stage-aware raw CSV files. It is clearly labelled
+“Offline analysis — does not control the instrument”, remains usable while
+disconnected, imports multiple immutable source files asynchronously, and has no
+reference to the serial transport, instrument driver, shared queue, channel
+engine, protocol controllers or output transitions. A load, parse, preview or
+export failure is contained inside the window and cannot stop an experiment.
+
+Completed M15 stages produce one processed scientific point only when their
+final uninterrupted RUNNING/Output-ON segment supplies a full continuous
+30-second window. Pause, OFF, Resume, handoff/settling, cleanup and invalid/error
+rows break continuity and are excluded; shorter stages are reported as
+`Insufficient stable 30-second window` rather than silently averaged. The
+processor retains Decimal precision and reports population voltage/current SD,
+time bounds and current density from recorded area or an explicit labelled
+override.
+
+Multiple experiments can be styled and compared on voltage-versus-current or
+voltage-versus-current-density figures with optional voltage-SD error bars.
+Processed CSV, PNG, SVG, PDF, plot configuration and processing metadata exports
+use sanitized exclusive filenames and never overwrite existing output. Old Test
+Bridge import, M14 summary import, GEIS parsing and iR correction remain deferred.
+See [Milestone 15B verification](docs/verification/milestone15b.md).
 
 ## Milestone 5 offline physical backend
 
@@ -645,7 +673,8 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Voltage Sweep / Staircase LSV | Simulation/fake-serial and supervised 100-ohm functional acceptance passed; not metrology or electrolyser approval |
 | Independent stepped Current Scan | Simulation and supervised CH1/CH2 100-ohm Real Hardware functional acceptance passed; low-current readings are not calibration |
 | Steady-State Polarisation | Simulation and supervised CH1/CH2 100-ohm resistor-load functional acceptance passed; quantitative low-current metrology, electrolyser science and unattended operation remain unapproved |
-| M15 Custom sequence editor | Simulation accepted; guarded Real Hardware path fake-serial validated, supervised physical acceptance pending |
+| M15 Custom sequence editor | Simulation, guarded fake-serial and supervised Safe-Off/Continuous resistor-load acceptance passed; unattended electrolyser operation unapproved |
+| M15B Results / Scientific Plotter | Optional isolated offline M15 CSV analysis and scientific export implemented; no hardware-control access |
 | M16 Full safety/emergency system | Pending; existing channel cleanup is not global Emergency Off |
 | M17 persistence / M18 UI refinement | Pending for QPX600DP |
 | M19 Windows packaging | Pending; no packaged executable is claimed |
@@ -673,6 +702,7 @@ not control potential against a reference electrode.
 - [Milestone 13 Current Scan verification](docs/verification/milestone13.md)
 - [Milestone 14 Steady-State Polarisation verification](docs/verification/milestone14.md)
 - [Milestone 15 Custom Sequence verification](docs/verification/milestone15.md)
+- [Milestone 15B Results / Scientific Plotter verification](docs/verification/milestone15b.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 

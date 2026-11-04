@@ -54,8 +54,10 @@ stale callback or session replacement cannot advance the stage or retry ON.
 Simulation/fake-serial coverage verifies CV→CC, CC→CV, CV→CV and CC→CC order,
 decreasing-before-increasing constraints, one initial ON and one final OFF,
 no boundary output writes, Stop during settling, metadata, channel isolation,
-and unchanged Safe-Off behavior. Continuous Real Hardware acceptance remains
-pending; unattended electrolyser operation remains unapproved.
+and unchanged Safe-Off behavior. Supervised resistor-load acceptance subsequently
+passed for both Safe-Off and Continuous Real Hardware sequences. Channel
+isolation, Pause/Resume, stage order and authoritative final OFF were accepted.
+Unattended electrolyser operation remains unapproved.
 
 Follow-up validation passed with 504 tests, including the requested simultaneous
 CH1 CV 1.0 V / 0.08 A / 5 s → CC 0.03 A / 4.0 V / 5 s → CV 2.0 V /
@@ -117,8 +119,10 @@ duplicated.
 Fake serial covers CH1 and CH2 exact preflight order, cancellation with no
 command, a selected output changing ON after connection, identity change,
 two-stage advancement, Pause/Resume, Stop, writer failure, stale callbacks,
-channel isolation and final OFF. Supervised physical M15 acceptance remains
-pending. No automatic launch, reconnect, retry, restart, resume or subsequent
+channel isolation and final OFF. Supervised physical resistor-load M15 acceptance
+has passed for both transition policies; this is functional evidence only and
+does not approve electrolyser science or unattended use. No automatic launch,
+reconnect, retry, restart, resume or subsequent
 run is performed. M16 global emergency behavior and M17 saved recipes are not
 implemented here. This milestone does not approve quantitative electrolyser
 science or unattended electrolyser operation.

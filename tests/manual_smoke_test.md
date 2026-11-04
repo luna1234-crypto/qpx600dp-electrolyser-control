@@ -1,5 +1,23 @@
 # Windows visual smoke test (milestone 12)
 
+## Milestone 15B Results / Plotter (offline)
+
+1. Leave the application disconnected and choose **Tools → Results / Plotter**.
+   Confirm the non-modal window says “Offline analysis — does not control the instrument”.
+2. Import at least two M15 raw CSV experiments containing completed stages of at
+   least 30 continuous RUNNING/Output-ON seconds. Set distinct material names,
+   legend labels, colours, markers and display order; hide and restore one curve.
+3. Import an M15 file whose completed stage has less than 30 continuous valid
+   seconds. Confirm it reports `Insufficient stable 30-second window` and does not
+   produce an averaged point.
+4. Preview voltage versus current, then voltage versus current density. If area
+   is absent, enter an override and confirm the source is marked overridden.
+5. Save/load a plot configuration. Export processed CSV, metadata and PNG/SVG/PDF
+   twice; confirm numbered alternatives are created and no file is overwritten.
+6. While a Simulation protocol owns a channel, open, analyse and close the Plotter.
+   Confirm the protocol state, output and logging are unaffected and the GUI stays
+   responsive. Close the Plotter independently.
+
 ## Milestone 15 Continuous Stage Handoff (Simulation Mode)
 
 1. Connect in Simulation Mode and add CH1 stages: CV 1.0 V / 0.08 A / 5 s,
@@ -201,5 +219,6 @@ a separate longer plan, Stop during its first stage and confirm no later stage
 starts. Disconnect and close only after both simulated outputs are OFF and no
 worker warning appears.
 
-Do not select Real Hardware: M15 physical acceptance is pending. Custom
-Sequences do not approve unattended electrolyser operation.
+This remains a Simulation procedure; do not select Real Hardware here.
+Supervised Safe-Off and Continuous resistor-load acceptance has passed, but
+Custom Sequences do not approve unattended electrolyser operation.

@@ -371,8 +371,9 @@ M15 Real Hardware Start requires a strong default-cancel confirmation. A single
 queued, atomic preflight then freshly identifies the backend and reads both
 channels before any CSV creation or mutation; the selected output must be OFF.
 Session/request generations reject late results. Successful preflight delegates
-each stage to its existing M11–M14 guarded path. Supervised physical acceptance
-remains pending.
+each stage to its existing M11–M14 guarded path. Supervised Safe-Off and
+Continuous-handoff resistor-load acceptance subsequently passed; this does not
+approve unattended electrolyser operation.
 
 M15 also offers a per-run transition policy. **Safe Off between stages** remains
 the default and preserves the accepted delegated behavior. Explicit
@@ -389,6 +390,23 @@ safety-priority Output-Off cleanup attempt without retrying Output On. Optional
 CSV columns record the transition policy and handoff state; transition evidence
 uses `stage_handoff_started`, `stage_handoff_settling` and
 `stage_handoff_completed` without adding a polling loop or a second writer.
+
+M15B is a strictly optional offline-analysis boundary. Qt-independent code under
+`qpx_electrolyser.analysis` opens immutable M15 raw CSV files, validates stage
+metadata, splits continuity at every excluded state and computes the fixed final
+30-second statistics using Decimal values. The presentation module imports only
+that analysis boundary and Qt; it has no dependency on application connection,
+protocol, queue, driver, transport or output-control modules. The main window
+loads it lazily from a non-modal Tools action and contains load failures locally,
+so the experiment-control application remains primary and starts normally when
+the extension is unavailable.
+
+Analysis runs in a dedicated bounded Qt thread pool. Source size is bounded and
+window shutdown drains its local workers without touching experiment workers.
+Preview and PNG/SVG/PDF rendering are Qt-native and consume processed points only;
+they never poll the instrument. Source files are never changed. Processed CSV,
+configuration and processing metadata retain full numeric precision and use
+exclusive sanitized export paths.
 
 Keep immutable hardware capabilities separate from user-configured safety limits.
 `QPX600DP_CAPABILITIES` records 80 V, 50 A and 600 W ratings; none is an
