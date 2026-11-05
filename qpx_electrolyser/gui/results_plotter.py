@@ -28,6 +28,7 @@ from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QColorDialog,
     QDoubleSpinBox,
     QFileDialog,
     QGridLayout,
@@ -246,6 +247,8 @@ def draw_scientific_plot(
                 painter.drawLine(x, top, x, bottom)
                 painter.drawLine(x - 4, top, x + 4, top)
                 painter.drawLine(x - 4, bottom, x + 4, bottom)
+            if style.marker == "none":
+                continue
             if style.marker == "square":
                 painter.drawRect(QRectF(x - size / 2, y - size / 2, size, size))
             elif style.marker == "triangle":
@@ -505,24 +508,116 @@ class ResultsPlotterWindow(QMainWindow):
             for row, key in enumerate(keys):
                 style = self._styles[key]
                 values = (
-                    "yes" if style.visible else "no", style.material_name,
-                    style.legend_label, style.color, style.marker,
-                    str(style.marker_size), style.line_style, str(style.line_width),
-                    str(style.display_order), style.active_area_override_cm2,
-                    Path(key).name,
-                    (
-                        self._reports[key].validation_status
-                        if key in self._reports
-                        else self._errors.get(key, "Analysing")
-                    ),
+                    "", style.material_name, style.legend_label, "", "", "", "", "", "",
+                    style.active_area_override_cm2, Path(key).name,
+                    self._reports[key].validation_status
+                    if key in self._reports else self._errors.get(key, "Analysing"),
                 )
                 for column, value in enumerate(values):
-                    item = QTableWidgetItem(value); item.setData(Qt.ItemDataRole.UserRole, key)
-                    if column in (10, 11): item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    item = QTableWidgetItem(value)
+                    item.setData(Qt.ItemDataRole.UserRole, key)
+                    if column in (0, 3, 4, 5, 6, 7, 8, 10, 11):
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.table.setItem(row, column, item)
+
+                visible = QCheckBox()
+                visible.setChecked(style.visible)
+                visible.setToolTip("Show this experiment in the preview and exports")
+                visible.toggled.connect(
+                    lambda checked, selected=key: self._set_curve_style(
+                        selected, "visible", checked
+                    )
+                )
+                self.table.setCellWidget(row, 0, visible)
+
+                colour = QPushButton(style.color)
+                colour.setToolTip("Choose curve colour")
+                colour.setStyleSheet(
+                    f"QPushButton {{ background: {style.color}; color: "
+                    f"{'#ffffff' if QColor(style.color).lightness() < 128 else '#000000'}; }}"
+                )
+                colour.clicked.connect(
+                    lambda _checked=False, selected=key: self._choose_curve_color(selected)
+                )
+                self.table.setCellWidget(row, 3, colour)
+
+                marker = QComboBox()
+                for text, value in (
+                    ("Circle", "circle"), ("Square", "square"),
+                    ("Triangle", "triangle"), ("None", "none"),
+                ):
+                    marker.addItem(text, value)
+                marker.setCurrentIndex(max(0, marker.findData(style.marker)))
+                marker.currentIndexChanged.connect(
+                    lambda _index, selected=key, control=marker: self._set_curve_style(
+                        selected, "marker", str(control.currentData())
+                    )
+                )
+                self.table.setCellWidget(row, 4, marker)
+
+                marker_size = QDoubleSpinBox()
+                marker_size.setRange(1.0, 40.0); marker_size.setDecimals(1)
+                marker_size.setValue(style.marker_size)
+                marker_size.valueChanged.connect(
+                    lambda value, selected=key: self._set_curve_style(
+                        selected, "marker_size", float(value)
+                    )
+                )
+                self.table.setCellWidget(row, 5, marker_size)
+
+                line = QComboBox()
+                for text, value in (
+                    ("Solid", "solid"), ("Dashed", "dash"),
+                    ("Dotted", "dot"), ("None", "none"),
+                ):
+                    line.addItem(text, value)
+                line.setCurrentIndex(max(0, line.findData(style.line_style)))
+                line.currentIndexChanged.connect(
+                    lambda _index, selected=key, control=line: self._set_curve_style(
+                        selected, "line_style", str(control.currentData())
+                    )
+                )
+                self.table.setCellWidget(row, 6, line)
+
+                line_width = QDoubleSpinBox()
+                line_width.setRange(0.1, 12.0); line_width.setDecimals(1)
+                line_width.setValue(style.line_width)
+                line_width.valueChanged.connect(
+                    lambda value, selected=key: self._set_curve_style(
+                        selected, "line_width", float(value)
+                    )
+                )
+                self.table.setCellWidget(row, 7, line_width)
+
+                order = QSpinBox()
+                order.setRange(0, 999); order.setValue(style.display_order)
+                order.valueChanged.connect(
+                    lambda value, selected=key: self._set_curve_style(
+                        selected, "display_order", int(value)
+                    )
+                )
+                self.table.setCellWidget(row, 8, order)
             self.table.resizeColumnsToContents()
         finally:
             self._updating_table = False
+
+    def _set_curve_style(self, key: str, attribute: str, value: object) -> None:
+        style = self._styles.get(key)
+        if style is None:
+            return
+        setattr(style, attribute, value)
+        self._refresh_preview()
+
+    def _choose_curve_color(self, key: str) -> None:
+        style = self._styles.get(key)
+        if style is None:
+            return
+        selected = QColorDialog.getColor(QColor(style.color), self, "Select curve colour")
+        if not selected.isValid():
+            return
+        style.color = selected.name()
+        self._rebuild_table()
+        self._refresh_preview()
 
     def _table_changed(self, row: int, _column: int) -> None:
         if self._updating_table:
@@ -534,15 +629,8 @@ class ResultsPlotterWindow(QMainWindow):
         old_material = style.material_name
         old_override = style.active_area_override_cm2
         try:
-            style.visible = self.table.item(row, 0).text().strip().lower() not in {"no", "false", "0"}
             style.material_name = self.table.item(row, 1).text().strip() or Path(key).stem
             style.legend_label = self.table.item(row, 2).text().strip() or style.material_name
-            style.color = self.table.item(row, 3).text().strip()
-            style.marker = self.table.item(row, 4).text().strip().lower()
-            style.marker_size = float(self.table.item(row, 5).text())
-            style.line_style = self.table.item(row, 6).text().strip().lower()
-            style.line_width = float(self.table.item(row, 7).text())
-            style.display_order = int(self.table.item(row, 8).text())
             style.active_area_override_cm2 = self.table.item(row, 9).text().strip()
             if (
                 old_override != style.active_area_override_cm2

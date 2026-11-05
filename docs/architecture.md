@@ -434,6 +434,22 @@ DISCONNECTED controller snapshot; it cannot instantiate or connect a backend.
 Main-window geometry is clamped to an available screen. M15B plot configuration
 remains a separate operator-managed file and is never overwritten by reset.
 
+Milestone 18 changes composition, not control ownership. `ChannelWorkspace`
+reparents the existing Manual and M9-M15 panels into one `QTabWidget` per
+channel and renders a read-only compact status derived from immutable controller
+snapshots. It does not submit commands. Connection, safety limits and Emergency
+All-Off live in a fixed header outside the protocol scroll area. Plot panels are
+hosted by checkable `CollapsiblePlotSection` splitters; their existing sample
+signals, bounded stores and zero-polling behavior are unchanged. Tab selection,
+focus and scroll position are never changed by snapshot delivery.
+
+The M15B completion predicate accepts either an explicit `stage_completed`
+event or the natural child-protocol terminal record (`completed`, COMPLETED,
+`Protocol duration completed`). It deliberately rejects the otherwise similar
+`Custom Sequence stopped by operator` terminal record. Offline style widgets
+mutate only `CurveStyle` and repaint processed data; they import no control
+objects.
+
 `EmergencyAllOffController` is orchestration, not an instrument owner: it only
 submits through the shared `ConnectionController` queue, reuses protocol Stop and
 guarded Output-Off behavior, and records independent CH1/CH2 outcomes through

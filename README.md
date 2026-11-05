@@ -2,7 +2,7 @@
 
 Python 3.12 / PySide6 desktop project for an Aim-TTi QPX600DP dual-output
 power supply. Milestones 1-4 were originally completed under a CPX400DP model
-assumption. Version 0.15.0 preserves those historical records, the Milestone 5
+assumption. Version 0.18.0 preserves those historical records, the Milestone 5
 QPX600DP serial backend and completed two-channel standard-load Windows
 validation, the Milestone 6 shared
 asynchronous command queue, Milestone 7 dual-channel manual controls with a
@@ -12,7 +12,9 @@ guarded Real Hardware follow-up, Milestone 10 bounded real-time plots, and
 Milestone 11 independent Constant Voltage protocols with supervised two-channel
 resistor-load acceptance, Milestone 12 independent Voltage Sweep / Staircase LSV,
 Milestone 13 stepped current scans, Milestone 14 steady-state power-supply
-polarisation, and Milestone 15 per-channel Custom Sequences.
+polarisation, Milestone 15 per-channel Custom Sequences, the optional M15B
+offline Results / Plotter, M16 unified safety, M17 safe persistence and the
+Milestone 18 refined dual-channel operator interface.
 
 All current implementation and every future Milestone 18–20 target the Aim-TTi
 QPX600DP. CPX400DP references are retained only as historical context for the
@@ -654,6 +656,32 @@ restored Real Hardware mode still requires manual Connect and every existing
 confirmation. **Tools > Reset Settings to Defaults** is guarded by confirmation
 and does not modify M15B plot-configuration files.
 
+## Milestone 18 refined operator interface
+
+Connection/mode state, per-channel safety limits and the prominent Emergency
+All-Off action remain in a fixed header while protocol content scrolls below.
+CH1 and CH2 each use the same compact workspace: an always-visible Output,
+measured V/I/P, CV/CC availability, protocol/stage and CSV status strip plus
+keyboard-navigable tabs for Manual, CC, CV, Voltage Scan, Current Scan,
+Polarisation and Custom Sequence. The original panels and controllers are
+reparented rather than reimplemented, so protocol semantics and signal routes
+are unchanged. Live time, LSV and polarisation plots are independently
+collapsible and use resizable two-channel splitters.
+
+Simulation and Real Hardware are surrounded by distinct mode-coloured header
+borders. The tabbed layout avoids the former long-page focus jump (including
+CH2 Constant Voltage Start), retains channel-local validation beside the
+affected panel and remains usable on smaller Windows displays and at 100%, 125%
+and 150% scaling.
+
+M15B now recognises the real M15 final-stage completion schema: a natural child
+`completed` row with `Protocol duration completed` is accepted even when the
+redundant `stage_completed` marker is absent. An operator-stopped stage remains
+rejected, while already completed earlier stages remain valid. Curve visibility,
+colour, marker, marker size, line style/width and display order now have typed
+controls that update preview immediately and round-trip through plot
+configuration files.
+
 Issue 14 gives two guaranteed power-envelope points, 10 V / 50 A and
 80 V / 7.5 A, but no complete mathematical expression for the graph. The
 simulator deliberately avoids interpolation:
@@ -721,7 +749,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | M15B Results / Scientific Plotter | Optional isolated offline M15 CSV analysis and scientific export implemented; no hardware-control access |
 | M16 Unified safety/emergency system | Simulation/FakeSerial and supervised dual-channel 100-ohm Emergency All-Off acceptance passed; physical USB-disconnection acceptance not performed |
 | M17 configuration persistence | Implemented with versioned atomic per-user settings and safe disconnected restore |
-| M18 UI refinement | Pending for QPX600DP |
+| M18 UI refinement | Implemented; fixed header, tabbed channel workspaces, compact status, collapsible plots, stable focus/routing and corrected M15B real-schema/style controls |
 | M19 Windows packaging | Pending; no packaged executable is claimed |
 | M20 final regression/stress testing | Pending; no 24-hour final-system result is claimed |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
@@ -750,6 +778,7 @@ not control potential against a reference electrode.
 - [Milestone 15B Results / Scientific Plotter verification](docs/verification/milestone15b.md)
 - [Milestone 16 Unified Safety verification](docs/verification/milestone16.md)
 - [Milestone 17 Configuration Persistence verification](docs/verification/milestone17.md)
+- [Milestone 18 UI Refinement verification](docs/verification/milestone18.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 

@@ -66,6 +66,10 @@ from qpx_electrolyser.engine.stepped_scan import (
     generate_inclusive_setpoints,
 )
 from qpx_electrolyser.gui.channel_panel import ChannelPanel
+from qpx_electrolyser.gui.channel_workspace import (
+    ChannelWorkspace,
+    CollapsiblePlotSection,
+)
 from qpx_electrolyser.gui.connection_panel import ConnectionPanel
 from qpx_electrolyser.gui.constant_current_panel import ConstantCurrentPanel
 from qpx_electrolyser.gui.constant_voltage_panel import ConstantVoltagePanel
@@ -119,24 +123,41 @@ class MainWindow(QMainWindow):
         self.safety_event_log = SafetyEventLog(Path(log_file).parent / "safety_events.csv")
         self._logged_safety_events: set[tuple[object, ...]] = set()
         self._live_validation_status_messages: dict[int, set[str]] = {1: set(), 2: set()}
-        self.setWindowTitle("QPX600DP Electrolyser - Custom Sequences")
+        self.setWindowTitle("QPX600DP Electrolyser Control")
         self.resize(1280, 960)
         self.setMinimumSize(760, 540)
         if restore_connection_preferences:
             connection_controller.set_port_name(restored.manual_port)
             connection_controller.set_simulation_mode(restored.simulation_mode)
 
+        shell = QWidget()
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(10, 8, 10, 8)
+        shell_layout.setSpacing(8)
+        fixed_header = QWidget()
+        fixed_header.setObjectName("alwaysVisibleControlHeader")
+        self.always_visible_header = fixed_header
+        initial_mode_colour = (
+            "#075985" if connection_controller.snapshot.simulation_mode else "#7f1d1d"
+        )
+        fixed_header.setStyleSheet(
+            f"#alwaysVisibleControlHeader {{ border: 3px solid {initial_mode_colour}; "
+            "border-radius: 6px; padding: 3px; }}"
+        )
+        header_layout = QVBoxLayout(fixed_header)
+        header_layout.setContentsMargins(8, 4, 8, 4)
+        header_layout.setSpacing(6)
         root = QWidget()
         layout = QVBoxLayout(root)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(18)
+        layout.setContentsMargins(10, 8, 10, 12)
+        layout.setSpacing(10)
 
         title = QLabel("Aim-TTi QPX600DP | Electrolyser testing")
         title_font = title.font()
         title_font.setPointSize(16)
         title_font.setBold(True)
         title.setFont(title_font)
-        layout.addWidget(title)
+        header_layout.addWidget(title)
 
         self.connection_panel = ConnectionPanel()
         self.connection_panel.connect_requested.connect(connection_controller.request_connect)
@@ -148,11 +169,11 @@ class MainWindow(QMainWindow):
         connection_controller.snapshot_changed.connect(self._apply_connection_snapshot)
         connection_controller.error_reported.connect(self._show_connection_error)
         self.connection_panel.apply_snapshot(connection_controller.snapshot)
-        layout.addWidget(self.connection_panel)
+        header_layout.addWidget(self.connection_panel)
 
         self.safety_panel = SafetyPanel(self.safety_validator)
         self.safety_panel.limits_changed.connect(self._apply_safety_limits)
-        layout.addWidget(self.safety_panel)
+        header_layout.addWidget(self.safety_panel)
 
         logging_row = QHBoxLayout()
         logging_row.addWidget(QLabel("CSV output directory:"))
@@ -178,10 +199,9 @@ class MainWindow(QMainWindow):
         self.logging_interval.setDecimals(3)
         self.logging_interval.setValue(restored.default_sampling_interval_s)
         logging_row.addWidget(self.logging_interval)
-        layout.addLayout(logging_row)
+        header_layout.addLayout(logging_row)
+        shell_layout.addWidget(fixed_header)
 
-        panels = QHBoxLayout()
-        panels.setSpacing(18)
         self.channel_controllers: dict[int, ManualChannelController] = {}
         self.logging_controllers: dict[int, ChannelLoggingController] = {}
         self.protocol_controllers: dict[int, ConstantCurrentController] = {}
@@ -481,8 +501,7 @@ class MainWindow(QMainWindow):
                 polarisation_panel,
                 sequence_panel,
             ))
-            panels.addWidget(panel, 1)
-        layout.addLayout(panels)
+        self.channel_workspaces: dict[int, ChannelWorkspace] = {}
 
         self.emergency_controller = EmergencyAllOffController(
             connection_controller, self.safety_event_log, self
@@ -505,67 +524,42 @@ class MainWindow(QMainWindow):
         self.safety_panel.emergency_requested.connect(self.emergency_controller.request)
         self.emergency_controller.snapshot_changed.connect(self._apply_emergency_snapshot)
 
-        protocol_panels = QHBoxLayout()
-        protocol_panels.setSpacing(18)
+        channel_areas = QHBoxLayout()
+        channel_areas.setSpacing(10)
         for channel in (1, 2):
-            protocol_panels.addWidget(self.protocol_panels[channel], 1)
-            self._update_protocol_context(channel)
-        layout.addLayout(protocol_panels)
-
-        voltage_protocol_panels = QHBoxLayout()
-        voltage_protocol_panels.setSpacing(18)
-        for channel in (1, 2):
-            voltage_protocol_panels.addWidget(self.voltage_protocol_panels[channel], 1)
-            self._update_protocol_context(channel)
-        layout.addLayout(voltage_protocol_panels)
-
-        voltage_scan_panels = QHBoxLayout()
-        voltage_scan_panels.setSpacing(18)
-        for channel in (1, 2):
-            voltage_scan_panels.addWidget(self.voltage_scan_panels[channel], 1)
-            self._update_protocol_context(channel)
-        layout.addLayout(voltage_scan_panels)
-
-        current_scan_panels = QHBoxLayout()
-        current_scan_panels.setSpacing(18)
-        for channel in (1, 2):
-            current_scan_panels.addWidget(self.current_scan_panels[channel], 1)
-            self._update_protocol_context(channel)
-        layout.addLayout(current_scan_panels)
-
-        polarisation_panels = QHBoxLayout()
-        polarisation_panels.setSpacing(18)
-        for channel in (1, 2):
-            polarisation_panels.addWidget(self.polarisation_panels[channel], 1)
-            self._update_protocol_context(channel)
-        layout.addLayout(polarisation_panels)
-
-        sequence_panels = QHBoxLayout()
-        sequence_panels.setSpacing(18)
-        for channel in (1, 2):
-            sequence_panels.addWidget(self.sequence_panels[channel], 1)
-            self._update_protocol_context(channel)
-        layout.addLayout(sequence_panels)
-
-        plot_panels = QHBoxLayout()
-        plot_panels.setSpacing(18)
-        for channel in (1, 2):
-            plot_panels.addWidget(self.plot_panels[channel], 1)
-        layout.addLayout(plot_panels)
-
-        lsv_plot_panels = QHBoxLayout()
-        lsv_plot_panels.setSpacing(18)
-        for channel in (1, 2):
-            lsv_plot_panels.addWidget(self.lsv_plot_panels[channel], 1)
-        layout.addLayout(lsv_plot_panels)
-
-        polarisation_plot_panels = QHBoxLayout()
-        polarisation_plot_panels.setSpacing(18)
-        for channel in (1, 2):
-            polarisation_plot_panels.addWidget(
-                self.polarisation_plot_panels[channel], 1
+            workspace = ChannelWorkspace(
+                channel,
+                (
+                    self.channel_panels[channel],
+                    self.protocol_panels[channel],
+                    self.voltage_protocol_panels[channel],
+                    self.voltage_scan_panels[channel],
+                    self.current_scan_panels[channel],
+                    self.polarisation_panels[channel],
+                    self.sequence_panels[channel],
+                ),
             )
-        layout.addLayout(polarisation_plot_panels)
+            self.channel_workspaces[channel] = workspace
+            channel_areas.addWidget(workspace, 1)
+            self._update_protocol_context(channel)
+        layout.addLayout(channel_areas)
+
+        self.plot_sections = {
+            "time": CollapsiblePlotSection(
+                "Live voltage/current time plots",
+                (self.plot_panels[1], self.plot_panels[2]),
+            ),
+            "lsv": CollapsiblePlotSection(
+                "Staircase LSV I–V / j–V plots",
+                (self.lsv_plot_panels[1], self.lsv_plot_panels[2]),
+            ),
+            "polarisation": CollapsiblePlotSection(
+                "Polarisation plots",
+                (self.polarisation_plot_panels[1], self.polarisation_plot_panels[2]),
+            ),
+        }
+        for section in self.plot_sections.values():
+            layout.addWidget(section)
 
         self._disconnect_pending = False
         self._close_pending = False
@@ -583,7 +577,8 @@ class MainWindow(QMainWindow):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(root)
         self.content_scroll = scroll
-        self.setCentralWidget(scroll)
+        shell_layout.addWidget(scroll, 1)
+        self.setCentralWidget(shell)
         self.statusBar().showMessage("Disconnected | Simulation available | Diagnostic logging active")
         self.statusBar().setToolTip(str(log_file))
 
@@ -654,13 +649,9 @@ class MainWindow(QMainWindow):
                 sequence.field_inputs[index].setText(area)
 
     def _set_plot_group_visible(self, group: str, visible: bool) -> None:
-        groups = {
-            "time": self.plot_panels,
-            "lsv": self.lsv_plot_panels,
-            "polarisation": self.polarisation_plot_panels,
-        }
-        for panel in groups[group].values():
-            panel.setVisible(visible)
+        section = self.plot_sections.get(group)
+        if section is not None:
+            section.setVisible(visible)
 
     def _apply_plot_preferences(self, preferences: PlotDisplayPreferences) -> None:
         self.show_time_plots_action.setChecked(preferences.show_time_plots)
@@ -782,7 +773,7 @@ class MainWindow(QMainWindow):
             self,
             "About QPX600DP Electrolyser",
             f"QPX600DP Electrolyser {__version__}\n\n"
-            "Milestone 17 configuration persistence build.\n\n"
+            "Milestone 18 refined operator interface build.\n\n"
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
             "Simulation is the default. Real Hardware uses only a manually entered COM port. "
             "Independent logging, guarded protocols and scans retain the shared command queue. "
@@ -1918,6 +1909,70 @@ class MainWindow(QMainWindow):
             simulation_mode=connection.simulation_mode,
         )
         self._refresh_start_validation(channel)
+        self._update_compact_channel_status(channel)
+
+    def _update_compact_channel_status(self, channel: int) -> None:
+        workspace = self.channel_workspaces.get(channel)
+        if workspace is None:
+            return
+        manual = self.channel_controllers[channel].snapshot
+        output = (
+            "ON" if manual.output_enabled is True
+            else "OFF" if manual.output_enabled is False else "UNKNOWN"
+        )
+        voltage = (
+            f"{manual.measured_voltage_v:.4g} V"
+            if manual.measured_voltage_v is not None else "—"
+        )
+        current = (
+            f"{manual.measured_current_a:.4g} A"
+            if manual.measured_current_a is not None else "—"
+        )
+        power = (
+            f"{manual.measured_voltage_v * manual.measured_current_a:.4g} W"
+            if manual.measured_voltage_v is not None
+            and manual.measured_current_a is not None else "—"
+        )
+        controllers = (
+            ("Constant Current", self.protocol_controllers[channel].snapshot),
+            ("Constant Voltage", self.voltage_protocol_controllers[channel].snapshot),
+            ("Voltage Scan", self.voltage_scan_controllers[channel].snapshot),
+            ("Current Scan", self.current_scan_controllers[channel].snapshot),
+            ("Polarisation", self.polarisation_controllers[channel].snapshot),
+            ("Custom Sequence", self.sequence_controllers[channel].snapshot),
+        )
+        active = next(
+            ((name, snapshot) for name, snapshot in controllers if snapshot.owns_channel),
+            None,
+        )
+        if active is None:
+            protocol = "IDLE"
+            stage = "—"
+            protocol_path = None
+        else:
+            name, snapshot = active
+            protocol = f"{name} / {snapshot.state.value}"
+            protocol_path = snapshot.file_path
+            if name == "Custom Sequence":
+                stage = (
+                    f"{snapshot.stage_index}/{snapshot.stage_total} {snapshot.stage_type}"
+                )
+            elif snapshot.scan_step_index is not None:
+                stage = f"{snapshot.scan_step_index}/{snapshot.scan_total_steps}"
+            else:
+                stage = "—"
+        logging = self.logging_controllers[channel].snapshot
+        csv_path = protocol_path or logging.file_path
+        csv_status = str(csv_path) if csv_path is not None else "inactive"
+        workspace.update_status(
+            output=output,
+            voltage=voltage,
+            current=current,
+            power=power,
+            protocol=protocol,
+            stage=stage,
+            csv=csv_status,
+        )
 
     def _channel_protocol_owned(self, channel: int) -> bool:
         return (
@@ -1997,6 +2052,11 @@ class MainWindow(QMainWindow):
 
     def _apply_connection_snapshot(self, snapshot: ConnectionSnapshot) -> None:
         self.connection_panel.apply_snapshot(snapshot)
+        mode_colour = "#7f1d1d" if not snapshot.simulation_mode else "#075985"
+        self.always_visible_header.setStyleSheet(
+            f"#alwaysVisibleControlHeader {{ border: 3px solid {mode_colour}; "
+            "border-radius: 6px; padding: 3px; }}"
+        )
         for panel in self.channel_panels.values():
             panel.set_real_hardware_mode(not snapshot.simulation_mode)
         for channel in self.protocol_panels:

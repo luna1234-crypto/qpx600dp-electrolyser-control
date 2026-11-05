@@ -206,6 +206,29 @@ def _commanded_setpoints(rows: Iterable[_ValidRow]) -> str:
     return json.dumps(values, ensure_ascii=False, separators=(",", ":"))
 
 
+def _stage_completed(rows: Iterable[Mapping[str, str]]) -> bool:
+    """Recognise both recorded M15 completion shapes without accepting Stop.
+
+    Older and real-hardware sequence files do not always contain a separate
+    ``stage_completed`` marker for the final stage.  The child protocol's
+    natural terminal row is nevertheless unambiguous: it is ``completed`` in
+    the COMPLETED state with the duration-completed reason.  Operator Stop
+    uses the same status/state pair but a different reason and must remain
+    excluded.
+    """
+    for row in rows:
+        if row.get("sample_status", "").strip() == "stage_completed":
+            return True
+        if (
+            row.get("sample_status", "").strip() == "completed"
+            and row.get("protocol_state", "").strip() == "COMPLETED"
+            and row.get("sequence_stage_state", "").strip() == "COMPLETED"
+            and row.get("error", "").strip() == "Protocol duration completed"
+        ):
+            return True
+    return False
+
+
 def analyse_m15_csv(
     spec: ExperimentSpec,
     *,
@@ -260,7 +283,7 @@ def analyse_m15_csv(
              if row.get("sequence_stage_type", "")),
             "unknown",
         )
-        completed = any(row.get("sample_status") == "stage_completed" for row in stage_rows)
+        completed = _stage_completed(stage_rows)
         segments: list[list[_ValidRow]] = []
         current_segment: list[_ValidRow] = []
         for row in stage_rows:

@@ -48,6 +48,7 @@ QPX 600 DP/
             __init__.py
             connection_panel.py
             channel_panel.py
+            channel_workspace.py
             constant_current_panel.py
             constant_voltage_panel.py
             current_scan_panel.py
@@ -151,6 +152,7 @@ QPX 600 DP/
         test_safety.py
         test_settings.py
         test_simulator.py
+        test_ui_refinement.py
     .gitattributes
     .gitignore
     main.py

@@ -12,7 +12,9 @@ import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QMessageBox, QSpinBox,
+)
 import pytest
 
 from qpx_electrolyser.analysis.m15_results import (
@@ -102,6 +104,17 @@ def _completed(rows: list[dict[str, object]], **kwargs: object) -> None:
     rows.append(_row(elapsed, status="stage_completed", state="COMPLETED", output="OFF", **kwargs))
 
 
+def _natural_child_completion(
+    rows: list[dict[str, object]], **kwargs: object
+) -> None:
+    elapsed = float(rows[-1]["elapsed_seconds"]) if rows else 0.0
+    row = _row(
+        elapsed, status="completed", state="COMPLETED", output="OFF", **kwargs
+    )
+    row["error"] = "Protocol duration completed"
+    rows.append(row)
+
+
 def _wait(qapp: QApplication, predicate, timeout: float = 3.0) -> None:  # type: ignore[no-untyped-def]
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -154,6 +167,51 @@ def test_only_completed_stages_and_each_run_channel_stage_are_independent(tmp_pa
     assert {(item.run_id, item.channel, item.stage_index) for item in report.accepted_points} == {
         ("r1", 1, 1), ("r1", 2, 1), ("r2", 1, 2),
     }
+
+
+def test_real_schema_natural_final_stage_is_completed_without_stage_marker(
+    tmp_path: Path,
+) -> None:
+    rows = [_row(float(value)) for value in range(31)]
+    _natural_child_completion(rows)
+    sequence = _row(30, status="sequence_completed", state="COMPLETED", output="OFF")
+    rows.append(sequence)
+    report = analyse_m15_csv(ExperimentSpec(_write(tmp_path / "natural.csv", rows)))
+    assert len(report.accepted_points) == 1
+    assert report.accepted_points[0].validation_status.startswith("Accepted")
+
+
+def test_real_schema_pause_resume_accepts_only_final_continuous_window(
+    tmp_path: Path,
+) -> None:
+    rows = [_row(float(value)) for value in range(6)]
+    rows.append(_row(5, status="paused", state="PAUSED", output="OFF"))
+    rows.append(_row(9, status="output_on_stabilized", state="RESUMING", output="ON"))
+    rows.extend(_row(float(value)) for value in range(10, 41))
+    _natural_child_completion(rows)
+    report = analyse_m15_csv(ExperimentSpec(_write(tmp_path / "resumed.csv", rows)))
+    point = report.accepted_points[0]
+    assert point.analysis_start_elapsed_s == Decimal("10")
+    assert point.analysis_end_elapsed_s == Decimal("40")
+    assert point.sample_count == 31
+
+
+def test_completed_stages_before_stop_remain_valid_but_interrupted_stage_is_rejected(
+    tmp_path: Path,
+) -> None:
+    rows = [_row(float(value), stage=1) for value in range(31)]
+    _completed(rows, stage=1)
+    rows.extend(_row(float(value), stage=2) for value in range(31))
+    stopped = _row(30, stage=2, status="completed", state="COMPLETED", output="OFF")
+    stopped["error"] = "Custom Sequence stopped by operator"
+    rows.append(stopped)
+    rows.append(_row(30, stage=2, status="sequence_completed", state="COMPLETED", output="OFF"))
+    report = analyse_m15_csv(ExperimentSpec(_write(tmp_path / "stopped.csv", rows)))
+    assert [(item.stage_index, item.accepted) for item in report.results] == [
+        (1, True),
+        (2, False),
+    ]
+    assert report.results[1].validation_status == "Stage not completed"
 
 
 def test_ascending_descending_and_repeated_setpoints_do_not_change_one_point_per_stage(
@@ -232,6 +290,45 @@ def test_png_svg_pdf_export_and_collision_handling(qapp: QApplication, tmp_path:
     assert {item.suffix for item in first} == {".png", ".svg", ".pdf"}
     assert all(item.exists() and item.stat().st_size > 0 for item in first + second)
     assert set(first).isdisjoint(second)
+
+
+def test_plotter_style_controls_update_preview_model_and_persist(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    rows = [_row(0), _row(30)]
+    _completed(rows)
+    source = _write(tmp_path / "styled.csv", rows)
+    window = ResultsPlotterWindow(tmp_path)
+    try:
+        window.import_paths([source])
+        _wait(qapp, lambda: bool(window.reports))
+        key = str(source.resolve())
+        visible = window.table.cellWidget(0, 0)
+        marker = window.table.cellWidget(0, 4)
+        marker_size = window.table.cellWidget(0, 5)
+        line = window.table.cellWidget(0, 6)
+        line_width = window.table.cellWidget(0, 7)
+        order = window.table.cellWidget(0, 8)
+        assert isinstance(visible, QCheckBox)
+        assert isinstance(marker, QComboBox)
+        assert isinstance(marker_size, QDoubleSpinBox)
+        assert isinstance(line, QComboBox)
+        assert isinstance(line_width, QDoubleSpinBox)
+        assert isinstance(order, QSpinBox)
+        visible.setChecked(False)
+        marker.setCurrentIndex(marker.findData("triangle"))
+        marker_size.setValue(11)
+        line.setCurrentIndex(line.findData("dot"))
+        line_width.setValue(3.2)
+        order.setValue(7)
+        style = window._configuration().curves[key]
+        assert (style.visible, style.marker, style.marker_size) == (False, "triangle", 11)
+        assert (style.line_style, style.line_width, style.display_order) == ("dot", 3.2, 7)
+        saved = save_plot_configuration(window._configuration(), tmp_path, "ui-style")
+        loaded = load_plot_configuration(saved)
+        assert loaded.curves[key] == style
+    finally:
+        window.close()
 
 
 def test_window_import_failure_is_contained_and_control_layer_receives_zero_operations(

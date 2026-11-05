@@ -279,3 +279,30 @@ Keep the application disconnected throughout the restore checks:
 
 Do not connect a port during this checklist. Persistence never restores outputs,
 protocol ownership, confirmation tokens or instrument identity.
+
+## Milestone 18 UI Refinement checks
+
+1. Launch disconnected in Simulation Mode at Windows 100%, 125% and 150%
+   scaling. Resize to the documented 760 × 540 minimum. Confirm connection/mode,
+   safety limits and Emergency All-Off remain visible while the body scrolls.
+2. Connect Simulation. In both CH1 and CH2 switch through Manual, CC, CV,
+   Voltage Scan, Current Scan, Polarisation and Custom Sequence tabs using mouse
+   and keyboard. Confirm the selected tab never changes during refresh or a
+   validation error.
+3. On CH2 CV, edit a valid field and press Start. Confirm focus remains within
+   CH2 CV, the page does not jump to Custom Sequence and only CH2 starts. Repeat
+   representative Start/Pause/Resume/Stop actions on CH1 and CH2 and confirm
+   the other channel remains unchanged.
+4. Confirm each compact strip reports Output, measured V/I/P, CV/CC availability,
+   protocol state, stage and CSV status. Trigger a validation error and confirm
+   it appears only beside the affected channel/control.
+5. Collapse, expand and resize the live-time, LSV and polarisation plot sections.
+   Confirm sampling and CSV recording continue without extra backend reads.
+6. Open Results / Plotter and import a real M15 file whose final natural stage
+   has `completed`/`Protocol duration completed` but no `stage_completed` row.
+   Confirm it is eligible when a continuous 30-second window exists. Import a
+   stopped run; confirm earlier completed stages remain valid and the interrupted
+   stage is rejected.
+7. Change visibility, colour, marker, size, line style/width and order. Confirm
+   immediate preview, save/load configuration round-trip, and no experiment
+   controller/output change. Close cleanly with no residual QThread warning.

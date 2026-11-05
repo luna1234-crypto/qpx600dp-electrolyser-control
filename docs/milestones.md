@@ -675,9 +675,20 @@ See [verification details](verification/milestone17.md).
 
 ## Milestone 18 - UI refinement
 
-Original roadmap task: refine the operator UI. This milestone is pending for
-the QPX600DP application; completed functional panels are not a claim of final
-operator-workflow or accessibility acceptance.
+Original roadmap task: refine the operator UI. Implemented for QPX600DP without
+changing protocol semantics: connection/mode/safety/Emergency remain fixed and
+visible, while reusable CH1/CH2 workspaces provide compact status and tabs for
+Manual, CC, CV, Voltage Scan, Current Scan, Polarisation and Custom Sequence.
+Plots are collapsible and splitter-resizable; errors stay channel-local; mode
+styling is visually distinct; normal Qt keyboard navigation and DPI-aware
+layouts support smaller Windows screens and 100/125/150% scaling.
+
+The known CH2 CV focus/navigation defect is covered by stable tab/focus/scroll
+tests and all CH1/CH2 controller routes retain their established isolation.
+M15B now accepts naturally completed final stages in real M15 CSVs while still
+rejecting interrupted stages, and provides typed, immediately previewed and
+persistent visibility/colour/marker/line/order controls. See
+[verification details](verification/milestone18.md).
 
 ## Milestone 19 - Windows packaging
 
