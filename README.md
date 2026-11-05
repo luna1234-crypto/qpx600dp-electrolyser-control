@@ -629,6 +629,14 @@ intervention. Safety events append to `logs/safety_events.csv` without instrumen
 serial numbers. Normal channel-local Stop/failure remains isolated; only this
 global action, shared connection loss or shutdown affects both channels.
 
+Supervised M16 resistor-load acceptance passed with two independent 100-ohm
+loads. Both channels operated normally in Constant Voltage mode at 4.000 V with
+a 0.080 A limit. Stopping one channel preserved the other channel, and global
+**Emergency All Outputs Off** authoritatively and physically switched both
+outputs OFF. Append-only safety-event logging was verified. Physical USB cable
+disconnection was not performed; communication-loss behavior retains its
+FakeSerial coverage and is not claimed as physical disconnect acceptance.
+
 Issue 14 gives two guaranteed power-envelope points, 10 V / 50 A and
 80 V / 7.5 A, but no complete mathematical expression for the graph. The
 simulator deliberately avoids interpolation:
@@ -694,7 +702,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Steady-State Polarisation | Simulation and supervised CH1/CH2 100-ohm resistor-load functional acceptance passed; quantitative low-current metrology, electrolyser science and unattended operation remain unapproved |
 | M15 Custom sequence editor | Simulation, guarded fake-serial and supervised Safe-Off/Continuous resistor-load acceptance passed; unattended electrolyser operation unapproved |
 | M15B Results / Scientific Plotter | Optional isolated offline M15 CSV analysis and scientific export implemented; no hardware-control access |
-| M16 Unified safety/emergency system | Implemented and Simulation/FakeSerial tested; physical Emergency All-Off acceptance remains pending |
+| M16 Unified safety/emergency system | Simulation/FakeSerial and supervised dual-channel 100-ohm Emergency All-Off acceptance passed; physical USB-disconnection acceptance not performed |
 | M17 persistence / M18 UI refinement | Pending for QPX600DP |
 | M19 Windows packaging | Pending; no packaged executable is claimed |
 | M20 final regression/stress testing | Pending; no 24-hour final-system result is claimed |

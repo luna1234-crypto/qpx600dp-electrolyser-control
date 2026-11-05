@@ -83,6 +83,23 @@ controller or instrument interfaces.
   flows and clean worker shutdown: passed;
 - `git diff --check`: passed.
 
-No COM port or physical instrument was accessed. Supervised physical Emergency
-All-Off acceptance, quantitative electrolyser science and unattended operation
-remain pending.
+No COM port or physical instrument was accessed during implementation or
+automated validation. The later supervised resistor-load acceptance is recorded
+below; quantitative electrolyser science and unattended operation remain
+unapproved.
+
+## Supervised real-hardware acceptance — 2026-11-05
+
+- Two independent 100-ohm loads were connected, one per channel.
+- CH1 and CH2 operated normally in Constant Voltage mode at 4.000 V with a
+  0.080 A current limit.
+- A normal Stop on one channel preserved operation of the other channel.
+- Global Emergency All-Off authoritatively confirmed and physically switched
+  both outputs OFF.
+- The append-only safety-event log was inspected and verified.
+
+Physical USB-disconnection testing was not performed. Communication-loss and
+partial-failure behavior therefore retain their FakeSerial acceptance evidence;
+this record does not claim a supervised physical cable-loss test. Quantitative
+electrolyser science and unattended operation remain unapproved. No instrument
+serial number is recorded.

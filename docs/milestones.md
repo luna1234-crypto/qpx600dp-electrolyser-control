@@ -647,8 +647,14 @@ Off before authoritative readback. CH1 and CH2 results remain separate; any
 unconfirmed state closes the session and presents a physical-front-panel warning.
 Normal channel-local failures stay isolated. Events append without instrument
 serial numbers to the safety-event log. Offline Plotter behavior is unchanged.
-Simulation and fake-backend acceptance is complete; supervised physical global
-Emergency All-Off acceptance and unattended electrolyser use are not approved.
+Simulation and fake-backend acceptance is complete. Supervised physical
+resistor-load acceptance used two independent 100-ohm loads: CH1 and CH2 each
+operated normally in Constant Voltage mode at 4.000 V with a 0.080 A limit,
+single-channel Stop preserved the other channel, and global Emergency All-Off
+authoritatively and physically switched both outputs OFF. Append-only
+safety-event logging was verified. Physical USB-disconnection testing was not
+performed; the communication-loss path retains FakeSerial coverage. This does
+not approve unattended electrolyser use.
 
 ## Milestone 17 - Persistence
 
