@@ -251,5 +251,31 @@ Keep Simulation Mode selected and disconnected initially:
    warns that physical OFF cannot be authoritatively confirmed rather than
    claiming success.
 
-This checklist is Simulation Mode only. Physical Emergency All-Off acceptance,
-electrolyser scientific acceptance and unattended operation remain pending.
+This checklist is Simulation Mode only. Supervised resistor-load Emergency
+All-Off acceptance passed later; physical USB-disconnection, electrolyser
+scientific acceptance and unattended operation remain pending.
+
+## Milestone 17 Configuration Persistence checks
+
+Keep the application disconnected throughout the restore checks:
+
+1. In Simulation Mode enter a harmless manual port name, choose a temporary
+   data/export directory, set different CH1/CH2 safety limits, change default
+   active area/logging interval, resize/move the window and hide one plot group.
+2. Close normally and relaunch. Confirm all listed preferences return, while the
+   connection state is DISCONNECTED, both outputs are unknown/OFF-disabled and
+   no protocol is running or paused.
+3. Select Real Hardware mode, enter a non-hardware test port name, close and
+   relaunch. Confirm Real Hardware preference and text return but no connection
+   occurs; do not press Connect.
+4. Move the window to a secondary screen, close it, disconnect that screen and
+   relaunch. Confirm the window is repositioned into a visible screen.
+5. Open Help > About and confirm the settings-file path is displayed. Choose
+   Tools > Reset Settings to Defaults, Cancel once, then confirm once while
+   disconnected. Verify Simulation Mode, independent default safety limits,
+   default directory/area/interval and all plot groups are restored.
+6. Confirm existing M15B plot-configuration files remain unchanged. Close and
+   verify there is no residual process or QThread warning.
+
+Do not connect a port during this checklist. Persistence never restores outputs,
+protocol ownership, confirmation tokens or instrument identity.

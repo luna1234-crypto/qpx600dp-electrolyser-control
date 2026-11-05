@@ -1,5 +1,6 @@
 """Compose guarded simulation/real connection and manual channel controls."""
 
+from dataclasses import replace
 from pathlib import Path
 from decimal import Decimal
 import math
@@ -8,6 +9,7 @@ import time
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -25,8 +27,20 @@ from PySide6.QtWidgets import (
 
 from qpx_electrolyser import __version__
 from qpx_electrolyser.app.channel_controller import ManualChannelController
-from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionSnapshot
+from qpx_electrolyser.app.connection_controller import (
+    ConnectionController,
+    ConnectionSnapshot,
+    ConnectionState,
+)
 from qpx_electrolyser.app.paths import default_paths
+from qpx_electrolyser.app.settings import (
+    ApplicationSettings,
+    PlotDisplayPreferences,
+    SettingsError,
+    SettingsStore,
+    WindowGeometry,
+    normalize_window_geometry,
+)
 from qpx_electrolyser.data.csv_logging import ChannelLoggingController
 from qpx_electrolyser.engine.constant_current import (
     ConstantCurrentController,
@@ -80,16 +94,37 @@ class MainWindow(QMainWindow):
         connection_controller: ConnectionController,
         *,
         data_directory: Path | None = None,
+        settings_store: SettingsStore | None = None,
+        settings: ApplicationSettings | None = None,
+        settings_warnings: tuple[str, ...] = (),
     ) -> None:
         super().__init__()
         self._connection_controller = connection_controller
-        self.safety_validator = SafetyValidator()
+        restore_connection_preferences = settings is not None
+        restored = settings or replace(
+            ApplicationSettings.defaults(data_directory),
+            manual_port=connection_controller.snapshot.port_name,
+            simulation_mode=connection_controller.snapshot.simulation_mode,
+        )
+        if data_directory is not None:
+            restored = replace(
+                restored,
+                data_export_directory=str(Path(data_directory).resolve()),
+            )
+        self._settings_store = settings_store
+        self._restored_settings = restored
+        self._settings_warnings = settings_warnings
+        self._settings_saved = False
+        self.safety_validator = SafetyValidator(restored.safety_limits)
         self.safety_event_log = SafetyEventLog(Path(log_file).parent / "safety_events.csv")
         self._logged_safety_events: set[tuple[object, ...]] = set()
         self._live_validation_status_messages: dict[int, set[str]] = {1: set(), 2: set()}
         self.setWindowTitle("QPX600DP Electrolyser - Custom Sequences")
         self.resize(1280, 960)
         self.setMinimumSize(760, 540)
+        if restore_connection_preferences:
+            connection_controller.set_port_name(restored.manual_port)
+            connection_controller.set_simulation_mode(restored.simulation_mode)
 
         root = QWidget()
         layout = QVBoxLayout(root)
@@ -121,7 +156,7 @@ class MainWindow(QMainWindow):
 
         logging_row = QHBoxLayout()
         logging_row.addWidget(QLabel("CSV output directory:"))
-        self._data_directory = Path(data_directory or default_paths().data_directory).resolve()
+        self._data_directory = Path(restored.data_export_directory).resolve()
         self.logging_directory_value = QLabel(str(self._data_directory))
         self.logging_directory_value.setObjectName("loggingDirectory")
         self.logging_directory_value.setToolTip(str(self._data_directory))
@@ -129,12 +164,19 @@ class MainWindow(QMainWindow):
         self.choose_logging_directory_button = QPushButton("Choose...")
         self.choose_logging_directory_button.clicked.connect(self._choose_logging_directory)
         logging_row.addWidget(self.choose_logging_directory_button)
-        logging_row.addWidget(QLabel("Interval (s):"))
+        logging_row.addWidget(QLabel("Default active area (cm²):"))
+        self.default_active_area = QDoubleSpinBox()
+        self.default_active_area.setObjectName("defaultActiveArea")
+        self.default_active_area.setDecimals(6)
+        self.default_active_area.setRange(0.000001, 1_000_000.0)
+        self.default_active_area.setValue(restored.default_active_area_cm2)
+        logging_row.addWidget(self.default_active_area)
+        logging_row.addWidget(QLabel("Default logging interval (s):"))
         self.logging_interval = QDoubleSpinBox()
         self.logging_interval.setObjectName("loggingInterval")
         self.logging_interval.setRange(0.1, 3600.0)
         self.logging_interval.setDecimals(3)
-        self.logging_interval.setValue(1.0)
+        self.logging_interval.setValue(restored.default_sampling_interval_s)
         logging_row.addWidget(self.logging_interval)
         layout.addLayout(logging_row)
 
@@ -430,6 +472,7 @@ class MainWindow(QMainWindow):
             self.plot_panels[channel] = plot_panel
             self.lsv_plot_panels[channel] = lsv_plot_panel
             self.polarisation_plot_panels[channel] = polarisation_plot_panel
+            self._apply_channel_defaults(channel)
             self._wire_live_start_validation(channel, (
                 protocol_panel,
                 voltage_protocol_panel,
@@ -555,29 +598,198 @@ class MainWindow(QMainWindow):
         results_action.setToolTip("Offline analysis — does not control the instrument")
         results_action.triggered.connect(self._open_results_plotter)
         tools_menu.addAction(results_action)
+        tools_menu.addSeparator()
+        reset_settings_action = QAction("Reset Settings to Defaults...", self)
+        reset_settings_action.triggered.connect(self._reset_settings_to_defaults)
+        tools_menu.addAction(reset_settings_action)
         self._results_plotter_window = None
+
+        view_menu = self.menuBar().addMenu("&View")
+        self.show_time_plots_action = QAction("Show live time plots", self)
+        self.show_lsv_plots_action = QAction("Show Staircase LSV plots", self)
+        self.show_polarisation_plots_action = QAction("Show polarisation plots", self)
+        for action, checked in (
+            (self.show_time_plots_action, restored.plot_display.show_time_plots),
+            (self.show_lsv_plots_action, restored.plot_display.show_lsv_plots),
+            (
+                self.show_polarisation_plots_action,
+                restored.plot_display.show_polarisation_plots,
+            ),
+        ):
+            action.setCheckable(True)
+            action.setChecked(checked)
+            view_menu.addAction(action)
+        self.show_time_plots_action.toggled.connect(
+            lambda visible: self._set_plot_group_visible("time", visible)
+        )
+        self.show_lsv_plots_action.toggled.connect(
+            lambda visible: self._set_plot_group_visible("lsv", visible)
+        )
+        self.show_polarisation_plots_action.toggled.connect(
+            lambda visible: self._set_plot_group_visible("polarisation", visible)
+        )
+        self._apply_plot_preferences(restored.plot_display)
 
         help_menu = self.menuBar().addMenu("&Help")
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+        self._restore_window_geometry(restored.window_geometry)
+        if settings_warnings:
+            self.statusBar().showMessage("; ".join(settings_warnings))
 
     @property
     def data_directory(self) -> Path:
         return self._data_directory
+
+    def _apply_channel_defaults(self, channel: int) -> None:
+        area = f"{self._restored_settings.default_active_area_cm2:g}"
+        self.protocol_panels[channel].active_area_input.setText(area)
+        self.voltage_scan_panels[channel].active_area_input.setText(area)
+        self.current_scan_panels[channel].active_area_input.setText(area)
+        self.polarisation_panels[channel].active_area_input.setText(area)
+        sequence = self.sequence_panels[channel]
+        for index, key in enumerate(sequence.field_keys):
+            if key == "active_area_cm2":
+                sequence.field_inputs[index].setText(area)
+
+    def _set_plot_group_visible(self, group: str, visible: bool) -> None:
+        groups = {
+            "time": self.plot_panels,
+            "lsv": self.lsv_plot_panels,
+            "polarisation": self.polarisation_plot_panels,
+        }
+        for panel in groups[group].values():
+            panel.setVisible(visible)
+
+    def _apply_plot_preferences(self, preferences: PlotDisplayPreferences) -> None:
+        self.show_time_plots_action.setChecked(preferences.show_time_plots)
+        self.show_lsv_plots_action.setChecked(preferences.show_lsv_plots)
+        self.show_polarisation_plots_action.setChecked(
+            preferences.show_polarisation_plots
+        )
+        self._set_plot_group_visible("time", preferences.show_time_plots)
+        self._set_plot_group_visible("lsv", preferences.show_lsv_plots)
+        self._set_plot_group_visible(
+            "polarisation", preferences.show_polarisation_plots
+        )
+
+    def _restore_window_geometry(self, geometry: WindowGeometry) -> None:
+        application = QApplication.instance()
+        screens = ()
+        if application is not None:
+            screens = tuple(
+                (
+                    screen.availableGeometry().x(),
+                    screen.availableGeometry().y(),
+                    screen.availableGeometry().width(),
+                    screen.availableGeometry().height(),
+                )
+                for screen in application.screens()
+            )
+        safe = normalize_window_geometry(geometry, screens)
+        self.setGeometry(safe.x, safe.y, safe.width, safe.height)
+
+    def _current_settings(self) -> ApplicationSettings:
+        snapshot = self._connection_controller.snapshot
+        return ApplicationSettings(
+            manual_port=snapshot.port_name,
+            data_export_directory=str(self._data_directory),
+            safety_limits={
+                channel: self.safety_validator.user_limits(channel)
+                for channel in (1, 2)
+            },
+            default_active_area_cm2=self.default_active_area.value(),
+            default_sampling_interval_s=self.logging_interval.value(),
+            simulation_mode=snapshot.simulation_mode,
+            window_geometry=WindowGeometry(
+                self.x(), self.y(), self.width(), self.height()
+            ),
+            plot_display=PlotDisplayPreferences(
+                show_time_plots=self.show_time_plots_action.isChecked(),
+                show_lsv_plots=self.show_lsv_plots_action.isChecked(),
+                show_polarisation_plots=(
+                    self.show_polarisation_plots_action.isChecked()
+                ),
+            ),
+        )
+
+    def _save_persistent_settings(self) -> None:
+        if self._settings_store is None or self._settings_saved:
+            return
+        try:
+            self._settings_store.save(self._current_settings())
+            self._settings_saved = True
+        except SettingsError as error:
+            self.statusBar().showMessage(str(error))
+
+    def _reset_settings_to_defaults(self) -> None:
+        if self._settings_store is None:
+            self.statusBar().showMessage("Settings persistence is disabled for this session.")
+            return
+        if (
+            self._connection_controller.snapshot.state
+            not in {ConnectionState.DISCONNECTED, ConnectionState.ERROR}
+            or any(item.snapshot.owns_channel for item in self._all_protocol_controllers())
+        ):
+            QMessageBox.warning(
+                self,
+                "Disconnect before resetting settings",
+                "Reset is available only while disconnected and with no active protocol.",
+            )
+            return
+        response = QMessageBox.warning(
+            self,
+            "Reset Settings to Defaults?",
+            "This resets the remembered port, mode, directories, safety limits, "
+            "defaults, window geometry and main plot visibility. It does not modify "
+            "M15B plot-configuration files.",
+            QMessageBox.StandardButton.Reset | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if response != QMessageBox.StandardButton.Reset:
+            return
+        try:
+            defaults = self._settings_store.reset(
+                default_data_directory=default_paths().data_directory
+            )
+        except SettingsError as error:
+            QMessageBox.warning(self, "Settings reset failed", str(error))
+            return
+        self._restored_settings = defaults
+        self._settings_saved = False
+        self._connection_controller.set_port_name("")
+        self._connection_controller.set_simulation_mode(True)
+        self._data_directory = Path(defaults.data_export_directory)
+        self.logging_directory_value.setText(str(self._data_directory))
+        self.logging_directory_value.setToolTip(str(self._data_directory))
+        self.default_active_area.setValue(defaults.default_active_area_cm2)
+        self.logging_interval.setValue(defaults.default_sampling_interval_s)
+        for channel in (1, 2):
+            limits = defaults.safety_limits[channel]
+            self.safety_validator.set_user_limits(channel, limits)
+            self.safety_panel.apply_limits(channel, limits)
+            self._apply_channel_defaults(channel)
+            self._update_protocol_context(channel)
+        self._apply_plot_preferences(defaults.plot_display)
+        self._restore_window_geometry(defaults.window_geometry)
+        self.statusBar().showMessage(
+            f"Settings reset to documented defaults: {self._settings_store.path}"
+        )
 
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
             "About QPX600DP Electrolyser",
             f"QPX600DP Electrolyser {__version__}\n\n"
-            "Milestone 16 unified safety build.\n\n"
+            "Milestone 17 configuration persistence build.\n\n"
             "The QPX600DP is a programmable DC power supply, not a potentiostat.\n"
             "Simulation is the default. Real Hardware uses only a manually entered COM port. "
             "Independent logging, guarded protocols and scans retain the shared command queue. "
             "Session-local CH1/CH2 safety limits and Emergency All-Off add validation and "
             "authoritative per-channel OFF reporting. The optional Results / Plotter remains "
-            "offline and cannot control the instrument.",
+            "offline and cannot control the instrument.\n\n"
+            f"Settings file:\n{self._settings_store.path if self._settings_store else 'Disabled for this session'}",
         )
 
     def _open_results_plotter(self) -> None:
@@ -1754,6 +1966,7 @@ class MainWindow(QMainWindow):
         if self._allow_close:
             for controller in self.logging_controllers.values():
                 controller.shutdown()
+            self._save_persistent_settings()
             super().closeEvent(event)
             return
         active = [item for item in self._all_protocol_controllers() if item.snapshot.owns_channel]
@@ -1768,6 +1981,7 @@ class MainWindow(QMainWindow):
             return
         for controller in self.logging_controllers.values():
             controller.shutdown()
+        self._save_persistent_settings()
         super().closeEvent(event)
 
     def _finish_coordinated_close(self) -> None:

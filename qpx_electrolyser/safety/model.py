@@ -57,6 +57,18 @@ class SafetyValidator:
         QPX600DP_CAPABILITIES.validate_channel(channel)
         if not isinstance(limits, SafetyLimits):
             raise TypeError("limits must be SafetyLimits")
+        if limits.max_voltage_v > QPX600DP_CAPABILITIES.max_voltage_v:
+            raise SafetyValidationError(
+                "Maximum voltage exceeds verified QPX600DP capability."
+            )
+        if limits.max_current_a > QPX600DP_CAPABILITIES.max_current_a:
+            raise SafetyValidationError(
+                "Maximum current exceeds verified QPX600DP capability."
+            )
+        if limits.max_power_w > QPX600DP_CAPABILITIES.max_power_w:
+            raise SafetyValidationError(
+                "Maximum power exceeds verified QPX600DP capability."
+            )
         with self._lock:
             self._user[channel] = limits
 

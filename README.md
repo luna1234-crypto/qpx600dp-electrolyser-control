@@ -14,7 +14,7 @@ resistor-load acceptance, Milestone 12 independent Voltage Sweep / Staircase LSV
 Milestone 13 stepped current scans, Milestone 14 steady-state power-supply
 polarisation, and Milestone 15 per-channel Custom Sequences.
 
-All current implementation and every future Milestone 17–20 target the Aim-TTi
+All current implementation and every future Milestone 18–20 target the Aim-TTi
 QPX600DP. CPX400DP references are retained only as historical context for the
 original Milestone 1–4 records and are not current or future requirements.
 
@@ -617,8 +617,7 @@ and in the disabled Start button's tooltip. Correcting the input clears that
 feedback immediately. Editing alone does not create safety-log noise; an
 explicit unsafe Start route records one pre-mutation safety event.
 The simulator's separate optional `UserSafetyLimits` remains a backend test
-facility and is not the GUI experiment policy. Persisting GUI limits is deferred
-to Milestone 17.
+facility and is not the GUI experiment policy.
 
 The prominent **Emergency All Outputs Off** action cancels queued manual/logger
 work, stops both owned protocols, then uses the existing safety-priority guarded
@@ -636,6 +635,24 @@ a 0.080 A limit. Stopping one channel preserved the other channel, and global
 outputs OFF. Append-only safety-event logging was verified. Physical USB cable
 disconnection was not performed; communication-loss behavior retains its
 FakeSerial coverage and is not claimed as physical disconnect acceptance.
+
+## Milestone 17 configuration persistence
+
+Milestone 17 stores a versioned JSON configuration in the current user's local
+application-data directory. The exact path is shown under **Help > About**.
+Writes use a flushed temporary file in the same directory followed by atomic
+replacement. Missing, corrupt, incompatible or unsafe fields fall back to
+documented defaults; invalid safety limits are rejected through the shared
+`SafetyValidator`.
+
+The file remembers only the manually entered port name, data/export directory,
+independent CH1/CH2 safety limits, default active area and logging interval,
+Simulation/Real Hardware preference, usable window geometry and main plot
+visibility. It never stores credentials, instrument identity, confirmation
+tokens, output state or protocol state. Every launch remains **DISCONNECTED**:
+restored Real Hardware mode still requires manual Connect and every existing
+confirmation. **Tools > Reset Settings to Defaults** is guarded by confirmation
+and does not modify M15B plot-configuration files.
 
 Issue 14 gives two guaranteed power-envelope points, 10 V / 50 A and
 80 V / 7.5 A, but no complete mathematical expression for the graph. The
@@ -703,7 +720,8 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | M15 Custom sequence editor | Simulation, guarded fake-serial and supervised Safe-Off/Continuous resistor-load acceptance passed; unattended electrolyser operation unapproved |
 | M15B Results / Scientific Plotter | Optional isolated offline M15 CSV analysis and scientific export implemented; no hardware-control access |
 | M16 Unified safety/emergency system | Simulation/FakeSerial and supervised dual-channel 100-ohm Emergency All-Off acceptance passed; physical USB-disconnection acceptance not performed |
-| M17 persistence / M18 UI refinement | Pending for QPX600DP |
+| M17 configuration persistence | Implemented with versioned atomic per-user settings and safe disconnected restore |
+| M18 UI refinement | Pending for QPX600DP |
 | M19 Windows packaging | Pending; no packaged executable is claimed |
 | M20 final regression/stress testing | Pending; no 24-hour final-system result is claimed |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
@@ -731,6 +749,7 @@ not control potential against a reference electrode.
 - [Milestone 15 Custom Sequence verification](docs/verification/milestone15.md)
 - [Milestone 15B Results / Scientific Plotter verification](docs/verification/milestone15b.md)
 - [Milestone 16 Unified Safety verification](docs/verification/milestone16.md)
+- [Milestone 17 Configuration Persistence verification](docs/verification/milestone17.md)
 - [Simulation-only visual smoke procedure](tests/manual_smoke_test.md)
 - [Hardware acceptance and commissioning safeguards](tests/manual_hardware_test.md)
 

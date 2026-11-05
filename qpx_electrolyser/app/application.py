@@ -15,6 +15,7 @@ from qpx_electrolyser import __version__
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
 from qpx_electrolyser.app.logging_config import configure_logging
 from qpx_electrolyser.app.paths import default_paths
+from qpx_electrolyser.app.settings import ApplicationSettings, SettingsStore
 from qpx_electrolyser.engine.constant_current import ProtocolState
 from qpx_electrolyser.engine.custom_sequence import SequenceStage, SequenceStageType
 from qpx_electrolyser.gui.main_window import MainWindow
@@ -74,7 +75,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sys.excepthook = handle_unhandled_exception
     try:
         logger.info(
-            "Application started: version=%s; Simulation Mode default; guarded explicit-port mode available",
+            "Application started: version=%s; always disconnected; guarded explicit-port mode available",
             __version__,
         )
         connection_controller = ConnectionController()
@@ -84,10 +85,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.data_dir
             or (Path(smoke_data_directory.name) if smoke_data_directory is not None else None)
         )
+        settings_store: SettingsStore | None = None
+        settings = ApplicationSettings.defaults(data_directory)
+        settings_warnings: tuple[str, ...] = ()
+        if not args.smoke_test:
+            settings_store = SettingsStore()
+            loaded = settings_store.load(default_data_directory=data_directory)
+            settings = loaded.settings
+            settings_warnings = loaded.warnings
+            for warning in settings_warnings:
+                logger.warning("Configuration fallback: %s", warning)
         window = MainWindow(
             log_file=session.file_path,
             connection_controller=connection_controller,
             data_directory=data_directory,
+            settings_store=settings_store,
+            settings=settings,
+            settings_warnings=settings_warnings,
         )
         window.show()
 

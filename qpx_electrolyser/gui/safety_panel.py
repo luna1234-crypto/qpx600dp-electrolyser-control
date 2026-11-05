@@ -78,6 +78,16 @@ class SafetyPanel(QWidget):
             voltage.value(), current.value(), power.value(), density.value()
         ))
 
+    def apply_limits(self, channel: int, limits: SafetyLimits) -> None:
+        """Synchronize the editor after a persisted/default policy is applied."""
+        for field, value in zip(self._inputs[channel], (
+            limits.max_voltage_v,
+            limits.max_current_a,
+            limits.max_power_w,
+            limits.max_current_density_a_cm2,
+        )):
+            field.setValue(value)
+
     def show_message(self, message: str, *, error: bool = False) -> None:
         self.status_label.setText(message)
         self.status_label.setStyleSheet("color: #b42318;" if error else "")

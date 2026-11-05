@@ -1,6 +1,6 @@
 # Application and communication architecture
 
-All current code and every future implementation target Milestone 17–20 is for
+All current code and every future implementation target Milestone 18–20 is for
 the Aim-TTi **QPX600DP**. CPX400DP appears only in historical Milestone 1–4
 records retained to explain the post-Milestone-4 model correction; it is not a
 current or future implementation target.
@@ -16,6 +16,8 @@ independent CSV loggers, Milestone 9 Constant Current state machines, Milestone
 the Milestone 12 reusable stepped-scan engine, Milestone 13 Current Scan,
 Milestone 14 Steady-State Polarisation controllers and Milestone 15 Custom
 Sequence orchestrators.
+Milestone 17 adds an orthogonal, non-operational settings store; it does not
+participate in command ownership or protocol state.
 The guarded follow-up connects the physical backend
 through that same worker only after an explicit mode, port and Connect action.
 See [simulator behaviour](simulator.md).
@@ -95,6 +97,7 @@ independent of the selected transport.
 | ConstantCurrentController, one per channel | Own explicit state, active monotonic time, queue requests, measured results and either a local CSV or an active logger sink | No backend reference, shared-port access, second writer for an active logger or GUI widgets |
 | TestProtocol implementations | Generate planned steps and averaging rules | No GUI, serial handles or wall-clock sleeps |
 | SafetyValidator | Validate full protocol against software and documented hardware capability before Start | No silent clamping or device writes |
+| SettingsStore / ApplicationSettings | Migrate, validate and atomically persist whitelisted user preferences | No connection, backend, output or protocol-state restoration; no M15B configuration ownership |
 | ChannelLoggingController / CsvLogFile, one per channel | Monotonic scheduling through the shared queue; exclusive creation, CSV rows, flush/close and file errors | No direct backend, plot buffer or software diagnostic logging |
 | ChannelPlotController / ChannelPlotPanel, one per channel | Consume existing measurement signals, retain bounded/downsampled display points, coalesce repaints and render voltage/current | No queue submission, backend access, CSV ownership or output control |
 | ConstantVoltageController / panel, one per channel | Specialize the Milestone 9 state machine for target voltage/current limit operation, including guarded real confirmation | No direct backend, extra polling, duplicate CSV writer, automatic retry or reconnect |
@@ -417,9 +420,19 @@ experiment default. Milestone 16 composes one `SafetyValidator` into manual and
 M9-M15 controllers. Its independent session-local CH1/CH2 maxima intersect with
 the 10 V / 5 A / 50 W project policy, hardware envelope and programming grids;
 current density is also limited whenever active area is known. Validation occurs
-before ownership, logging, mutation or Output On and never clamps. Persistence
-is deliberately deferred to M17. The simulator's older `UserSafetyLimits` stays
+before ownership, logging, mutation or Output On and never clamps. The simulator's older `UserSafetyLimits` stays
 an independent backend test policy rather than becoming a GUI default.
+
+Milestone 17 persistence sits outside the worker/engine graph. `SettingsStore`
+loads one fixed-schema per-user JSON document before `MainWindow` composition,
+migrates older schemas and returns defaults plus warnings for invalid fields.
+Safety-limit restoration passes through `SafetyValidator`; capability violations
+are rejected. Saves flush a same-directory temporary file and replace the target
+atomically. The model contains no credentials, identity, confirmation tokens,
+output state, ownership or protocol state. A restored port/mode only updates the
+DISCONNECTED controller snapshot; it cannot instantiate or connect a backend.
+Main-window geometry is clamped to an available screen. M15B plot configuration
+remains a separate operator-managed file and is never overwritten by reset.
 
 `EmergencyAllOffController` is orchestration, not an instrument owner: it only
 submits through the shared `ConnectionController` queue, reuses protocol Stop and

@@ -23,6 +23,7 @@ QPX 600 DP/
             connection_controller.py
             logging_config.py
             paths.py
+            settings.py
         data/
             __init__.py
             csv_logging.py
@@ -107,6 +108,8 @@ QPX 600 DP/
             milestone14.md
             milestone15.md
             milestone15b.md
+            milestone16.md
+            milestone17.md
             model_correction_qpx600dp.md
         architecture.md
         qpx600dp_commands.md
@@ -146,6 +149,7 @@ QPX 600 DP/
         test_realtime_plot.py
         test_serial_transport.py
         test_safety.py
+        test_settings.py
         test_simulator.py
     .gitattributes
     .gitignore

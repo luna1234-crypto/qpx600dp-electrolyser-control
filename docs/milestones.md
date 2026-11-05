@@ -4,7 +4,7 @@
 > CPX400DP assumption. Their claims are intentionally not rewritten as QPX600DP
 > results. The post-Milestone-4 model correction is recorded separately at the
 > end of this file and in `verification/model_correction_qpx600dp.md`.
-> All current implementation and every future Milestone 17–20 target the
+> All current implementation and every future Milestone 18–20 target the
 > QPX600DP. CPX400DP is retained only as historical context for Milestones 1–4.
 
 ## Milestone 1 - Project skeleton
@@ -658,9 +658,20 @@ not approve unattended electrolyser use.
 
 ## Milestone 17 - Persistence
 
-Original roadmap task: restore settings through persistent configuration. This
-milestone is pending for the QPX600DP application. Current sessions do not claim
-persistent connection, experiment or safety defaults.
+Original roadmap task: restore settings through persistent configuration.
+Implemented as one versioned, atomically replaced per-user JSON model. It keeps
+the last manually entered port, data/export directory, independent CH1/CH2
+safety limits, default active area and logging interval, mode preference, usable
+window geometry and main plot visibility. Schema migration and field-level
+fallback handle old, missing, corrupt, invalid and out-of-capability data.
+
+Restoration is deliberately non-operational: every process starts DISCONNECTED,
+never constructs a physical backend until manual Connect, never enumerates a
+port, and never restores output or protocol state. Remembered Real Hardware mode
+still uses all existing confirmations. Settings contain no credentials,
+instrument serial identity or transient confirmation token. A confirmed reset
+restores documented defaults without touching M15B plot-configuration files.
+See [verification details](verification/milestone17.md).
 
 ## Milestone 18 - UI refinement
 
