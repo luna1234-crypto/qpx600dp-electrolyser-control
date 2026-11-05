@@ -83,6 +83,8 @@ class SafetyValidator:
         *,
         active_area_cm2: float | None = None,
         current_density_a_cm2: float | None = None,
+        voltage_label: str = "Voltage",
+        current_label: str = "Current",
     ) -> tuple[float, float]:
         """Validate without clamping; capability grids precede policy limits."""
         QPX600DP_CAPABILITIES.validate_channel(channel)
@@ -103,13 +105,13 @@ class SafetyValidator:
         tolerance = 1e-12
         if voltage > limits.max_voltage_v + tolerance:
             raise SafetyValidationError(
-                f"CH{channel} voltage {voltage:g} V exceeds the effective safety limit "
-                f"of {limits.max_voltage_v:g} V."
+                f"{voltage_label} {voltage:g} V exceeds CH{channel} safety limit "
+                f"{limits.max_voltage_v:g} V."
             )
         if current > limits.max_current_a + tolerance:
             raise SafetyValidationError(
-                f"CH{channel} current {current:g} A exceeds the effective safety limit "
-                f"of {limits.max_current_a:g} A."
+                f"{current_label} {current:g} A exceeds CH{channel} safety limit "
+                f"{limits.max_current_a:g} A."
             )
         power = voltage * current
         if power > limits.max_power_w + tolerance:
@@ -131,8 +133,8 @@ class SafetyValidator:
                 raise SafetyValidationError("Current density must be finite and nonnegative.")
         if density is not None and density > limits.max_current_density_a_cm2 + tolerance:
             raise SafetyValidationError(
-                f"CH{channel} current density {density:g} A/cm² exceeds the effective "
-                f"safety limit of {limits.max_current_density_a_cm2:g} A/cm²."
+                f"Commanded current density {density:g} A/cm² exceeds CH{channel} safety "
+                f"limit {limits.max_current_density_a_cm2:g} A/cm²."
             )
         return voltage, current
 

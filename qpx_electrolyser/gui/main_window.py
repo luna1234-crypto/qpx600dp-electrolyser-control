@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QDoubleSpinBox,
+    QComboBox,
+    QLineEdit,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -84,6 +86,7 @@ class MainWindow(QMainWindow):
         self.safety_validator = SafetyValidator()
         self.safety_event_log = SafetyEventLog(Path(log_file).parent / "safety_events.csv")
         self._logged_safety_events: set[tuple[object, ...]] = set()
+        self._live_validation_status_messages: dict[int, set[str]] = {1: set(), 2: set()}
         self.setWindowTitle("QPX600DP Electrolyser - Custom Sequences")
         self.resize(1280, 960)
         self.setMinimumSize(760, 540)
@@ -427,6 +430,14 @@ class MainWindow(QMainWindow):
             self.plot_panels[channel] = plot_panel
             self.lsv_plot_panels[channel] = lsv_plot_panel
             self.polarisation_plot_panels[channel] = polarisation_plot_panel
+            self._wire_live_start_validation(channel, (
+                protocol_panel,
+                voltage_protocol_panel,
+                voltage_scan_panel,
+                current_scan_panel,
+                polarisation_panel,
+                sequence_panel,
+            ))
             panels.addWidget(panel, 1)
         layout.addLayout(panels)
 
@@ -608,6 +619,168 @@ class MainWindow(QMainWindow):
             self.safety_panel.show_message(str(error), error=True)
             return
         self.safety_panel.show_message(self.safety_validator.summary(channel))
+        self._update_protocol_context(channel)
+
+    def _wire_live_start_validation(
+        self, channel: int, panels: tuple[QWidget, ...]
+    ) -> None:
+        """Revalidate UI-only inputs without acquiring ownership or logging."""
+        for panel in panels:
+            for field in panel.findChildren(QLineEdit):
+                field.textChanged.connect(
+                    lambda _text, selected=channel: self._refresh_start_validation(selected)
+                )
+            for choice in panel.findChildren(QComboBox):
+                choice.currentIndexChanged.connect(
+                    lambda _index, selected=channel: self._refresh_start_validation(selected)
+                )
+        sequence = self.sequence_panels[channel]
+        for button in (
+            sequence.add_button,
+            sequence.update_button,
+            sequence.remove_button,
+            sequence.duplicate_button,
+            sequence.up_button,
+            sequence.down_button,
+        ):
+            button.clicked.connect(
+                lambda _checked=False, selected=channel:
+                self._refresh_start_validation(selected)
+            )
+
+    def _refresh_start_validation(self, channel: int) -> None:
+        """Publish channel-local preflight feedback; never submit queue work."""
+        if channel not in self.channel_controllers:
+            return
+        connection = self._connection_controller.snapshot
+        manual = self.channel_controllers[channel].snapshot
+        panels = (
+            self.protocol_panels[channel],
+            self.voltage_protocol_panels[channel],
+            self.voltage_scan_panels[channel],
+            self.current_scan_panels[channel],
+            self.polarisation_panels[channel],
+            self.sequence_panels[channel],
+        )
+        if (
+            connection.state.value != "connected"
+            or not manual.connected
+            or manual.voltage_range_name is None
+            or manual.output_enabled is not False
+        ):
+            for panel in panels:
+                panel.set_start_validation(None)
+            return
+
+        cc_panel = self.protocol_panels[channel]
+        cc_error = self.protocol_controllers[channel].validate_inputs(
+            cc_panel.current_input.text(),
+            cc_panel.voltage_input.text(),
+            cc_panel.duration_input.text(),
+            cc_panel.interval_input.text(),
+            manual.voltage_range_name,
+            current_input_mode=str(cc_panel.input_mode.currentData()),
+            active_area_cm2=cc_panel.active_area_input.text(),
+        )
+        cc_panel.set_start_validation(cc_error)
+
+        cv_panel = self.voltage_protocol_panels[channel]
+        cv_error = self.voltage_protocol_controllers[channel].validate_inputs(
+            cv_panel.target_voltage_input.text(),
+            cv_panel.current_limit_input.text(),
+            cv_panel.duration_input.text(),
+            cv_panel.interval_input.text(),
+            manual.voltage_range_name,
+        )
+        cv_panel.set_start_validation(cv_error)
+
+        voltage_panel = self.voltage_scan_panels[channel]
+        voltage_error = self.voltage_scan_controllers[channel].validate_inputs(
+            voltage_panel.start_voltage_input.text(),
+            voltage_panel.stop_voltage_input.text(),
+            voltage_panel.step_input.text(),
+            voltage_panel.scan_rate_input.text(),
+            voltage_panel.current_limit_input.text(),
+            voltage_panel.settling_input.text(),
+            voltage_panel.measurements_input.text(),
+            voltage_panel.interval_input.text(),
+            manual.voltage_range_name,
+            voltage_panel.active_area_input.text(),
+        )
+        voltage_panel.set_start_validation(voltage_error)
+
+        current_panel = self.current_scan_panels[channel]
+        current_error = self.current_scan_controllers[channel].validate_inputs(
+            current_panel.start_current_input.text(),
+            current_panel.stop_current_input.text(),
+            current_panel.step_input.text(),
+            current_panel.voltage_compliance_input.text(),
+            current_panel.dwell_input.text(),
+            current_panel.interval_input.text(),
+            manual.voltage_range_name,
+            current_input_mode=str(current_panel.input_mode.currentData()),
+            active_area_cm2=current_panel.active_area_input.text(),
+        )
+        current_panel.set_start_validation(current_error)
+
+        polar_panel = self.polarisation_panels[channel]
+        polar_error = self.polarisation_controllers[channel].validate_inputs(
+            polar_panel.active_area_input.text(),
+            polar_panel.start_density_input.text(),
+            polar_panel.stop_density_input.text(),
+            polar_panel.increment_input.text(),
+            polar_panel.voltage_input.text(),
+            polar_panel.dwell_input.text(),
+            polar_panel.interval_input.text(),
+            polar_panel.averaging_input.text(),
+            manual.voltage_range_name,
+        )
+        polar_panel.set_start_validation(polar_error)
+
+        sequence_panel = self.sequence_panels[channel]
+        try:
+            settling = float(sequence_panel.handoff_settling_input.text())
+            if not math.isfinite(settling) or not 0 <= settling <= 60:
+                raise ValueError(
+                    "Handoff settling time must be finite and between 0 and 60 seconds."
+                )
+            SequenceTransitionPolicy(str(sequence_panel.transition_policy.currentData()))
+            self.sequence_controllers[channel].validate_sequence(
+                sequence_panel.name_input.text(),
+                sequence_panel.stages,
+                manual.voltage_range_name,
+            )
+            sequence_error = None
+        except (TypeError, ValueError) as error:
+            sequence_error = str(error)
+        sequence_panel.set_start_validation(sequence_error)
+        errors = tuple(
+            error for error in (
+                cc_error, cv_error, voltage_error, current_error,
+                polar_error,
+                sequence_error if sequence_panel.stages else None,
+            ) if error
+        )
+        previous_statuses = self._live_validation_status_messages[channel]
+        self._live_validation_status_messages[channel] = set(errors)
+        if errors:
+            self.statusBar().showMessage(errors[0])
+        elif self.statusBar().currentMessage() in previous_statuses:
+            self.statusBar().showMessage(connection.message)
+
+    def _blocked_start(
+        self, channel: int, panel: object, protocol_name: str, message: str
+    ) -> None:
+        panel.show_validation_error(message)
+        self.statusBar().showMessage(message)
+        self.safety_event_log.append(
+            channel=channel,
+            cause=message,
+            requested_action=f"Blocked unsafe {protocol_name} Start before mutation",
+            confirmed_off=(
+                self.channel_controllers[channel].snapshot.output_enabled is False
+            ),
+        )
 
     def _apply_emergency_snapshot(self, snapshot: EmergencySnapshot) -> None:
         self.safety_panel.set_emergency_pending(snapshot.active)
@@ -691,8 +864,10 @@ class MainWindow(QMainWindow):
             active_area_cm2=active_area_cm2,
         )
         if validation_error is not None:
-            self.protocol_panels[channel].show_validation_error(validation_error)
-            self.statusBar().showMessage(validation_error)
+            self._blocked_start(
+                channel, self.protocol_panels[channel],
+                "Constant Current", validation_error,
+            )
             return
         resolved = CurrentInputSelection.parse(
             current_input_mode, active_area_cm2
@@ -815,7 +990,10 @@ class MainWindow(QMainWindow):
             voltage, current, duration, interval, manual.voltage_range_name
         )
         if validation_error is not None:
-            self.statusBar().showMessage(validation_error)
+            self._blocked_start(
+                channel, self.voltage_protocol_panels[channel],
+                "Constant Voltage", validation_error,
+            )
             return
         confirmation = None
         if not self._connection_controller.snapshot.simulation_mode:
@@ -932,8 +1110,10 @@ class MainWindow(QMainWindow):
             active_area_cm2,
         )
         if validation_error is not None:
-            self.voltage_scan_panels[channel].show_validation_error(validation_error)
-            self.statusBar().showMessage(validation_error)
+            self._blocked_start(
+                channel, self.voltage_scan_panels[channel],
+                "Voltage Sweep / Staircase LSV", validation_error,
+            )
             return
         confirmation = None
         if not self._connection_controller.snapshot.simulation_mode:
@@ -1030,8 +1210,10 @@ class MainWindow(QMainWindow):
             active_area_cm2=active_area_cm2,
         )
         if validation_error is not None:
-            self.current_scan_panels[channel].show_validation_error(validation_error)
-            self.statusBar().showMessage(validation_error)
+            self._blocked_start(
+                channel, self.current_scan_panels[channel],
+                "Current Scan", validation_error,
+            )
             return
         confirmation = None
         if not self._connection_controller.snapshot.simulation_mode:
@@ -1193,8 +1375,10 @@ class MainWindow(QMainWindow):
             manual.voltage_range_name,
         )
         if error is not None:
-            self.polarisation_panels[channel].show_validation_error(error)
-            self.statusBar().showMessage(error)
+            self._blocked_start(
+                channel, self.polarisation_panels[channel],
+                "Steady-State Polarisation", error,
+            )
             return
         confirmation = None
         if not self._connection_controller.snapshot.simulation_mode:
@@ -1333,18 +1517,21 @@ class MainWindow(QMainWindow):
                 raise ValueError
         except (TypeError, ValueError):
             message = "Select a valid transition policy and finite handoff settling time."
-            self.sequence_panels[channel].show_validation_error(message)
+            self._blocked_start(
+                channel, self.sequence_panels[channel], "Custom Sequence", message
+            )
+            return
+        try:
+            prepared = controller.validate_sequence(
+                sequence_name, stages, manual.voltage_range_name
+            )
+        except ValueError as error:
+            self._blocked_start(
+                channel, self.sequence_panels[channel],
+                "Custom Sequence", str(error),
+            )
             return
         if not self._connection_controller.snapshot.simulation_mode:
-            try:
-                prepared = controller.validate_sequence(
-                    sequence_name, stages, manual.voltage_range_name
-                )
-            except ValueError as error:
-                message = str(error)
-                self.sequence_panels[channel].show_validation_error(message)
-                self.statusBar().showMessage(message)
-                return
             maximum_voltage, maximum_current = controller.sequence_maxima(prepared)
             stage_lines = "\n".join(
                 f"{index}. {stage.stage_type.label}: "
@@ -1518,6 +1705,7 @@ class MainWindow(QMainWindow):
             ),
             simulation_mode=connection.simulation_mode,
         )
+        self._refresh_start_validation(channel)
 
     def _channel_protocol_owned(self, channel: int) -> bool:
         return (

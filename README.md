@@ -610,6 +610,12 @@ CH1/CH2 maxima for voltage, current, power and (when active area is known)
 current density. The effective limit is always the strictest user, project and
 verified QPX600DP capability/grid constraint. Values are rejected before
 ownership, file creation, setting mutation or Output On; they are never clamped.
+M9-M15 inputs are revalidated in their own channel panel as they are edited and
+whenever a channel safety limit changes. An unsafe Start remains blocked, but
+the rejected value and applicable CH1/CH2 limit are shown beside the controls
+and in the disabled Start button's tooltip. Correcting the input clears that
+feedback immediately. Editing alone does not create safety-log noise; an
+explicit unsafe Start route records one pre-mutation safety event.
 The simulator's separate optional `UserSafetyLimits` remains a backend test
 facility and is not the GUI experiment policy. Persisting GUI limits is deferred
 to Milestone 17.

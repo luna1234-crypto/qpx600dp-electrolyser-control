@@ -822,7 +822,11 @@ def test_invalid_real_protocol_input_prevents_confirmation_file_and_queue(
         )
         window._start_protocol(1, "nan", "2", "2", "1")
         assert fake.writes == baseline
-        assert not list(tmp_path.glob("*.csv"))
+        assert not [
+            path for path in tmp_path.glob("*.csv")
+            if path.name != "safety_events.csv"
+        ]
+        assert (tmp_path / "safety_events.csv").exists()
         assert "finite" in window.statusBar().currentMessage()
     finally:
         window.close()
@@ -920,7 +924,11 @@ def test_real_cv_requires_guard_and_rejects_invalid_or_initially_on_before_write
         )
         window._start_voltage_protocol(1, "61", "0.1", "2", "1")
         assert fake.writes == baseline
-        assert not list(tmp_path.glob("*.csv"))
+        assert not [
+            path for path in tmp_path.glob("*.csv")
+            if path.name != "safety_events.csv"
+        ]
+        assert (tmp_path / "safety_events.csv").exists()
 
         assert protocol.start(
             "2", "0.1", "2", "1", "60 V", tmp_path,

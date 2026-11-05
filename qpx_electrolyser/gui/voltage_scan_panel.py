@@ -29,6 +29,7 @@ class VoltageScanPanel(QGroupBox):
         self._available = False
         self._simulation_mode = True
         self._snapshot = ProtocolSnapshot(channel=channel, message="Staircase LSV idle")
+        self._start_validation_message: str | None = None
 
         self.start_voltage_input = self._input("2", f"channel{channel}ScanStartVoltage")
         self.stop_voltage_input = self._input("3", f"channel{channel}ScanStopVoltage")
@@ -203,12 +204,29 @@ class VoltageScanPanel(QGroupBox):
         self._update_enabled()
 
     def show_validation_error(self, message: str) -> None:
+        self._start_validation_message = message
         self.message_label.setText(message)
         self.message_label.setStyleSheet("color: #a61b1b;")
+        self.start_button.setToolTip(message)
+        self._update_enabled()
+
+    def set_start_validation(self, message: str | None) -> None:
+        previous = self._start_validation_message
+        self._start_validation_message = message
+        self.start_button.setToolTip(message or "")
+        if message:
+            self.message_label.setText(message)
+            self.message_label.setStyleSheet("color: #a61b1b;")
+        elif previous:
+            self.message_label.setText(self._snapshot.message)
+            self.message_label.setStyleSheet(
+                "color: #a61b1b;" if self._snapshot.error else ""
+            )
+        self._update_enabled()
 
     def _update_enabled(self) -> None:
         state = self._snapshot.state
-        start_ready = (
+        editable = (
             self._available
             and state in {ProtocolState.IDLE, ProtocolState.COMPLETED, ProtocolState.FAILED}
         )
@@ -223,8 +241,10 @@ class VoltageScanPanel(QGroupBox):
             self.interval_input,
             self.active_area_input,
         ):
-            widget.setEnabled(start_ready)
-        self.start_button.setEnabled(start_ready)
+            widget.setEnabled(editable)
+        self.start_button.setEnabled(
+            editable and self._start_validation_message is None
+        )
         self.pause_button.setEnabled(state is ProtocolState.RUNNING)
         self.resume_button.setEnabled(
             state is ProtocolState.PAUSED

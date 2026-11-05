@@ -29,6 +29,7 @@ class CurrentScanPanel(QGroupBox):
         self._available = False
         self._simulation_mode = True
         self._snapshot = ProtocolSnapshot(channel=channel, message="Current Scan idle")
+        self._start_validation_message: str | None = None
 
         self.start_current_input = self._input("0.1", f"channel{channel}ScanStartCurrent")
         self.stop_current_input = self._input("0.3", f"channel{channel}ScanStopCurrent")
@@ -244,12 +245,29 @@ class CurrentScanPanel(QGroupBox):
 
     def show_validation_error(self, message: str) -> None:
         """Keep a rejected Start visible beside the controls that caused it."""
+        self._start_validation_message = message
         self.message_label.setText(message)
         self.message_label.setStyleSheet("color: #a61b1b;")
+        self.start_button.setToolTip(message)
+        self._update_enabled()
+
+    def set_start_validation(self, message: str | None) -> None:
+        previous = self._start_validation_message
+        self._start_validation_message = message
+        self.start_button.setToolTip(message or "")
+        if message:
+            self.message_label.setText(message)
+            self.message_label.setStyleSheet("color: #a61b1b;")
+        elif previous:
+            self.message_label.setText(self._snapshot.message)
+            self.message_label.setStyleSheet(
+                "color: #a61b1b;" if self._snapshot.error else ""
+            )
+        self._update_enabled()
 
     def _update_enabled(self) -> None:
         state = self._snapshot.state
-        start_ready = (
+        editable = (
             self._available
             and state in {ProtocolState.IDLE, ProtocolState.COMPLETED, ProtocolState.FAILED}
         )
@@ -263,8 +281,10 @@ class CurrentScanPanel(QGroupBox):
             self.dwell_input,
             self.interval_input,
         ):
-            widget.setEnabled(start_ready)
-        self.start_button.setEnabled(start_ready)
+            widget.setEnabled(editable)
+        self.start_button.setEnabled(
+            editable and self._start_validation_message is None
+        )
         self.pause_button.setEnabled(state is ProtocolState.RUNNING)
         self.resume_button.setEnabled(
             state is ProtocolState.PAUSED

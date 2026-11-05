@@ -623,6 +623,8 @@ class ConstantCurrentController(QObject):
                 None if current_input.current_density_a_cm2 is None
                 else float(current_input.current_density_a_cm2)
             ),
+            voltage_label=self._voltage_label,
+            current_label=self._current_label,
         )
         if not 0 < duration_s <= limits.max_duration_s:
             raise ValueError(

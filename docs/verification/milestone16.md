@@ -17,6 +17,20 @@ active area is available. A connected instrument's safe 0 A baseline remains
 readable/validatable; every protocol still requires its established positive,
 grid-supported current.
 
+## Safety-validation feedback follow-up
+
+Every M9-M15 panel now runs its existing controller preflight immediately when
+an input changes and whenever its channel's safety limits are applied. Unsafe
+values keep the editor usable for correction while disabling Start. The panel
+shows the exact rejected value and effective channel limit, and repeats that
+message in the disabled Start button tooltip. Valid input clears both without
+affecting the other channel.
+
+Live typing is diagnostic only and never appends a safety event. If an explicit
+Start route is invoked with unsafe values, one append-only pre-mutation event is
+recorded for that operator action. No ownership, CSV creation, queue submission,
+setting write or Output transition occurs.
+
 Real Hardware Start/Resume remains default-Cancel. The confirmation includes the
 channel, protocol/sequence settings, voltage range, duration or step plan,
 available area/density, effective safety limits and exact/current CSV target.
@@ -59,10 +73,10 @@ controller or instrument interfaces.
 - append/flush schema and serial-number redaction;
 - preserved M9-M15 protocol and M15B offline-analysis regressions.
 
-## Validation result — 2026-11-04
+## Validation result — 2026-11-05
 
-- focused safety and FakeSerial tests: passed;
-- complete pytest suite: **536 passed**;
+- focused M9-M15 safety-feedback and GUI regressions: **176 passed**;
+- complete pytest suite: **539 passed**;
 - package, application and test `compileall`: passed;
 - `pip check`: no broken requirements;
 - disconnected/default Simulation smoke, including simultaneous CH1/CH2 M9-M15

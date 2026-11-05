@@ -89,6 +89,7 @@ class CustomSequencePanel(QGroupBox):
         self._simulation_mode = True
         self._snapshot = SequenceSnapshot(channel=channel)
         self._stages: list[SequenceStage] = []
+        self._start_validation_message: str | None = None
 
         self.name_input = QLineEdit(f"CH{channel} custom sequence")
         self.name_input.setObjectName(f"channel{channel}SequenceName")
@@ -313,8 +314,25 @@ class CustomSequencePanel(QGroupBox):
         self._update_enabled()
 
     def show_validation_error(self, message: str) -> None:
+        self._start_validation_message = message
         self.message_label.setText(message)
         self.message_label.setStyleSheet("color: #a61b1b;")
+        self.start_button.setToolTip(message)
+        self._update_enabled()
+
+    def set_start_validation(self, message: str | None) -> None:
+        previous = self._start_validation_message
+        self._start_validation_message = message
+        self.start_button.setToolTip(message or "")
+        if message:
+            self.message_label.setText(message)
+            self.message_label.setStyleSheet("color: #a61b1b;")
+        elif previous:
+            self.message_label.setText(self._snapshot.message)
+            self.message_label.setStyleSheet(
+                "color: #a61b1b;" if self._snapshot.error else ""
+            )
+        self._update_enabled()
 
     def _update_enabled(self) -> None:
         state = self._snapshot.state
@@ -328,6 +346,7 @@ class CustomSequencePanel(QGroupBox):
             widget.setEnabled(editable)
         self.start_button.setEnabled(
             editable and self._available and bool(self._stages)
+            and self._start_validation_message is None
         )
         self.pause_button.setEnabled(
             state is ProtocolState.RUNNING and not self._snapshot.handoff_state

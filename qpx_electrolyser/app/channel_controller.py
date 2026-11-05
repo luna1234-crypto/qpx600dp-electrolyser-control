@@ -99,7 +99,9 @@ class ManualChannelController(QObject):
             if current is None:
                 raise SafetyValidationError("Refresh the current limit before setting voltage.")
             self._safety_validator.validate_operating_point(
-                self._channel, voltage, current, voltage_range
+                self._channel, voltage, current, voltage_range,
+                voltage_label="Programmed voltage",
+                current_label="Current limit",
             )
         except (InstrumentValueError, SafetyValidationError) as error:
             self._validation_failed(str(error))
@@ -123,7 +125,9 @@ class ManualChannelController(QObject):
             if voltage is None or voltage_range is None:
                 raise SafetyValidationError("Refresh voltage and range before setting current.")
             self._safety_validator.validate_operating_point(
-                self._channel, voltage, current, voltage_range
+                self._channel, voltage, current, voltage_range,
+                voltage_label="Programmed voltage",
+                current_label="Current limit",
             )
         except (InstrumentValueError, SafetyValidationError) as error:
             self._validation_failed(str(error))
@@ -148,7 +152,9 @@ class ManualChannelController(QObject):
             return
         try:
             self._safety_validator.validate_operating_point(
-                self._channel, voltage, current, voltage_range
+                self._channel, voltage, current, voltage_range,
+                voltage_label="Programmed voltage",
+                current_label="Current limit",
             )
         except SafetyValidationError as error:
             self._validation_failed(str(error))

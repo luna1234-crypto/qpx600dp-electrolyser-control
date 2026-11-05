@@ -16,6 +16,8 @@ import pytest
 from qpx_electrolyser.app.channel_controller import ManualChannelController
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
 from qpx_electrolyser.engine.constant_current import ConstantCurrentController, ProtocolState
+from qpx_electrolyser.engine.custom_sequence import SequenceStageType
+from qpx_electrolyser.gui.main_window import MainWindow
 from qpx_electrolyser.instrument.simulator import SimulatedPowerSupply
 from qpx_electrolyser.instrument.qpx600dp import QPX600DPDriver
 from qpx_electrolyser.instrument.serial_transport import SerialTransport
@@ -122,7 +124,7 @@ def test_limits_are_independent_and_use_strictest_policy() -> None:
     })
     assert validator.validate_operating_point(1, 3.0, 0.5, "60 V") == (3.0, 0.5)
     assert validator.validate_operating_point(2, 8.0, 1.0, "60 V") == (8.0, 1.0)
-    with pytest.raises(SafetyValidationError, match="voltage"):
+    with pytest.raises(SafetyValidationError, match="[Vv]oltage"):
         validator.validate_operating_point(1, 4.001, 0.1, "60 V")
     with pytest.raises(SafetyValidationError, match="power"):
         validator.validate_operating_point(1, 4.0, 0.5, "60 V")
@@ -330,3 +332,130 @@ def test_real_fake_serial_emergency_uses_guarded_exactly_once_sequence(
         b"VRANGE2?\n", b"V2?\n", b"I2?\n", b"V2O?\n", b"I2O?\n", b"OP2?\n",
     ]
     assert connection.shutdown(1)
+
+
+def connected_window(
+    qapp: QApplication, tmp_path: Path,
+) -> tuple[ConnectionController, MainWindow]:
+    connection = ConnectionController(SimulatedPowerSupply)
+    window = MainWindow(
+        tmp_path / "application.log", connection, data_directory=tmp_path / "data"
+    )
+    connection.request_connect()
+    wait_until(
+        qapp,
+        lambda: connection.snapshot.state is ConnectionState.CONNECTED
+        and all(item.snapshot.connected for item in window.channel_controllers.values()),
+    )
+    return connection, window
+
+
+def test_live_safety_feedback_is_immediate_exact_and_channel_local(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, window = connected_window(qapp, tmp_path)
+    try:
+        cv1 = window.voltage_protocol_panels[1]
+        cv2 = window.voltage_protocol_panels[2]
+        assert cv1.start_button.isEnabled()
+        assert cv2.start_button.isEnabled()
+
+        window.safety_panel.limits_changed.emit(
+            1, SafetyLimits(1.0, 5.0, 50.0, 5.0)
+        )
+        qapp.processEvents()
+        expected = "Target voltage 2 V exceeds CH1 safety limit 1 V."
+        assert cv1.message_label.text() == expected
+        assert cv1.start_button.toolTip() == expected
+        assert not cv1.start_button.isEnabled()
+        assert cv2.start_button.isEnabled()
+        assert "CH1 safety limit" not in cv2.message_label.text()
+
+        cv1.target_voltage_input.setText("1")
+        qapp.processEvents()
+        assert cv1.start_button.isEnabled()
+        assert cv1.start_button.toolTip() == ""
+        assert "exceeds" not in cv1.message_label.text()
+    finally:
+        window.close()
+        assert connection.shutdown(1)
+
+
+def test_live_safety_feedback_covers_m9_through_m15_panels(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, window = connected_window(qapp, tmp_path)
+    try:
+        sequence = window.sequence_panels[1]
+        sequence.stage_type.setCurrentIndex(
+            sequence.stage_type.findData(SequenceStageType.CONSTANT_VOLTAGE.value)
+        )
+        sequence.add_button.click()
+        qapp.processEvents()
+        window.safety_panel.limits_changed.emit(
+            1, SafetyLimits(1.0, 5.0, 50.0, 5.0)
+        )
+        qapp.processEvents()
+
+        panels = (
+            window.protocol_panels[1],
+            window.voltage_protocol_panels[1],
+            window.voltage_scan_panels[1],
+            window.current_scan_panels[1],
+            window.polarisation_panels[1],
+            window.sequence_panels[1],
+        )
+        for panel in panels:
+            assert not panel.start_button.isEnabled(), type(panel).__name__
+            assert "exceeds CH1 safety limit 1 V" in panel.message_label.text()
+            assert panel.start_button.toolTip() == panel.message_label.text()
+
+        # No CH1 policy feedback leaks into the independent CH2 protocol panels.
+        for panel in (
+            window.protocol_panels[2],
+            window.voltage_protocol_panels[2],
+            window.voltage_scan_panels[2],
+            window.current_scan_panels[2],
+            window.polarisation_panels[2],
+        ):
+            assert panel.start_button.isEnabled(), type(panel).__name__
+            assert "CH1 safety limit" not in panel.message_label.text()
+    finally:
+        window.close()
+        assert connection.shutdown(1)
+
+
+def test_typing_does_not_log_but_explicit_unsafe_start_attempt_does(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    connection, window = connected_window(qapp, tmp_path)
+    event_path = tmp_path / "safety_events.csv"
+    try:
+        window.safety_panel.limits_changed.emit(
+            1, SafetyLimits(1.0, 5.0, 50.0, 5.0)
+        )
+        panel = window.voltage_protocol_panels[1]
+        panel.target_voltage_input.setText("3")
+        qapp.processEvents()
+        assert not event_path.exists()
+
+        window._start_voltage_protocol(1, "3", "0.1", "2", "1")
+        assert event_path.exists()
+        with event_path.open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+        assert len(rows) == 1
+        assert rows[0]["channel"] == "1"
+        assert rows[0]["cause"] == "Target voltage 3 V exceeds CH1 safety limit 1 V."
+        assert rows[0]["requested_action"] == (
+            "Blocked unsafe Constant Voltage Start before mutation"
+        )
+        assert rows[0]["final_state"] == "OFF_CONFIRMED"
+
+        panel.target_voltage_input.setText("4")
+        panel.target_voltage_input.setText("3")
+        qapp.processEvents()
+        with event_path.open(newline="", encoding="utf-8") as stream:
+            assert len(list(csv.DictReader(stream))) == 1
+    finally:
+        window.close()
+        assert connection.shutdown(1)

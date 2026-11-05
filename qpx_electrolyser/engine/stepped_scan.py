@@ -775,6 +775,8 @@ class VoltageScanController(SteppedScanController):
                 current,
                 voltage_range_name,
                 active_area_cm2=area,
+                voltage_label="Scan voltage",
+                current_label="Current limit",
             )
             setpoints.append(voltage)
         duration_s = len(setpoints) * dwell_s
@@ -1147,6 +1149,8 @@ class CurrentScanController(SteppedScanController):
                     else float(selection.active_area_cm2)
                 ),
                 current_density_a_cm2=density,
+                voltage_label="Voltage compliance",
+                current_label="Scan current",
             )
             setpoints.append(current)
         duration_s = len(setpoints) * dwell_s

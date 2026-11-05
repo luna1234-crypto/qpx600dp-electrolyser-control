@@ -28,6 +28,7 @@ class ConstantCurrentPanel(QGroupBox):
         self.channel = channel
         self._available = False
         self._snapshot = ProtocolSnapshot(channel=channel)
+        self._start_validation_message: str | None = None
 
         self.current_input = self._input("A", f"channel{channel}ProtocolCurrent")
         self.input_mode = QComboBox()
@@ -155,8 +156,25 @@ class ConstantCurrentPanel(QGroupBox):
             self.derived_current_value.setStyleSheet("color: #a61b1b;")
 
     def show_validation_error(self, message: str) -> None:
+        self._start_validation_message = message
         self.message_label.setText(message)
         self.message_label.setStyleSheet("color: #a61b1b;")
+        self.start_button.setToolTip(message)
+        self._update_enabled()
+
+    def set_start_validation(self, message: str | None) -> None:
+        previous = self._start_validation_message
+        self._start_validation_message = message
+        self.start_button.setToolTip(message or "")
+        if message:
+            self.message_label.setText(message)
+            self.message_label.setStyleSheet("color: #a61b1b;")
+        elif previous:
+            self.message_label.setText(self._snapshot.message)
+            self.message_label.setStyleSheet(
+                "color: #a61b1b;" if self._snapshot.error else ""
+            )
+        self._update_enabled()
 
     @staticmethod
     def _input(placeholder: str, object_name: str) -> QLineEdit:
@@ -213,7 +231,7 @@ class ConstantCurrentPanel(QGroupBox):
 
     def _update_enabled(self) -> None:
         state = self._snapshot.state
-        start_ready = (
+        editable = (
             self._available
             and state in {ProtocolState.IDLE, ProtocolState.COMPLETED, ProtocolState.FAILED}
         )
@@ -225,8 +243,10 @@ class ConstantCurrentPanel(QGroupBox):
             self.duration_input,
             self.interval_input,
         ):
-            widget.setEnabled(start_ready)
-        self.start_button.setEnabled(start_ready)
+            widget.setEnabled(editable)
+        self.start_button.setEnabled(
+            editable and self._start_validation_message is None
+        )
         self.pause_button.setEnabled(state is ProtocolState.RUNNING)
         self.resume_button.setEnabled(
             state is ProtocolState.PAUSED
