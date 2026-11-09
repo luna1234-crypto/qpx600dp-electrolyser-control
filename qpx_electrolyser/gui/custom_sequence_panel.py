@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QPushButton,
+    QTextEdit,
     QVBoxLayout,
 )
 
@@ -27,7 +28,7 @@ from qpx_electrolyser.engine.custom_sequence import (
 _FIELDS: dict[SequenceStageType, tuple[tuple[str, str, str], ...]] = {
     SequenceStageType.CONSTANT_CURRENT: (
         ("current", "Target current (A):", "0.10"),
-        ("voltage", "Voltage compliance (V):", "2"),
+        ("voltage", "Voltage limit / compliance (V):", "2"),
         ("duration", "Duration (s):", "2"),
         ("interval", "Sample interval (s):", "0.25"),
         ("current_input_mode", "Input mode (current/current_density):", "current"),
@@ -54,7 +55,7 @@ _FIELDS: dict[SequenceStageType, tuple[tuple[str, str, str], ...]] = {
         ("start", "Start current (A):", "0.10"),
         ("stop", "End current (A):", "0.20"),
         ("step", "Signed step (A):", "0.10"),
-        ("voltage", "Voltage compliance (V):", "2"),
+        ("voltage", "Voltage limit / compliance (V):", "2"),
         ("dwell", "Dwell per step (s):", "1"),
         ("interval", "Sample interval (s):", "0.25"),
         ("current_input_mode", "Input mode (current/current_density):", "current"),
@@ -65,7 +66,7 @@ _FIELDS: dict[SequenceStageType, tuple[tuple[str, str, str], ...]] = {
         ("start", "Start density (A/cm²):", "0.05"),
         ("stop", "End density (A/cm²):", "0.10"),
         ("step", "Signed increment (A/cm²):", "0.05"),
-        ("voltage", "Voltage compliance (V):", "2"),
+        ("voltage", "Voltage limit / compliance (V):", "2"),
         ("dwell", "Dwell per step (s):", "2"),
         ("interval", "Sample interval (s):", "0.25"),
         ("window", "Final averaging window (s):", "1"),
@@ -81,6 +82,9 @@ class CustomSequencePanel(QGroupBox):
     pause_requested = Signal()
     resume_requested = Signal()
     stop_requested = Signal()
+    save_template_requested = Signal(bool)
+    load_template_requested = Signal()
+    clear_template_requested = Signal()
 
     def __init__(self, channel: int) -> None:
         super().__init__(f"Channel {channel} Custom Sequence")
@@ -93,6 +97,11 @@ class CustomSequencePanel(QGroupBox):
 
         self.name_input = QLineEdit(f"CH{channel} custom sequence")
         self.name_input.setObjectName(f"channel{channel}SequenceName")
+        self.notes_input = QTextEdit()
+        self.notes_input.setObjectName(f"channel{channel}SequenceNotes")
+        self.notes_input.setPlaceholderText("Template notes (optional)")
+        self.notes_input.setMaximumHeight(55)
+        self.template_path: str | None = None
         self.transition_policy = QComboBox()
         for policy in SequenceTransitionPolicy:
             self.transition_policy.addItem(policy.label, policy.value)
@@ -181,6 +190,26 @@ class CustomSequencePanel(QGroupBox):
         names.addWidget(QLabel("Sequence name:"))
         names.addWidget(self.name_input, 1)
         layout.addLayout(names)
+        template_row = QHBoxLayout()
+        self.save_template_button = QPushButton("Save")
+        self.save_as_template_button = QPushButton("Save As…")
+        self.load_template_button = QPushButton("Load…")
+        self.clear_template_button = QPushButton("Clear")
+        for button in (
+            self.save_template_button, self.save_as_template_button,
+            self.load_template_button, self.clear_template_button,
+        ):
+            template_row.addWidget(button)
+        self.save_template_button.clicked.connect(
+            lambda: self.save_template_requested.emit(False)
+        )
+        self.save_as_template_button.clicked.connect(
+            lambda: self.save_template_requested.emit(True)
+        )
+        self.load_template_button.clicked.connect(self.load_template_requested)
+        self.clear_template_button.clicked.connect(self.clear_template_requested)
+        layout.addLayout(template_row)
+        layout.addWidget(self.notes_input)
         policy_row = QHBoxLayout()
         policy_row.addWidget(QLabel("Transition policy:"))
         policy_row.addWidget(self.transition_policy, 1)
@@ -339,6 +368,8 @@ class CustomSequencePanel(QGroupBox):
         editable = state in {ProtocolState.IDLE, ProtocolState.COMPLETED, ProtocolState.FAILED}
         for widget in (
             self.name_input, self.stage_list, self.stage_type, *self.field_inputs,
+            self.notes_input, self.save_template_button, self.save_as_template_button,
+            self.load_template_button, self.clear_template_button,
             self.transition_policy, self.handoff_settling_input,
             self.add_button, self.update_button, self.remove_button,
             self.duplicate_button, self.up_button, self.down_button,
@@ -358,3 +389,25 @@ class CustomSequencePanel(QGroupBox):
             ProtocolState.IDLE, ProtocolState.COMPLETED, ProtocolState.FAILED,
             ProtocolState.STOPPING,
         })
+
+    def set_template(
+        self, *, name: str, notes: str, stages: tuple[SequenceStage, ...],
+        transition_policy: str, handoff_settling_s: str, path: str | None,
+    ) -> None:
+        """Apply a prevalidated offline template without starting anything."""
+        self.name_input.setText(name)
+        self.notes_input.setPlainText(notes)
+        index = self.transition_policy.findData(transition_policy)
+        if index >= 0:
+            self.transition_policy.setCurrentIndex(index)
+        self.handoff_settling_input.setText(handoff_settling_s)
+        self._stages = list(stages)
+        self.template_path = path
+        self._refresh_list(0 if stages else None)
+
+    def clear_template(self) -> None:
+        self.name_input.setText(f"CH{self.channel} custom sequence")
+        self.notes_input.clear()
+        self._stages.clear()
+        self.template_path = None
+        self._refresh_list()

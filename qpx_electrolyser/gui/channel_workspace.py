@@ -18,7 +18,7 @@ class ChannelWorkspace(QGroupBox):
     """Keep one channel's status visible while switching protocol editors."""
 
     TAB_NAMES = (
-        "Manual", "CC", "CV", "Voltage Scan", "Current Scan",
+        "Manual", "Chronopotentiometry (CP)", "Chronoamperometry (CA)", "Voltage Scan", "Current Scan",
         "Polarisation", "Custom Sequence",
     )
 
@@ -51,6 +51,8 @@ class ChannelWorkspace(QGroupBox):
         self.tabs.setDocumentMode(True)
         self.tabs.setUsesScrollButtons(True)
         for name, panel in zip(self.TAB_NAMES, panels, strict=True):
+            if isinstance(panel, QGroupBox):
+                panel.setFlat(True)
             self.tabs.addTab(panel, name)
         layout.addWidget(self.tabs, 1)
 

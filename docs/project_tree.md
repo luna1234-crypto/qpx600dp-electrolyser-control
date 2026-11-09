@@ -25,6 +25,7 @@ QPX 600 DP/
             paths.py
             settings.py
         data/
+            sequence_templates.py
             __init__.py
             csv_logging.py
         engine/
@@ -153,6 +154,7 @@ QPX 600 DP/
         test_settings.py
         test_simulator.py
         test_ui_refinement.py
+        test_m18b_refinement.py
     .gitattributes
     .gitignore
     main.py

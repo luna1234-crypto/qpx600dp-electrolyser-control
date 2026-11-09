@@ -231,6 +231,7 @@ def draw_scientific_plot(
             color = QColor("#1769aa")
         pen = QPen(color, max(0.1, style.line_width), _line_style(style.line_style))
         painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         path = QPainterPath()
         for index, point in enumerate(points):
             x, y = mapped(point)
@@ -339,6 +340,11 @@ class ResultsPlotterWindow(QMainWindow):
         "Visible", "Material/sample", "Legend", "Colour", "Marker", "Size",
         "Line", "Width", "Order", "Area override (cm²)", "Source", "Status",
     )
+    RESULT_COLUMNS = (
+        "Stage status", "Source", "Run ID", "Channel", "Stage", "Type",
+        "Commanded values", "Mean ± SD voltage (V)", "Mean ± SD current (A)",
+        "Mean current density (A/cm²)", "Samples", "Final 30 s bounds", "Acceptance reason",
+    )
 
     def __init__(self, default_directory: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -373,6 +379,21 @@ class ResultsPlotterWindow(QMainWindow):
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
         self.table.setMinimumHeight(190)
         layout.addWidget(self.table)
+        result_tools = QHBoxLayout()
+        result_tools.addWidget(QLabel("Results filter:"))
+        self.results_filter = QLineEdit()
+        self.results_filter.setPlaceholderText("Filter source, stage, status, channel…")
+        self.include_partial_check = QCheckBox(
+            "Include deliberately stopped stage with a complete valid 30-second window"
+        )
+        result_tools.addWidget(self.results_filter, 1)
+        result_tools.addWidget(self.include_partial_check)
+        layout.addLayout(result_tools)
+        self.results_table = QTableWidget(0, len(self.RESULT_COLUMNS))
+        self.results_table.setHorizontalHeaderLabels(self.RESULT_COLUMNS)
+        self.results_table.setSortingEnabled(True)
+        self.results_table.setMinimumHeight(190)
+        layout.addWidget(self.results_table)
         self.canvas = ResultsPlotCanvas(); layout.addWidget(self.canvas, 1)
         controls = QGroupBox("Figure and exports"); grid = QGridLayout(controls)
         self.plot_mode = QComboBox(); self.plot_mode.addItem("Voltage vs current", "current")
@@ -422,6 +443,8 @@ class ResultsPlotterWindow(QMainWindow):
         self.export_csv_button.clicked.connect(self._export_csv)
         self.export_plots_button.clicked.connect(self._export_plots)
         self.table.cellChanged.connect(self._table_changed)
+        self.results_filter.textChanged.connect(self._filter_results_table)
+        self.include_partial_check.toggled.connect(self._reanalyze_all)
         self.plot_mode.currentIndexChanged.connect(self._plot_mode_changed)
         for widget in (
             self.title_input, self.x_label_input, self.y_label_input,
@@ -466,6 +489,7 @@ class ResultsPlotterWindow(QMainWindow):
             spec = ExperimentSpec(
                 Path(key), style.material_name, style.legend_label,
                 None if override is None else Decimal(override),
+                self.include_partial_check.isChecked(),
             )
         except Exception as error:
             self._show_local_error(f"Invalid active-area override: {error}")
@@ -489,7 +513,7 @@ class ResultsPlotterWindow(QMainWindow):
             self._errors.pop(key, None)
             self._reports[key] = report
             self.status_label.setText(f"{Path(key).name}: {report.validation_status}")
-        self._rebuild_table(); self._refresh_preview()
+        self._rebuild_table(); self._rebuild_results_table(); self._refresh_preview()
         if key in self._rerun_keys:
             self._rerun_keys.discard(key)
             self._submit_analysis(key)
@@ -601,6 +625,59 @@ class ResultsPlotterWindow(QMainWindow):
         finally:
             self._updating_table = False
 
+    def _rebuild_results_table(self) -> None:
+        self.results_table.setSortingEnabled(False)
+        rows = [
+            result
+            for key in sorted(self._reports)
+            for result in self._reports[key].results
+        ]
+        self.results_table.setRowCount(len(rows))
+        for row, result in enumerate(rows):
+            status = (
+                "PARTIAL" if result.validation_status.startswith("PARTIAL")
+                else ("ACCEPTED" if result.accepted else "EXCLUDED")
+            )
+            values = (
+                status, result.source_file, result.run_id, f"CH{result.channel}",
+                str(result.stage_index), result.stage_name, result.commanded_setpoints,
+                self._mean_sd(result.mean_voltage_v, result.voltage_population_sd_v),
+                self._mean_sd(result.mean_current_a, result.current_population_sd_a),
+                "" if result.mean_current_density_a_cm2 is None else str(result.mean_current_density_a_cm2),
+                str(result.sample_count),
+                (
+                    "" if result.analysis_start_elapsed_s is None
+                    else f"{result.analysis_start_elapsed_s}–{result.analysis_end_elapsed_s} s"
+                ),
+                result.validation_status,
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column in (4, 10):
+                    item.setData(Qt.ItemDataRole.EditRole, int(value or 0))
+                self.results_table.setItem(row, column, item)
+        self.results_table.setSortingEnabled(True)
+        self.results_table.resizeColumnsToContents()
+        self._filter_results_table()
+
+    @staticmethod
+    def _mean_sd(mean_value: object, sd_value: object) -> str:
+        return "" if mean_value is None else f"{mean_value} ± {sd_value}"
+
+    def _filter_results_table(self, *_args) -> None:  # type: ignore[no-untyped-def]
+        needle = self.results_filter.text().strip().lower()
+        for row in range(self.results_table.rowCount()):
+            haystack = " ".join(
+                self.results_table.item(row, column).text()
+                for column in range(self.results_table.columnCount())
+                if self.results_table.item(row, column) is not None
+            ).lower()
+            self.results_table.setRowHidden(row, bool(needle and needle not in haystack))
+
+    def _reanalyze_all(self, *_args) -> None:  # type: ignore[no-untyped-def]
+        for key in tuple(self._styles):
+            self._submit_analysis(key)
+
     def _set_curve_style(self, key: str, attribute: str, value: object) -> None:
         style = self._styles.get(key)
         if style is None:
@@ -679,7 +756,7 @@ class ResultsPlotterWindow(QMainWindow):
         self.pdf_check.setChecked("pdf" in figure.formats)
         for key, style in configuration.curves.items():
             if key in self._styles: self._styles[key] = style
-        self._rebuild_table(); self._refresh_preview()
+        self._rebuild_table(); self._rebuild_results_table(); self._refresh_preview()
 
     def _reset_defaults(self) -> None:
         defaults = FigureSettings(output_directory=str(self._default_directory))

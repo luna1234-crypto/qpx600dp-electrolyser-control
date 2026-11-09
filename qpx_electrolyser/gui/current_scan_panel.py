@@ -61,7 +61,7 @@ class CurrentScanPanel(QGroupBox):
             (self.start_current_label, self.start_current_input),
             (self.stop_current_label, self.stop_current_input),
             (self.step_label, self.step_input),
-            ("Voltage compliance (V):", self.voltage_compliance_input),
+            ("Voltage limit / compliance (V):", self.voltage_compliance_input),
             ("Dwell per step (s):", self.dwell_input),
             ("Sampling interval (s):", self.interval_input),
         )

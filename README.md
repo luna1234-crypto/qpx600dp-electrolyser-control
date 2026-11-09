@@ -658,11 +658,14 @@ and does not modify M15B plot-configuration files.
 
 ## Milestone 18 refined operator interface
 
-Connection/mode state, per-channel safety limits and the prominent Emergency
-All-Off action remain in a fixed header while protocol content scrolls below.
+Connection/mode state and the prominent Emergency All-Off action remain fixed.
+Unified Safety and the two channel workspaces share a persisted, draggable
+vertical splitter with explicit Collapse/Restore controls, reducing whole-page
+scrolling while retaining immediate safety access.
 CH1 and CH2 each use the same compact workspace: an always-visible Output,
 measured V/I/P, CV/CC availability, protocol/stage and CSV status strip plus
-keyboard-navigable tabs for Manual, CC, CV, Voltage Scan, Current Scan,
+keyboard-navigable tabs for Manual, Chronopotentiometry (CP),
+Chronoamperometry (CA), Voltage Scan, Current Scan,
 Polarisation and Custom Sequence. The original panels and controllers are
 reparented rather than reimplemented, so protocol semantics and signal routes
 are unchanged. Live time, LSV and polarisation plots are independently
@@ -681,6 +684,20 @@ rejected, while already completed earlier stages remain valid. Curve visibility,
 colour, marker, marker size, line style/width and display order now have typed
 controls that update preview immediately and round-trip through plot
 configuration files.
+
+M18B adds versioned offline Custom Sequence templates (`*.qpxseq.txt`) with
+Save/Save As/Load/Clear and a validation preview. Every new raw-data run now
+uses an operator-selected, exclusively created CSV path before any hardware
+mutation; Cancel submits no command, Pause/Resume retains the same path and
+companion files share its base name. Only the last directory is remembered.
+M15B includes a sortable/filterable stage Results Table and an explicit option
+to include a deliberately stopped stage only when it contains a complete valid
+final 30-second window; FAILED stages remain excluded. Scientific curves are
+drawn independently with no inter-experiment fill. View > Theme switches the
+operator UI immediately between persistent Light and Dark themes, while
+scientific exports retain their configured white default background. Internal
+and CSV identifiers remain `constant_current`/`constant_voltage` and CC/CV.
+This remains two-electrode power-supply control, not potentiostat control.
 
 Issue 14 gives two guaranteed power-envelope points, 10 V / 50 A and
 80 V / 7.5 A, but no complete mathematical expression for the graph. The
@@ -749,7 +766,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | M15B Results / Scientific Plotter | Optional isolated offline M15 CSV analysis and scientific export implemented; no hardware-control access |
 | M16 Unified safety/emergency system | Simulation/FakeSerial and supervised dual-channel 100-ohm Emergency All-Off acceptance passed; physical USB-disconnection acceptance not performed |
 | M17 configuration persistence | Implemented with versioned atomic per-user settings and safe disconnected restore |
-| M18 UI refinement | Implemented; fixed header, tabbed channel workspaces, compact status, collapsible plots, stable focus/routing and corrected M15B real-schema/style controls |
+| M18/M18B UI refinement | Implemented; fixed connection/Emergency header, persisted safety/channel splitter and themes, CP/CA terminology, sequence templates, operator-named exclusive CSVs, stage Results Table and independent no-fill scientific curves |
 | M19 Windows packaging | Pending; no packaged executable is claimed |
 | M20 final regression/stress testing | Pending; no 24-hour final-system result is claimed |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |

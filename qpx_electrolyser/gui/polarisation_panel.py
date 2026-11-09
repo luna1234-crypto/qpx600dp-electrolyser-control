@@ -40,7 +40,7 @@ class PolarisationPanel(QGroupBox):
             ("Start current density (A/cm²):", self.start_density_input),
             ("End current density (A/cm²):", self.stop_density_input),
             ("Signed increment (A/cm²):", self.increment_input),
-            ("Voltage compliance (V):", self.voltage_input),
+            ("Voltage limit / compliance (V):", self.voltage_input),
             ("Dwell per step (s):", self.dwell_input),
             ("Sampling interval (s):", self.interval_input),
             ("Final averaging window (s):", self.averaging_input),

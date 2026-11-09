@@ -20,7 +20,7 @@ from qpx_electrolyser.safety.model import (
 )
 
 
-SETTINGS_SCHEMA_VERSION = 1
+SETTINGS_SCHEMA_VERSION = 2
 _PORT_PATTERN = re.compile(r"COM[1-9]\d*", re.IGNORECASE)
 
 
@@ -61,6 +61,8 @@ class ApplicationSettings:
     simulation_mode: bool = True
     window_geometry: WindowGeometry = field(default_factory=WindowGeometry)
     plot_display: PlotDisplayPreferences = field(default_factory=PlotDisplayPreferences)
+    theme: str = "light"
+    safety_splitter_sizes: tuple[int, int] = (190, 730)
 
     @classmethod
     def defaults(cls, data_directory: Path | None = None) -> "ApplicationSettings":
@@ -84,6 +86,8 @@ class ApplicationSettings:
             "simulation_mode": self.simulation_mode,
             "window_geometry": asdict(self.window_geometry),
             "plot_display": asdict(self.plot_display),
+            "theme": self.theme,
+            "safety_splitter_sizes": list(self.safety_splitter_sizes),
         }
 
 
@@ -193,7 +197,7 @@ class SettingsStore:
         version = raw.get("schema_version", 0)
         if version == SETTINGS_SCHEMA_VERSION:
             return dict(raw)
-        if version == 0:
+        if version in (0, 1):
             return {
                 "schema_version": SETTINGS_SCHEMA_VERSION,
                 "manual_port": raw.get("port", raw.get("manual_port", "")),
@@ -206,6 +210,8 @@ class SettingsStore:
                 "simulation_mode": raw.get("simulation_mode", True),
                 "window_geometry": raw.get("window_geometry", {}),
                 "plot_display": raw.get("plot_display", {}),
+                "theme": raw.get("theme", "light"),
+                "safety_splitter_sizes": raw.get("safety_splitter_sizes", [190, 730]),
             }
         raise ValueError(f"unsupported settings schema version {version!r}")
 
@@ -278,6 +284,18 @@ class SettingsStore:
 
         geometry = SettingsStore._geometry(raw.get("window_geometry"), defaults, warnings)
         plots = SettingsStore._plots(raw.get("plot_display"), warnings)
+        theme = raw.get("theme", "light")
+        if theme not in {"light", "dark"}:
+            warnings.append("Invalid persisted theme was replaced by Light.")
+            theme = "light"
+        splitter_raw = raw.get("safety_splitter_sizes", [190, 730])
+        try:
+            if not isinstance(splitter_raw, (list, tuple)) or len(splitter_raw) != 2:
+                raise ValueError
+            splitter = (max(0, int(splitter_raw[0])), max(100, int(splitter_raw[1])))
+        except (TypeError, ValueError):
+            warnings.append("Invalid persisted splitter position was replaced by default.")
+            splitter = (190, 730)
         return SettingsLoadResult(ApplicationSettings(
             manual_port=port,
             data_export_directory=directory,
@@ -287,6 +305,8 @@ class SettingsStore:
             simulation_mode=simulation_mode,
             window_geometry=geometry,
             plot_display=plots,
+            theme=theme,
+            safety_splitter_sizes=splitter,
         ), tuple(warnings))
 
     @staticmethod

@@ -176,13 +176,18 @@ class CsvLogFile:
     def __init__(self, directory: Path, channel: int, *, created_at: datetime | None = None) -> None:
         if not isinstance(directory, Path):
             directory = Path(directory)
-        if not directory.exists():
-            raise FileNotFoundError(f"Logging directory does not exist: {directory}")
-        if not directory.is_dir():
-            raise NotADirectoryError(f"Logging destination is not a directory: {directory}")
-        instant = created_at or datetime.now(timezone.utc)
-        stamp = instant.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
-        self.path = directory / f"qpx600dp_ch{channel}_{stamp}.csv"
+        explicit_path = directory.suffix.lower() == ".csv"
+        parent = directory.parent if explicit_path else directory
+        if not parent.exists():
+            raise FileNotFoundError(f"Logging directory does not exist: {parent}")
+        if not parent.is_dir():
+            raise NotADirectoryError(f"Logging destination is not a directory: {parent}")
+        if explicit_path:
+            self.path = directory
+        else:
+            instant = created_at or datetime.now(timezone.utc)
+            stamp = instant.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+            self.path = directory / f"qpx600dp_ch{channel}_{stamp}.csv"
         self._stream: TextIO | None = self.path.open("x", newline="", encoding="utf-8")
         self._writer = csv.DictWriter(self._stream, fieldnames=CSV_COLUMNS, extrasaction="raise")
         try:

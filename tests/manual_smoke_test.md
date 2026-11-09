@@ -306,3 +306,19 @@ protocol ownership, confirmation tokens or instrument identity.
 7. Change visibility, colour, marker, size, line style/width and order. Confirm
    immediate preview, save/load configuration round-trip, and no experiment
    controller/output change. Close cleanly with no residual QThread warning.
+8. Drag the Unified Safety/channel splitter, Collapse and Restore it, restart,
+   and confirm the position returns while connection and Emergency All-Off stay
+   visible. Switch View > Theme between Light and Dark and verify readable tabs,
+   tables, dialogs, tooltips, status badges and safety colours at 100/125/150%.
+9. In each Custom Sequence panel Save As a `*.qpxseq.txt` template, Clear it,
+   Load it, inspect the preview, and confirm no connection or run starts. Test
+   Cancel as well as a malformed template.
+10. Start a short Simulation run, choose a new CSV name, and confirm Cancel
+    leaves the channel untouched. Confirm an existing file is rejected, CH1/CH2
+    use independent names, Resume retains the selected file and polarisation
+    companions share its base.
+11. In Results / Plotter import at least two M15 files. Sort/filter stage rows;
+    verify completed-before-Stop remains accepted, stopped is excluded by
+    default, optional qualifying PARTIAL is labelled, and FAILED is excluded.
+    Confirm separate lines/markers/error bars with no blue filled polygon and
+    that Dark UI still exports scientific figures on the configured white default.

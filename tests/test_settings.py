@@ -57,14 +57,14 @@ def test_versioned_save_restart_restore_and_fixed_schema(tmp_path: Path) -> None
     assert loaded.warnings == ()
     assert loaded.settings == expected
     raw = json.loads(path.read_text(encoding="utf-8"))
-    assert raw["schema_version"] == 1
+    assert raw["schema_version"] == 2
     assert "instrument_serial" not in raw
     assert "confirmation_token" not in raw
     assert set(raw) == {
         "schema_version", "manual_port", "data_export_directory",
         "safety_limits", "default_active_area_cm2",
         "default_sampling_interval_s", "simulation_mode",
-        "window_geometry", "plot_display",
+        "window_geometry", "plot_display", "theme", "safety_splitter_sizes",
     }
 
 
@@ -87,7 +87,7 @@ def test_missing_corrupt_and_old_settings_fall_back_or_migrate(tmp_path: Path) -
         "simulation_mode": False,
     }), encoding="utf-8")
     migrated = SettingsStore(path).load(default_data_directory=tmp_path)
-    assert migrated.settings.schema_version == 1
+    assert migrated.settings.schema_version == 2
     assert migrated.settings.manual_port == "COM9"
     assert migrated.settings.default_active_area_cm2 == 3
     assert migrated.settings.default_sampling_interval_s == 2
@@ -198,6 +198,8 @@ def test_gui_close_saves_and_restart_restores_channel_independence(
     first.default_active_area.setValue(4.5)
     first.logging_interval.setValue(2.5)
     first.show_time_plots_action.setChecked(False)
+    first._apply_theme("dark")
+    first.main_vertical_splitter.setSizes([240, 660])
     first_controller.set_port_name("COM12")
     first_controller.set_simulation_mode(False)
     first.close(); qapp.processEvents()
@@ -220,6 +222,8 @@ def test_gui_close_saves_and_restart_restores_channel_independence(
         assert second.default_active_area.value() == 4.5
         assert second.logging_interval.value() == 2.5
         assert not second.show_time_plots_action.isChecked()
+        assert second.dark_theme_action.isChecked()
+        assert second.main_vertical_splitter.sizes()[0] > 0
     finally:
         second.close(); qapp.processEvents()
         assert second_controller.shutdown(1)

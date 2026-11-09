@@ -52,17 +52,26 @@ def test_always_visible_header_channel_tabs_and_collapsible_plots(
 ) -> None:
     connection, window = _window(qapp, tmp_path)
     try:
-        assert window.safety_panel.parentWidget() is window.always_visible_header
+        assert window.safety_panel.parentWidget() is window.main_vertical_splitter
+        assert window.safety_panel.emergency_button.parentWidget() is window.always_visible_header
         assert window.connection_panel.parentWidget() is window.always_visible_header
         assert window.always_visible_header.parentWidget() is window.centralWidget()
-        assert window.content_scroll.parentWidget() is window.centralWidget()
+        assert window.content_scroll.parentWidget() is window.main_vertical_splitter
         for channel in (1, 2):
             workspace = window.channel_workspaces[channel]
             assert workspace.tabs.count() == 7
             assert [workspace.tabs.tabText(index) for index in range(7)] == [
-                "Manual", "CC", "CV", "Voltage Scan", "Current Scan",
+                "Manual", "Chronopotentiometry (CP)", "Chronoamperometry (CA)", "Voltage Scan", "Current Scan",
                 "Polarisation", "Custom Sequence",
             ]
+        original = window.main_vertical_splitter.sizes()
+        window._collapse_safety_panel()
+        assert window.main_vertical_splitter.sizes()[0] == 0
+        window._restore_safety_panel()
+        assert window.main_vertical_splitter.sizes()[0] > 0
+        window._apply_theme("dark")
+        assert window.dark_theme_action.isChecked()
+        assert original[1] > 0
         section = window.plot_sections["time"]
         section.setChecked(False)
         assert not section.splitter.isVisible()

@@ -13,7 +13,7 @@ class ConstantVoltagePanel(ConstantCurrentPanel):
 
     def __init__(self, channel: int) -> None:
         super().__init__(channel)
-        self.setTitle(f"Channel {channel} Constant Voltage protocol")
+        self.setTitle(f"Channel {channel} Chronoamperometry (CA)")
         self.target_voltage_input = self.voltage_input
         self.current_limit_input = self.current_input
         self.target_voltage_input.setObjectName(f"channel{channel}CvTargetVoltage")

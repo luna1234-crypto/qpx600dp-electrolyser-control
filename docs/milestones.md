@@ -690,6 +690,14 @@ rejecting interrupted stages, and provides typed, immediately previewed and
 persistent visibility/colour/marker/line/order controls. See
 [verification details](verification/milestone18.md).
 
+M18B completes the refinement with a persisted Safety/channel splitter,
+Light/Dark operator themes, CP/CA display terminology, versioned Custom Sequence
+templates, and exclusive operator-named CSV files selected before mutation.
+The offline Plotter adds sortable/filterable stage results, guarded PARTIAL
+inclusion and independent no-fill curve rendering. Internal protocol and CSV IDs,
+instrument state names, controller ownership and guarded Output behavior remain
+unchanged.
+
 ## Milestone 19 - Windows packaging
 
 Original roadmap task: build the Windows executable. This milestone is pending

@@ -69,8 +69,8 @@ class SequenceStageType(str, Enum):
     @property
     def label(self) -> str:
         return {
-            self.CONSTANT_CURRENT: "Constant Current",
-            self.CONSTANT_VOLTAGE: "Constant Voltage",
+            self.CONSTANT_CURRENT: "Chronopotentiometry (CP)",
+            self.CONSTANT_VOLTAGE: "Chronoamperometry (CA)",
             self.VOLTAGE_SCAN: "Voltage Sweep / Staircase LSV",
             self.CURRENT_SCAN: "Current Scan",
             self.POLARISATION: "Steady-State Polarisation",
@@ -374,6 +374,17 @@ class CustomSequenceController(QObject):
             raise ValueError("Connect and initialize the selected instrument first.")
         if voltage_range_name is None:
             raise ValueError("Refresh the channel before starting a Custom Sequence.")
+        self._validate_connected_preflight()
+        prepared = self.validate_template(sequence_name, stages, voltage_range_name)
+        return prepared
+
+    def validate_template(
+        self,
+        sequence_name: str,
+        stages: list[SequenceStage] | tuple[SequenceStage, ...],
+        voltage_range_name: str = "80 V",
+    ) -> tuple[_PreparedStage, ...]:
+        """Validate an offline editor template without acquiring or mutating a channel."""
         name = sequence_name.strip()
         if not name:
             raise ValueError("Sequence name is required.")
@@ -381,6 +392,19 @@ class CustomSequenceController(QObject):
             raise ValueError("Sequence name must be a single line.")
         if not stages:
             raise ValueError("Add at least one sequence stage before Start.")
+        prepared = tuple(
+            self._prepare_stage(index, stage, voltage_range_name)
+            for index, stage in enumerate(stages, start=1)
+        )
+        total = sum(item.duration_s for item in prepared)
+        if total > DEFAULT_CONSTANT_CURRENT_LIMITS.max_duration_s:
+            raise ValueError(
+                f"Total sequence active duration exceeds the "
+                f"{DEFAULT_CONSTANT_CURRENT_LIMITS.max_duration_s:g} second project limit."
+            )
+        return prepared
+
+    def _validate_connected_preflight(self) -> None:
         initial = next(
             (
                 item for item in self._connection.snapshot.initial_readbacks
@@ -398,17 +422,6 @@ class CustomSequenceController(QObject):
             if len(parts) != 4 or parts[1].upper() != "QPX600DP":
                 raise ValueError("Real Hardware sequence requires an identified QPX600DP session.")
 
-        prepared = tuple(
-            self._prepare_stage(index, stage, voltage_range_name)
-            for index, stage in enumerate(stages, start=1)
-        )
-        total = sum(item.duration_s for item in prepared)
-        if total > DEFAULT_CONSTANT_CURRENT_LIMITS.max_duration_s:
-            raise ValueError(
-                f"Total sequence active duration exceeds the "
-                f"{DEFAULT_CONSTANT_CURRENT_LIMITS.max_duration_s:g} second project limit."
-            )
-        return prepared
 
     def _prepare_stage(
         self, index: int, stage: SequenceStage, voltage_range_name: str

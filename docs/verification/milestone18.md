@@ -43,6 +43,42 @@ No COM port was enumerated or accessed and no physical instrument command was
 sent. Manual DPI and small-screen acceptance follows the checklist in
 `tests/manual_smoke_test.md`.
 
+## M18B final refinement
+
+- Connection status and Emergency All-Off stay fixed while Unified Safety and
+  channel content use a draggable vertical splitter with persisted sizes and
+  Collapse/Restore actions.
+- Operator terminology is Chronopotentiometry (CP) and Chronoamperometry (CA),
+  while internal/CSV IDs remain unchanged. Compliance fields read “Voltage
+  limit / compliance (V)” and the UI identifies two-electrode power-supply
+  control rather than potentiostat control.
+- Custom Sequence templates are versioned JSON `*.qpxseq.txt` documents with
+  notes, stages, transition policy, settling, interval and area values. Import
+  is previewed and validated offline and cannot connect or start an output.
+- Each new logger/protocol/scan/sequence file is chosen before mutation and
+  created exclusively; cancel submits zero commands, Resume keeps the same
+  writer and companion files derive from the selected base name.
+- M15B exposes sortable/filterable stage results and optional, clearly marked
+  PARTIAL inclusion only for deliberately stopped stages with a complete valid
+  final 30 seconds. FAILED stages remain excluded.
+- Curve paths have no brush and are created per experiment, so independent
+  curves are never filled or joined. Light/Dark themes apply immediately and
+  persist; scientific exports retain the configured white default background.
+
+Focused coverage includes settings migration/splitter/theme restore, template
+round-trip, CSV cancellation/exclusive naming, stage rules/results filtering,
+two-curve no-fill rendering and unchanged M9–M18 controller regressions.
+
+## M18B validation result — 2026-11-09
+
+- focused M18B/Custom Sequence/M15B/settings/UI regressions: **62 passed**;
+- complete pytest suite: **559 passed**;
+- package, entrypoint and tests `compileall`: passed;
+- `pip check`: no broken requirements;
+- default-Simulation automated smoke: passed with both outputs OFF, clean
+  disconnect and worker shutdown; and
+- `git diff --check`: passed.
+
 ## Validation result — 2026-11-05
 
 - focused M18/M15B and M9-M17 regressions: **137 passed**;

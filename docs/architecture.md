@@ -450,6 +450,23 @@ event or the natural child-protocol terminal record (`completed`, COMPLETED,
 mutate only `CurveStyle` and repaint processed data; they import no control
 objects.
 
+M18B keeps the fixed connection/Emergency header and places `SafetyPanel` above
+the channel/plot scroll area in a vertical `QSplitter`; M17 persists only its
+sizes and the Light/Dark theme. Theme styles affect operator widgets only:
+scientific exports still render from `FigureSettings` on a white default canvas.
+`SequenceTemplate` is an offline, versioned JSON document; load uses structural,
+capability and safety validation but cannot acquire a channel. Explicit CSV
+selection is represented by passing a `.csv` path to the existing `CsvLogFile`,
+which still opens with exclusive mode and remains the sole writer. Controllers,
+queue ownership, sampling and guarded Output transitions are unchanged.
+
+The M15B Results Table is another view of immutable `StageResult` objects.
+Natural completions and completed stages preceding Stop remain valid; optional
+PARTIAL inclusion requires a deliberately stopped stage with a full continuous
+30-second window, while FAILED stages can never become accepted. Plot rendering
+sets `NoBrush` before every independent curve path, preventing Qt from implicitly
+closing/filling one experiment or visually joining separate experiments.
+
 `EmergencyAllOffController` is orchestration, not an instrument owner: it only
 submits through the shared `ConnectionController` queue, reuses protocol Stop and
 guarded Output-Off behavior, and records independent CH1/CH2 outcomes through

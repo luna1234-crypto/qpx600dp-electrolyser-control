@@ -24,7 +24,7 @@ class ConstantCurrentPanel(QGroupBox):
     stop_requested = Signal()
 
     def __init__(self, channel: int) -> None:
-        super().__init__(f"Channel {channel} Constant Current protocol")
+        super().__init__(f"Channel {channel} Chronopotentiometry (CP)")
         self.channel = channel
         self._available = False
         self._snapshot = ProtocolSnapshot(channel=channel)
@@ -54,7 +54,7 @@ class ConstantCurrentPanel(QGroupBox):
         inputs.addWidget(self.input_mode_label, 0, 0)
         inputs.addWidget(self.input_mode, 0, 1)
         self.current_label = QLabel("Target current (A):")
-        self.voltage_label = QLabel("Voltage compliance (V):")
+        self.voltage_label = QLabel("Voltage limit / compliance (V):")
         inputs.addWidget(self.current_label, 1, 0)
         inputs.addWidget(self.current_input, 1, 1)
         self.active_area_label = QLabel("Active area (cm²):")

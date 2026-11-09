@@ -213,6 +213,12 @@ def test_completed_stages_before_stop_remain_valid_but_interrupted_stage_is_reje
     ]
     assert report.results[1].validation_status == "Stage not completed"
 
+    included = analyse_m15_csv(ExperimentSpec(
+        tmp_path / "stopped.csv", include_stopped_complete_window=True
+    ))
+    assert included.results[1].accepted
+    assert included.results[1].validation_status.startswith("PARTIAL")
+
 
 def test_ascending_descending_and_repeated_setpoints_do_not_change_one_point_per_stage(
     tmp_path: Path,

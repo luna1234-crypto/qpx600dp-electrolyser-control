@@ -1,13 +1,15 @@
 """Compose guarded simulation/real connection and manual channel controls."""
 
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from decimal import Decimal
 import math
+import os
 import time
 
-from PySide6.QtCore import QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -21,6 +23,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QLineEdit,
     QScrollArea,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -42,6 +45,10 @@ from qpx_electrolyser.app.settings import (
     normalize_window_geometry,
 )
 from qpx_electrolyser.data.csv_logging import ChannelLoggingController
+from qpx_electrolyser.data.sequence_templates import (
+    SequenceTemplate, SequenceTemplateError, load_sequence_template,
+    save_sequence_template,
+)
 from qpx_electrolyser.engine.constant_current import (
     ConstantCurrentController,
     ProtocolSnapshot,
@@ -171,9 +178,9 @@ class MainWindow(QMainWindow):
         self.connection_panel.apply_snapshot(connection_controller.snapshot)
         header_layout.addWidget(self.connection_panel)
 
-        self.safety_panel = SafetyPanel(self.safety_validator)
+        self.safety_panel = SafetyPanel(self.safety_validator, show_emergency=False)
         self.safety_panel.limits_changed.connect(self._apply_safety_limits)
-        header_layout.addWidget(self.safety_panel)
+        header_layout.addWidget(self.safety_panel.emergency_button)
 
         logging_row = QHBoxLayout()
         logging_row.addWidget(QLabel("CSV output directory:"))
@@ -469,6 +476,16 @@ class MainWindow(QMainWindow):
                 self._resume_custom_sequence(selected_channel)
             )
             sequence_panel.stop_requested.connect(sequence_controller.stop)
+            sequence_panel.save_template_requested.connect(
+                lambda save_as, selected_channel=channel:
+                self._save_sequence_template(selected_channel, save_as)
+            )
+            sequence_panel.load_template_requested.connect(
+                lambda selected_channel=channel: self._load_sequence_template(selected_channel)
+            )
+            sequence_panel.clear_template_requested.connect(
+                lambda selected_channel=channel: self._clear_sequence_template(selected_channel)
+            )
             panel.apply_snapshot(controller.snapshot)
             plot_panel.apply_snapshot(plot_controller.snapshot)
             self.channel_controllers[channel] = controller
@@ -568,7 +585,8 @@ class MainWindow(QMainWindow):
 
         notice = QLabel(
             "Simulation is the default. Real Hardware requires deliberate mode selection, a "
-            "manually entered COM port and explicit Connect; ports are never enumerated."
+            "manually entered COM port and explicit Connect; ports are never enumerated. "
+            "This is two-electrode power-supply control, not potentiostat control."
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)
@@ -577,7 +595,23 @@ class MainWindow(QMainWindow):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(root)
         self.content_scroll = scroll
-        shell_layout.addWidget(scroll, 1)
+        self.main_vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.main_vertical_splitter.setObjectName("safetyChannelSplitter")
+        self.main_vertical_splitter.setChildrenCollapsible(True)
+        self.main_vertical_splitter.addWidget(self.safety_panel)
+        self.main_vertical_splitter.addWidget(scroll)
+        self.main_vertical_splitter.setSizes(list(restored.safety_splitter_sizes))
+        self._last_safety_splitter_sizes = restored.safety_splitter_sizes
+        splitter_controls = QHBoxLayout()
+        self.collapse_safety_button = QPushButton("Collapse Safety")
+        self.restore_safety_button = QPushButton("Restore Safety")
+        self.collapse_safety_button.clicked.connect(self._collapse_safety_panel)
+        self.restore_safety_button.clicked.connect(self._restore_safety_panel)
+        splitter_controls.addStretch(1)
+        splitter_controls.addWidget(self.collapse_safety_button)
+        splitter_controls.addWidget(self.restore_safety_button)
+        header_layout.addLayout(splitter_controls)
+        shell_layout.addWidget(self.main_vertical_splitter, 1)
         self.setCentralWidget(shell)
         self.statusBar().showMessage("Disconnected | Simulation available | Diagnostic logging active")
         self.statusBar().setToolTip(str(log_file))
@@ -600,6 +634,16 @@ class MainWindow(QMainWindow):
         self._results_plotter_window = None
 
         view_menu = self.menuBar().addMenu("&View")
+        theme_menu = view_menu.addMenu("Theme")
+        self.theme_action_group = QActionGroup(self)
+        self.theme_action_group.setExclusive(True)
+        self.light_theme_action = QAction("Light", self, checkable=True)
+        self.dark_theme_action = QAction("Dark", self, checkable=True)
+        self.theme_action_group.addAction(self.light_theme_action)
+        self.theme_action_group.addAction(self.dark_theme_action)
+        theme_menu.addActions(self.theme_action_group.actions())
+        self.light_theme_action.triggered.connect(lambda: self._apply_theme("light"))
+        self.dark_theme_action.triggered.connect(lambda: self._apply_theme("dark"))
         self.show_time_plots_action = QAction("Show live time plots", self)
         self.show_lsv_plots_action = QAction("Show Staircase LSV plots", self)
         self.show_polarisation_plots_action = QAction("Show polarisation plots", self)
@@ -624,6 +668,7 @@ class MainWindow(QMainWindow):
             lambda visible: self._set_plot_group_visible("polarisation", visible)
         )
         self._apply_plot_preferences(restored.plot_display)
+        self._apply_theme(restored.theme)
 
         help_menu = self.menuBar().addMenu("&Help")
         about_action = QAction("&About", self)
@@ -665,6 +710,133 @@ class MainWindow(QMainWindow):
             "polarisation", preferences.show_polarisation_plots
         )
 
+    def _collapse_safety_panel(self) -> None:
+        sizes = tuple(self.main_vertical_splitter.sizes())
+        if sizes[0] > 0:
+            self._last_safety_splitter_sizes = sizes
+        self.main_vertical_splitter.setSizes([0, max(100, sum(sizes))])
+
+    def _restore_safety_panel(self) -> None:
+        self.main_vertical_splitter.setSizes(list(self._last_safety_splitter_sizes))
+
+    def _apply_theme(self, theme: str) -> None:
+        dark = theme == "dark"
+        self.dark_theme_action.setChecked(dark)
+        self.light_theme_action.setChecked(not dark)
+        self.setProperty("uiTheme", theme)
+        self.setStyleSheet(
+            "" if not dark else """
+            QMainWindow, QWidget { background-color: #1f242b; color: #eef2f6; }
+            QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox,
+            QListWidget, QTableWidget, QTabWidget::pane, QScrollArea {
+                background-color: #2b313a; color: #f6f8fa; border: 1px solid #596270;
+            }
+            QPushButton { background-color: #39414c; color: #ffffff; border: 1px solid #737e8c;
+                          padding: 4px 8px; border-radius: 3px; }
+            QPushButton:disabled { color: #8f98a4; background-color: #2b3138; }
+            QPushButton:hover { background-color: #4a5563; }
+            QTabBar::tab { background: #313844; color: #eef2f6; padding: 6px 9px; }
+            QTabBar::tab:selected { background: #526174; color: white; }
+            QGroupBox { border: 1px solid #596270; margin-top: 8px; padding-top: 7px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 7px; }
+            QToolTip { color: #ffffff; background: #11151a; border: 1px solid #9da7b3; }
+            QMenuBar, QMenu, QStatusBar { background: #252b33; color: #ffffff; }
+            QHeaderView::section { background: #3a424d; color: #ffffff; padding: 4px; }
+            """
+        )
+
+    def _save_sequence_template(self, channel: int, save_as: bool) -> None:
+        panel = self.sequence_panels[channel]
+        manual = self.channel_controllers[channel].snapshot
+        try:
+            self.sequence_controllers[channel].validate_template(
+                panel.name_input.text(), panel.stages,
+                manual.voltage_range_name or "80 V",
+            )
+        except ValueError as error:
+            panel.show_validation_error(f"Template validation failed: {error}")
+            return
+        selected = panel.template_path
+        if save_as or not selected:
+            selected, _ = QFileDialog.getSaveFileName(
+                self, "Save Custom Sequence template",
+                str(self._data_directory / f"{panel.name_input.text().strip() or 'sequence'}.qpxseq.txt"),
+                "QPX sequence templates (*.qpxseq.txt)",
+            )
+        if not selected:
+            return
+        template = SequenceTemplate(
+            panel.name_input.text().strip(), panel.notes_input.toPlainText(),
+            str(panel.transition_policy.currentData()),
+            panel.handoff_settling_input.text(), panel.stages,
+        )
+        try:
+            path = Path(selected)
+            save_sequence_template(path, template)
+            if not path.name.lower().endswith(".qpxseq.txt"):
+                path = path.with_name(path.name + ".qpxseq.txt")
+            panel.template_path = str(path)
+            self.statusBar().showMessage(f"CH{channel} template saved: {path}")
+        except SequenceTemplateError as error:
+            panel.show_validation_error(str(error))
+
+    def _load_sequence_template(self, channel: int) -> None:
+        selected, _ = QFileDialog.getOpenFileName(
+            self, "Load Custom Sequence template", str(self._data_directory),
+            "QPX sequence templates (*.qpxseq.txt)",
+        )
+        if not selected:
+            return
+        panel = self.sequence_panels[channel]
+        manual = self.channel_controllers[channel].snapshot
+        try:
+            template = load_sequence_template(Path(selected))
+            SequenceTransitionPolicy(template.transition_policy)
+            settling = float(template.handoff_settling_s)
+            if not math.isfinite(settling) or not 0 <= settling <= 60:
+                raise ValueError("invalid handoff settling time")
+            self.sequence_controllers[channel].validate_template(
+                template.name, template.stages,
+                manual.voltage_range_name or "80 V",
+            )
+        except (SequenceTemplateError, ValueError) as error:
+            panel.show_validation_error(f"Template import rejected: {error}")
+            return
+        stage_preview = "\n".join(
+            f"{index}. {stage.stage_type.label}: "
+            + ", ".join(f"{key}={value}" for key, value in stage.parameters)
+            for index, stage in enumerate(template.stages, 1)
+        )
+        answer = QMessageBox.question(
+            self, f"Import CH{channel} sequence template?",
+            f"Name: {template.name}\nNotes: {template.notes or '—'}\n"
+            f"Transition: {template.transition_policy}\n\n{stage_preview}\n\n"
+            "Importing edits the offline sequence only. It cannot connect, start or enable an output.",
+            QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Open:
+            return
+        panel.set_template(
+            name=template.name, notes=template.notes, stages=template.stages,
+            transition_policy=template.transition_policy,
+            handoff_settling_s=template.handoff_settling_s, path=selected,
+        )
+        self._update_protocol_context(channel)
+
+    def _clear_sequence_template(self, channel: int) -> None:
+        panel = self.sequence_panels[channel]
+        if panel._snapshot.owns_channel:
+            return
+        answer = QMessageBox.question(
+            self, f"Clear CH{channel} sequence?", "Remove all stages from the editor?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            panel.clear_template()
+            self._update_protocol_context(channel)
+
     def _restore_window_geometry(self, geometry: WindowGeometry) -> None:
         application = QApplication.instance()
         screens = ()
@@ -703,6 +875,8 @@ class MainWindow(QMainWindow):
                     self.show_polarisation_plots_action.isChecked()
                 ),
             ),
+            theme=("dark" if self.dark_theme_action.isChecked() else "light"),
+            safety_splitter_sizes=tuple(self.main_vertical_splitter.sizes()),
         )
 
     def _save_persistent_settings(self) -> None:
@@ -763,6 +937,8 @@ class MainWindow(QMainWindow):
             self._apply_channel_defaults(channel)
             self._update_protocol_context(channel)
         self._apply_plot_preferences(defaults.plot_display)
+        self.main_vertical_splitter.setSizes(list(defaults.safety_splitter_sizes))
+        self._apply_theme(defaults.theme)
         self._restore_window_geometry(defaults.window_geometry)
         self.statusBar().showMessage(
             f"Settings reset to documented defaults: {self._settings_store.path}"
@@ -1026,12 +1202,62 @@ class MainWindow(QMainWindow):
             self.logging_directory_value.setText(str(self._data_directory))
             self.logging_directory_value.setToolTip(str(self._data_directory))
 
+    def _choose_run_csv(
+        self, channel: int, run_name: str, *, reuse_active_logger: bool = False
+    ) -> Path | None:
+        """Choose one exclusive raw CSV before any protocol mutation."""
+        if reuse_active_logger and self.logging_controllers[channel].snapshot.active:
+            return self._data_directory
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+        safe_name = "".join(
+            character if character.isalnum() or character in "-_" else "_"
+            for character in run_name.lower()
+        ).strip("_") or "run"
+        suggested = self._data_directory / f"qpx600dp_ch{channel}_{safe_name}_{stamp}.csv"
+        # Headless regression/smoke runs cannot display a native dialog. They still
+        # exercise exclusive explicit-path creation; GUI tests can monkeypatch the dialog.
+        if (
+            QApplication.platformName().lower() == "offscreen"
+            and not getattr(self, "_force_native_csv_dialog", False)
+        ):
+            selected = str(suggested)
+        else:
+            selected, _ = QFileDialog.getSaveFileName(
+                self, f"Save CH{channel} {run_name} CSV", str(suggested),
+                "CSV files (*.csv)",
+            )
+        if not selected:
+            self.statusBar().showMessage(
+                f"CH{channel} {run_name} cancelled before any instrument command."
+            )
+            return None
+        path = Path(selected)
+        if path.suffix.lower() != ".csv":
+            path = path.with_suffix(".csv")
+        try:
+            parent = path.parent.resolve()
+            if not parent.is_dir() or not os.access(parent, os.W_OK):
+                raise OSError(f"Directory is not writable: {parent}")
+            path = parent / path.name
+            if path.exists():
+                raise FileExistsError(f"CSV already exists and will not be overwritten: {path}")
+        except OSError as error:
+            QMessageBox.warning(self, "CSV destination rejected", str(error))
+            return None
+        self._data_directory = path.parent
+        self.logging_directory_value.setText(str(self._data_directory))
+        self.logging_directory_value.setToolTip(str(self._data_directory))
+        return path
+
     def _start_logging(self, channel: int) -> None:
         if self._channel_protocol_owned(channel):
             self.statusBar().showMessage("Stop the channel protocol before standalone logging.")
             return
         controller = self.logging_controllers[channel]
-        if not controller.start(self._data_directory, self.logging_interval.value()):
+        destination = self._choose_run_csv(channel, "manual_logging")
+        if destination is None:
+            return
+        if not controller.start(destination, self.logging_interval.value()):
             self.statusBar().showMessage(controller.snapshot.message)
 
     def _start_protocol(
@@ -1072,6 +1298,11 @@ class MainWindow(QMainWindow):
                 "Constant Current", validation_error,
             )
             return
+        run_destination = self._choose_run_csv(
+            channel, "chronopotentiometry", reuse_active_logger=True
+        )
+        if run_destination is None:
+            return
         resolved = CurrentInputSelection.parse(
             current_input_mode, active_area_cm2
         ).resolve(current, "Target current")
@@ -1080,11 +1311,11 @@ class MainWindow(QMainWindow):
             log_target = (
                 str(logger.snapshot.file_path)
                 if logger.snapshot.active and logger.snapshot.file_path is not None
-                else f"new channel {channel} CSV in {self._data_directory}"
+                else str(run_destination)
             )
             answer = QMessageBox.warning(
                 self,
-                f"Confirm REAL HARDWARE Constant Current - CH{channel}",
+                f"Confirm REAL HARDWARE Chronopotentiometry (CP) - CH{channel}",
                 "REAL HARDWARE OUTPUT-ON AUTHORIZATION\n\n"
                 f"Channel: CH{channel}\n"
                 f"Current input mode: {resolved.input_mode.value}\n"
@@ -1097,7 +1328,7 @@ class MainWindow(QMainWindow):
                     and resolved.active_area_cm2 is not None else ""
                 )
                 +
-                f"Voltage compliance: {voltage} V\n"
+                f"Voltage limit / compliance: {voltage} V\n"
                 f"Active duration: {duration} s\n"
                 f"Measurement interval: {interval} s\n"
                 f"Current displayed output state: "
@@ -1122,7 +1353,7 @@ class MainWindow(QMainWindow):
             duration,
             interval,
             manual.voltage_range_name,
-            self._data_directory,
+            run_destination,
             current_input_mode=current_input_mode,
             active_area_cm2=active_area_cm2,
             logging_sink=logger if logger.snapshot.active else None,
@@ -1198,16 +1429,21 @@ class MainWindow(QMainWindow):
                 "Constant Voltage", validation_error,
             )
             return
+        run_destination = self._choose_run_csv(
+            channel, "chronoamperometry", reuse_active_logger=True
+        )
+        if run_destination is None:
+            return
         confirmation = None
         if not self._connection_controller.snapshot.simulation_mode:
             log_target = (
                 str(logger.snapshot.file_path)
                 if logger.snapshot.active and logger.snapshot.file_path is not None
-                else f"new channel {channel} CSV in {self._data_directory}"
+                else str(run_destination)
             )
             answer = QMessageBox.warning(
                 self,
-                f"Confirm REAL HARDWARE Constant Voltage - CH{channel}",
+                f"Confirm REAL HARDWARE Chronoamperometry (CA) - CH{channel}",
                 "REAL HARDWARE OUTPUT-ON AUTHORIZATION\n\n"
                 f"Channel: CH{channel}\n"
                 f"Target voltage: {voltage} V\n"
@@ -1236,7 +1472,7 @@ class MainWindow(QMainWindow):
             duration,
             interval,
             manual.voltage_range_name,
-            self._data_directory,
+            run_destination,
             logging_sink=logger if logger.snapshot.active else None,
             real_hardware_confirmation=confirmation,
         ):
@@ -1251,7 +1487,7 @@ class MainWindow(QMainWindow):
                 return
             answer = QMessageBox.warning(
                 self,
-                f"Confirm REAL HARDWARE Constant Voltage resume - CH{channel}",
+                f"Confirm REAL HARDWARE Chronoamperometry (CA) resume - CH{channel}",
                 "REAL HARDWARE OUTPUT-ON AUTHORIZATION\n\n"
                 f"Resume CH{channel} at {config.target_voltage_v:g} V with "
                 f"{config.current_limit_a:g} A current limit?\n\n"
@@ -1318,12 +1554,17 @@ class MainWindow(QMainWindow):
                 "Voltage Sweep / Staircase LSV", validation_error,
             )
             return
+        run_destination = self._choose_run_csv(
+            channel, "staircase_lsv", reuse_active_logger=True
+        )
+        if run_destination is None:
+            return
         confirmation = None
         if not self._connection_controller.snapshot.simulation_mode:
             logger_path = (
                 str(logger.snapshot.file_path)
                 if logger.snapshot.active and logger.snapshot.file_path is not None
-                else f"new channel {channel} CSV in {self._data_directory}"
+                else str(run_destination)
             )
             step_count = len(generate_inclusive_setpoints(
                 start_voltage, stop_voltage, str(Decimal(voltage_step_mv) / Decimal("1000"))
@@ -1368,7 +1609,7 @@ class MainWindow(QMainWindow):
             measurements_per_point,
             interval,
             manual.voltage_range_name,
-            self._data_directory,
+            run_destination,
             logging_sink=logger if logger.snapshot.active else None,
             real_hardware_confirmation=confirmation,
             active_area_cm2=active_area_cm2,
@@ -1418,12 +1659,17 @@ class MainWindow(QMainWindow):
                 "Current Scan", validation_error,
             )
             return
+        run_destination = self._choose_run_csv(
+            channel, "current_scan", reuse_active_logger=True
+        )
+        if run_destination is None:
+            return
         confirmation = None
         if not self._connection_controller.snapshot.simulation_mode:
             logger_path = (
                 str(logger.snapshot.file_path)
                 if logger.snapshot.active and logger.snapshot.file_path is not None
-                else f"new channel {channel} CSV in {self._data_directory}"
+                else str(run_destination)
             )
             step_count = len(generate_inclusive_setpoints(
                 start_current, stop_current, current_step, axis_label="Current"
@@ -1450,7 +1696,7 @@ class MainWindow(QMainWindow):
                 +
                 f"Start / stop / step: {float(start_a):g} / {float(stop_a):g} / "
                 f"{float(step_a):g} A\n"
-                f"Voltage compliance: {voltage_compliance} V\n"
+                f"Voltage limit / compliance: {voltage_compliance} V\n"
                 f"Dwell / interval: {dwell} / {interval} s\n"
                 f"Total scan steps: {step_count}\n"
                 "Output-On writes for this Start: exactly one\n"
@@ -1478,7 +1724,7 @@ class MainWindow(QMainWindow):
             dwell,
             interval,
             manual.voltage_range_name,
-            self._data_directory,
+            run_destination,
             current_input_mode=current_input_mode,
             active_area_cm2=active_area_cm2,
             logging_sink=logger if logger.snapshot.active else None,
@@ -1501,7 +1747,7 @@ class MainWindow(QMainWindow):
             commanded = config.setpoints[
                 max(0, (scan.snapshot.scan_step_index or 1) - 1)
             ]
-            fixed_label = "Current limit" if scan_type == "voltage" else "Voltage compliance"
+            fixed_label = "Current limit" if scan_type == "voltage" else "Voltage limit / compliance"
             fixed_value = (
                 f"{config.fixed_current_a:g} A"
                 if scan_type == "voltage"
@@ -1583,6 +1829,11 @@ class MainWindow(QMainWindow):
                 "Steady-State Polarisation", error,
             )
             return
+        run_destination = self._choose_run_csv(
+            channel, "polarisation", reuse_active_logger=True
+        )
+        if run_destination is None:
+            return
         confirmation = None
         if not self._connection_controller.snapshot.simulation_mode:
             selection = CurrentInputSelection.parse(
@@ -1598,7 +1849,7 @@ class MainWindow(QMainWindow):
             logger_path = (
                 str(logger.snapshot.file_path)
                 if logger.snapshot.active and logger.snapshot.file_path is not None
-                else f"new channel {channel} CSV in {self._data_directory}"
+                else str(run_destination)
             )
             answer = QMessageBox.warning(
                 self,
@@ -1610,7 +1861,7 @@ class MainWindow(QMainWindow):
                 f"Derived current start / end / increment: {float(start_a):g} / "
                 f"{float(stop_a):g} / {float(step_a):g} A\n"
                 f"Active area: {active_area} cm²\n"
-                f"Voltage compliance: {voltage_compliance} V\n"
+                f"Voltage limit / compliance: {voltage_compliance} V\n"
                 f"Dwell / interval / final averaging window: {dwell} / {interval} / "
                 f"{averaging_window} s\n"
                 f"Total steps: {step_count}\n"
@@ -1638,7 +1889,7 @@ class MainWindow(QMainWindow):
             interval,
             averaging_window,
             manual.voltage_range_name,
-            self._data_directory,
+            run_destination,
             logging_sink=logger if logger.snapshot.active else None,
             real_hardware_confirmation=confirmation,
         ):
@@ -1734,6 +1985,9 @@ class MainWindow(QMainWindow):
                 "Custom Sequence", str(error),
             )
             return
+        run_destination = self._choose_run_csv(channel, "custom_sequence")
+        if run_destination is None:
+            return
         if not self._connection_controller.snapshot.simulation_mode:
             maximum_voltage, maximum_current = controller.sequence_maxima(prepared)
             stage_lines = "\n".join(
@@ -1763,8 +2017,7 @@ class MainWindow(QMainWindow):
                 f"{maximum_voltage:g} V / {maximum_current:g} A\n"
                 f"{transition_warning}"
                 f"Displayed output states: {current_states}\n"
-                f"CSV destination: new exclusive CH{channel} run file in "
-                f"{self._data_directory}\n\n"
+                f"CSV destination: {run_destination}\n\n"
                 "Start will first run a fresh QPX600DP identity and atomic two-channel "
                 "readback. The selected output must be OFF. Each stage will use its "
                 "existing guarded transition; no Output-On action is retried. Confirm "
@@ -1783,7 +2036,7 @@ class MainWindow(QMainWindow):
             sequence_name,
             stages,
             manual.voltage_range_name,
-            self._data_directory,
+            run_destination,
             real_hardware_confirmation=confirmation,
             transition_policy=policy,
             handoff_settling_s=handoff_settling_s,
@@ -1934,8 +2187,8 @@ class MainWindow(QMainWindow):
             and manual.measured_current_a is not None else "—"
         )
         controllers = (
-            ("Constant Current", self.protocol_controllers[channel].snapshot),
-            ("Constant Voltage", self.voltage_protocol_controllers[channel].snapshot),
+            ("Chronopotentiometry (CP)", self.protocol_controllers[channel].snapshot),
+            ("Chronoamperometry (CA)", self.voltage_protocol_controllers[channel].snapshot),
             ("Voltage Scan", self.voltage_scan_controllers[channel].snapshot),
             ("Current Scan", self.current_scan_controllers[channel].snapshot),
             ("Polarisation", self.polarisation_controllers[channel].snapshot),

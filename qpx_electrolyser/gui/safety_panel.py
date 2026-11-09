@@ -21,7 +21,7 @@ class SafetyPanel(QWidget):
     limits_changed = Signal(int, object)
     emergency_requested = Signal()
 
-    def __init__(self, validator: SafetyValidator) -> None:
+    def __init__(self, validator: SafetyValidator, *, show_emergency: bool = True) -> None:
         super().__init__()
         self._inputs: dict[int, tuple[QDoubleSpinBox, ...]] = {}
         layout = QVBoxLayout(self)
@@ -35,7 +35,8 @@ class SafetyPanel(QWidget):
             "padding: 10px; border: 2px solid #7a1712; }"
         )
         self.emergency_button.clicked.connect(self.emergency_requested)
-        heading.addWidget(self.emergency_button)
+        if show_emergency:
+            heading.addWidget(self.emergency_button)
         layout.addLayout(heading)
         channels = QHBoxLayout()
         for channel in (1, 2):

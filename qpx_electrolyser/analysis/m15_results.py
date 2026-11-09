@@ -45,6 +45,7 @@ class ExperimentSpec:
     material_name: str = ""
     legend_label: str = ""
     active_area_override_cm2: Decimal | None = None
+    include_stopped_complete_window: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +230,22 @@ def _stage_completed(rows: Iterable[Mapping[str, str]]) -> bool:
     return False
 
 
+def _stage_failed(rows: Iterable[Mapping[str, str]]) -> bool:
+    return any(
+        row.get("protocol_state", "").strip() == "FAILED"
+        or row.get("sequence_stage_state", "").strip() == "FAILED"
+        or row.get("sample_status", "").strip() in {"failed", "error"}
+        for row in rows
+    )
+
+
+def _stage_stopped(rows: Iterable[Mapping[str, str]]) -> bool:
+    return any(
+        "stopped by operator" in row.get("error", "").strip().lower()
+        for row in rows
+    )
+
+
 def analyse_m15_csv(
     spec: ExperimentSpec,
     *,
@@ -284,6 +301,8 @@ def analyse_m15_csv(
             "unknown",
         )
         completed = _stage_completed(stage_rows)
+        failed = _stage_failed(stage_rows)
+        stopped = _stage_stopped(stage_rows)
         segments: list[list[_ValidRow]] = []
         current_segment: list[_ValidRow] = []
         for row in stage_rows:
@@ -299,7 +318,10 @@ def analyse_m15_csv(
         status = "Accepted"
         selected: list[_ValidRow] = []
         final_segment = segments[-1] if segments else []
-        if not completed:
+        partial_allowed = stopped and spec.include_stopped_complete_window and not failed
+        if failed:
+            status = "FAILED stage excluded"
+        elif not completed and not partial_allowed:
             status = "Stage not completed"
         elif not final_segment:
             status = INSUFFICIENT_WINDOW
@@ -313,6 +335,9 @@ def analyse_m15_csv(
                 if not selected:
                     status = INSUFFICIENT_WINDOW
 
+        if selected and partial_allowed:
+            status = "PARTIAL — deliberately stopped; complete stable 30-second window"
+
         recorded_areas = [row.area_cm2 for row in selected if row.area_cm2 is not None]
         area = recorded_areas[-1] if recorded_areas else override
         area_source = "recorded" if recorded_areas else ("overridden" if override else "missing")
@@ -325,7 +350,11 @@ def analyse_m15_csv(
             current_sd = pstdev(currents)
             density = mean_current / area if area is not None else None
             if area is None:
-                status = "Accepted; active area unavailable"
+                status = (
+                    status + "; active area unavailable"
+                    if status.startswith("PARTIAL")
+                    else "Accepted; active area unavailable"
+                )
             start_elapsed = selected[0].elapsed_s
             end_elapsed = selected[-1].elapsed_s
             start_timestamp = selected[0].timestamp
