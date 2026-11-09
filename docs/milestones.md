@@ -624,6 +624,11 @@ window. Short stages visibly report `Insufficient stable 30-second window`.
 Exports include a combined processed CSV, PNG/SVG/PDF plots, plot configuration
 and processing metadata, all through exclusive sanitized filenames.
 
+Scientific presentation now includes independent Auto/Manual axes for I–V and
+j–V, validated X/Y ranges and major ticks, Auto Range/reset actions, and
+persisted legend placement including least-overlap Best/Auto and unclipped
+Outside Right. Preview and PNG/SVG/PDF share the same display configuration.
+
 M15B is read-only and optional: it imports no transport, driver, queue, channel
 engine, protocol controller or safety transition and submits no instrument
 operation. Its asynchronous workers and exceptions are local, and experiment

@@ -14,7 +14,9 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 import pytest
 
 from qpx_electrolyser.analysis.m15_results import (
-    AnalysisReport, CurveStyle, FigureSettings, PlotConfiguration, StageResult,
+    AnalysisError, AnalysisReport, AxisSettings, CurveStyle, FigureSettings,
+    PlotConfiguration, StageResult, load_plot_configuration,
+    save_plot_configuration, validate_axis_settings,
 )
 from qpx_electrolyser.data.csv_logging import CsvLogFile
 from qpx_electrolyser.data.sequence_templates import (
@@ -24,7 +26,10 @@ from qpx_electrolyser.engine.custom_sequence import SequenceStage, SequenceStage
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
 from qpx_electrolyser.gui.main_window import MainWindow
 from qpx_electrolyser.instrument.simulator import SimulatedPowerSupply
-from qpx_electrolyser.gui.results_plotter import ResultsPlotterWindow, draw_scientific_plot
+from qpx_electrolyser.gui.results_plotter import (
+    ResultsPlotterWindow, choose_best_legend_position, draw_scientific_plot,
+    export_plot_files,
+)
 
 
 @pytest.fixture(scope="module")
@@ -134,4 +139,135 @@ def test_results_table_is_sortable_filterable_and_reports_stage_reason(
         assert window.results_table.isRowHidden(0)
     finally:
         window.close()
+
+
+@pytest.mark.parametrize(
+    "axis, message",
+    (
+        (AxisSettings("manual", float("nan"), 1, 0, 1, 0.1, 0.1), "finite"),
+        (AxisSettings("manual", 1, 1, 0, 1, 0.1, 0.1), "X minimum"),
+        (AxisSettings("manual", 0, 1, 2, 1, 0.1, 0.1), "Y minimum"),
+        (AxisSettings("manual", 0, 1, 0, 1, 0, 0.1), "positive"),
+        (AxisSettings("manual", 0, 1, 0, 1, 0.001, 0.1), "200-major-tick"),
+    ),
+)
+def test_manual_axis_validation_rejects_unsafe_definitions(
+    axis: AxisSettings, message: str,
+) -> None:
+    with pytest.raises(AnalysisError, match=message):
+        validate_axis_settings(axis)
+    validate_axis_settings(AxisSettings("auto", float("nan")))
+
+
+def test_axis_and_legend_configuration_round_trip_is_plot_specific(tmp_path: Path) -> None:
+    current_axis = AxisSettings("manual", -0.1, 0.5, 0.8, 2.2, 0.1, 0.2)
+    density_axis = AxisSettings("manual", 0, 1.5, 1, 4, 0.25, 0.5)
+    configuration = PlotConfiguration(
+        FigureSettings(
+            legend_position="outside_right",
+            current_axis=current_axis,
+            density_axis=density_axis,
+        ),
+        {},
+    )
+    saved = save_plot_configuration(configuration, tmp_path, "axis-settings")
+    loaded = load_plot_configuration(saved)
+    assert loaded == configuration
+    assert loaded.figure.current_axis != loaded.figure.density_axis
+
+
+def test_plotter_preserves_separate_axis_controls_and_rejects_invalid_local_input(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    window = ResultsPlotterWindow(tmp_path)
+    try:
+        window.axis_mode.setCurrentIndex(window.axis_mode.findData("manual"))
+        for widget, value in (
+            (window.x_min_input, "-0.1"), (window.x_max_input, "0.5"),
+            (window.y_min_input, "0.8"), (window.y_max_input, "2.2"),
+            (window.x_tick_input, "0.1"), (window.y_tick_input, "0.2"),
+        ):
+            widget.setText(value)
+        current = window._configuration().figure.current_axis
+        assert current == AxisSettings("manual", -0.1, 0.5, 0.8, 2.2, 0.1, 0.2)
+
+        window.plot_mode.setCurrentIndex(window.plot_mode.findData("density"))
+        assert window.axis_mode.currentData() == "auto"
+        window.axis_mode.setCurrentIndex(window.axis_mode.findData("manual"))
+        window.x_max_input.setText("4")
+        density = window._configuration().figure.density_axis
+        assert density.mode == "manual" and density.x_max == 4
+
+        window.plot_mode.setCurrentIndex(window.plot_mode.findData("current"))
+        assert window.x_min_input.text() == "-0.1"
+        before = window._axis_settings["current"]
+        window.x_max_input.setText("-0.2")
+        qapp.processEvents()
+        assert window._axis_settings["current"] == before
+        assert "Axis settings rejected" in window.status_label.text()
+        assert window.canvas._configuration.figure.current_axis == before
+    finally:
+        window.close()
+
+
+def test_auto_range_reset_and_legend_controls_update_preview_immediately(
+    qapp: QApplication, tmp_path: Path,
+) -> None:
+    window = ResultsPlotterWindow(tmp_path)
+    try:
+        window.axis_mode.setCurrentIndex(window.axis_mode.findData("manual"))
+        window.x_max_input.setText("5")
+        window.auto_range_button.click()
+        assert window.canvas._configuration.figure.current_axis.mode == "auto"
+        window.axis_mode.setCurrentIndex(window.axis_mode.findData("manual"))
+        window.x_max_input.setText("8")
+        window.reset_axis_button.click()
+        assert window._axis_settings["current"] == AxisSettings()
+
+        window.legend_position.setCurrentIndex(
+            window.legend_position.findData("outside_right")
+        )
+        qapp.processEvents()
+        assert window.canvas._configuration.figure.legend_position == "outside_right"
+        window.legend_check.setChecked(False)
+        assert not window._configuration().figure.legend_visible
+        assert window._configuration().figure.legend_position == "outside_right"
+    finally:
+        window.close()
+
+
+def test_best_legend_position_chooses_least_occupied_corner() -> None:
+    assert choose_best_legend_position([]) == "upper_right"
+    assert choose_best_legend_position([(0.8, 0.1), (0.9, 0.2)]) == "upper_left"
+    assert choose_best_legend_position([(0.1, 0.1), (0.2, 0.2)]) == "upper_right"
+
+
+def test_exports_use_visible_manual_axes_ticks_and_outside_legend(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key = "a"
+    reports = {key: AnalysisReport(Path("a.csv"), (_point("a.csv", 1, "0.1", "1.2"),), "accepted")}
+    axis = AxisSettings("manual", 0, 0.2, 1, 1.4, 0.05, 0.1)
+    configuration = PlotConfiguration(
+        FigureSettings(
+            output_directory=str(tmp_path), output_filename="manual-axis",
+            formats=["png", "svg", "pdf"], legend_position="outside_right",
+            current_axis=axis, width_in=4, height_in=3,
+        ),
+        {key: CurveStyle(legend_label="Curve A")},
+    )
+    import qpx_electrolyser.gui.results_plotter as plotter_module
+    original = plotter_module.draw_scientific_plot
+    observed: list[tuple[AxisSettings, str]] = []
+
+    def recording_draw(*args, **kwargs):  # type: ignore[no-untyped-def]
+        config = args[3]
+        observed.append((config.figure.current_axis, config.figure.legend_position))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(plotter_module, "draw_scientific_plot", recording_draw)
+    outputs = export_plot_files(reports, configuration)
+    assert {path.suffix for path in outputs} == {".png", ".svg", ".pdf"}
+    assert all(path.stat().st_size > 0 for path in outputs)
+    assert observed == [(axis, "outside_right")] * 3
 

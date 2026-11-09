@@ -12,9 +12,19 @@
    produce an averaged point.
 4. Preview voltage versus current, then voltage versus current density. If area
    is absent, enter an override and confirm the source is marked overridden.
-5. Save/load a plot configuration. Export processed CSV, metadata and PNG/SVG/PDF
+5. For I–V choose Manual axes, enter finite increasing X/Y bounds and positive
+   major-tick intervals, and confirm the preview updates. Enter an invalid bound
+   and confirm a local error appears without losing results. Use Auto Range,
+   switch to j–V, set different axes, then switch back and confirm each plot
+   retained its own settings. Exercise Reset Axis Defaults.
+6. Exercise Best/Auto, each corner and Outside Right legend placement; toggle
+   legend visibility separately and confirm no legend is clipped at two figure
+   sizes.
+7. Save/load a plot configuration and confirm both axis sets and legend position
+   return. Export processed CSV, metadata and PNG/SVG/PDF
    twice; confirm numbered alternatives are created and no file is overwritten.
-6. While a Simulation protocol owns a channel, open, analyse and close the Plotter.
+   Confirm each exported figure matches the visible ranges, ticks and legend.
+8. While a Simulation protocol owns a channel, open, analyse and close the Plotter.
    Confirm the protocol state, output and logging are unaffected and the GUI stays
    responsive. Close the Plotter independently.
 

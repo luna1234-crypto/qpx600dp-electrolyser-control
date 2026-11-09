@@ -64,6 +64,10 @@ sent. Manual DPI and small-screen acceptance follows the checklist in
 - Curve paths have no brush and are created per experiment, so independent
   curves are never filled or joined. Light/Dark themes apply immediately and
   persist; scientific exports retain the configured white default background.
+- M15B I–V and j–V previews now keep independent Auto/Manual ranges and major
+  tick intervals, with local validation, Auto Range and per-plot reset actions.
+  Legend visibility remains independent from persisted Best/Auto, corner and
+  Outside Right placement; preview and PNG/SVG/PDF use the same settings.
 
 Focused coverage includes settings migration/splitter/theme restore, template
 round-trip, CSV cancellation/exclusive naming, stage rules/results filtering,

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
+import math
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -48,6 +50,7 @@ from PySide6.QtWidgets import (
 
 from qpx_electrolyser.analysis.m15_results import (
     AnalysisReport,
+    AxisSettings,
     CurveStyle,
     ExperimentSpec,
     FigureSettings,
@@ -58,6 +61,7 @@ from qpx_electrolyser.analysis.m15_results import (
     export_processing_metadata,
     load_plot_configuration,
     save_plot_configuration,
+    validate_axis_settings,
 )
 
 
@@ -87,6 +91,37 @@ def _line_style(value: str) -> Qt.PenStyle:
         "dot": Qt.PenStyle.DotLine,
         "none": Qt.PenStyle.NoPen,
     }.get(value, Qt.PenStyle.SolidLine)
+
+
+def _nice_tick(span: float) -> float:
+    if not math.isfinite(span) or span <= 0:
+        return 1.0
+    raw = span / 5.0
+    magnitude = 10 ** math.floor(math.log10(raw))
+    fraction = raw / magnitude
+    nice = 1.0 if fraction <= 1 else (2.0 if fraction <= 2 else (5.0 if fraction <= 5 else 10.0))
+    return nice * magnitude
+
+
+def _tick_values(minimum: float, maximum: float, interval: float) -> list[float]:
+    start = math.ceil((minimum / interval) - 1e-12) * interval
+    count = int(math.floor(((maximum - start) / interval) + 1e-9)) + 1
+    if count < 0 or count > 201:
+        raise ValueError("Axis major tick count is outside the supported range")
+    return [start + index * interval for index in range(count)]
+
+
+def choose_best_legend_position(
+    normalized_points: list[tuple[float, float]],
+) -> str:
+    """Choose the corner containing the fewest plotted data points."""
+    positions = ("upper_right", "upper_left", "lower_right", "lower_left")
+    counts = {position: 0 for position in positions}
+    for x, y in normalized_points:
+        horizontal = "left" if x < 0.5 else "right"
+        vertical = "upper" if y < 0.5 else "lower"
+        counts[f"{vertical}_{horizontal}"] += 1
+    return min(positions, key=lambda position: (counts[position], positions.index(position)))
 
 
 class ResultsPlotCanvas(QWidget):
@@ -135,10 +170,12 @@ def draw_scientific_plot(
 ) -> None:
     figure = configuration.figure
     painter.fillRect(outer, QColor("white"))
+    outside_legend = figure.legend_visible and figure.legend_position == "outside_right"
+    right_margin = 255 if outside_legend else 135
     area = QRectF(
         outer.left() + 90,
         outer.top() + 55,
-        max(80, outer.width() - 135),
+        max(80, outer.width() - right_margin),
         max(80, outer.height() - 125),
     )
     curves: list[tuple[CurveStyle, list[tuple[float, float, float]]]] = []
@@ -196,25 +233,23 @@ def draw_scientific_plot(
         painter.drawRect(area)
         painter.drawText(area, Qt.AlignmentFlag.AlignCenter, "No accepted 30-second points")
         return
-    min_x, max_x = min(p[0] for p in all_points), max(p[0] for p in all_points)
-    min_y = min(p[1] - p[2] for p in all_points)
-    max_y = max(p[1] + p[2] for p in all_points)
-    x_pad = max((max_x - min_x) * 0.08, abs(max_x) * 0.02, 1e-12)
-    y_pad = max((max_y - min_y) * 0.08, abs(max_y) * 0.02, 1e-12)
-    min_x -= x_pad; max_x += x_pad; min_y -= y_pad; max_y += y_pad
-    if figure.grid_visible:
-        painter.setPen(QPen(QColor("#dddddd"), 1, Qt.PenStyle.DotLine))
-        for index in range(1, 5):
-            x = area.left() + area.width() * index / 5
-            y = area.top() + area.height() * index / 5
-            painter.drawLine(x, area.top(), x, area.bottom())
-            painter.drawLine(area.left(), y, area.right(), y)
-    painter.setPen(QPen(QColor("#444444"), 1))
-    painter.drawRect(area)
-    painter.drawText(area.left(), area.bottom() + 20, f"{min_x:.6g}")
-    painter.drawText(area.right() - 80, area.bottom() + 20, f"{max_x:.6g}")
-    painter.drawText(45, area.bottom(), f"{min_y:.6g}")
-    painter.drawText(45, area.top() + 10, f"{max_y:.6g}")
+    data_min_x, data_max_x = min(p[0] for p in all_points), max(p[0] for p in all_points)
+    data_min_y = min(p[1] - p[2] for p in all_points)
+    data_max_y = max(p[1] + p[2] for p in all_points)
+    axis = figure.density_axis if figure.plot_mode == "density" else figure.current_axis
+    validate_axis_settings(axis)
+    if axis.mode == "manual":
+        min_x, max_x = axis.x_min, axis.x_max
+        min_y, max_y = axis.y_min, axis.y_max
+        x_tick, y_tick = axis.x_major_tick, axis.y_major_tick
+    else:
+        x_pad = max((data_max_x - data_min_x) * 0.08, abs(data_max_x) * 0.02, 1e-12)
+        y_pad = max((data_max_y - data_min_y) * 0.08, abs(data_max_y) * 0.02, 1e-12)
+        min_x, max_x = data_min_x - x_pad, data_max_x + x_pad
+        min_y, max_y = data_min_y - y_pad, data_max_y + y_pad
+        x_tick, y_tick = _nice_tick(max_x - min_x), _nice_tick(max_y - min_y)
+    x_ticks = _tick_values(min_x, max_x, x_tick)
+    y_ticks = _tick_values(min_y, max_y, y_tick)
 
     def mapped(point: tuple[float, float, float]) -> tuple[float, float]:
         return (
@@ -222,7 +257,25 @@ def draw_scientific_plot(
             area.bottom() - area.height() * (point[1] - min_y) / (max_y - min_y),
         )
 
-    legend_y = area.top() + 6
+    if figure.grid_visible:
+        painter.setPen(QPen(QColor("#dddddd"), 1, Qt.PenStyle.DotLine))
+        for tick in x_ticks:
+            x = mapped((tick, min_y, 0))[0]
+            painter.drawLine(x, area.top(), x, area.bottom())
+        for tick in y_ticks:
+            y = mapped((min_x, tick, 0))[1]
+            painter.drawLine(area.left(), y, area.right(), y)
+    painter.setPen(QPen(QColor("#444444"), 1))
+    painter.drawRect(area)
+    for tick in x_ticks:
+        x = mapped((tick, min_y, 0))[0]
+        painter.drawText(QRectF(x - 42, area.bottom() + 3, 84, 18), Qt.AlignmentFlag.AlignHCenter, f"{tick:.6g}")
+    for tick in y_ticks:
+        y = mapped((min_x, tick, 0))[1]
+        painter.drawText(QRectF(4, y - 9, area.left() - 10, 18), Qt.AlignmentFlag.AlignRight, f"{tick:.6g}")
+
+    painter.save()
+    painter.setClipRect(area)
     for style, points in curves:
         if not points:
             continue
@@ -259,15 +312,45 @@ def draw_scientific_plot(
                 painter.drawPath(marker)
             else:
                 painter.drawEllipse(QRectF(x - size / 2, y - size / 2, size, size))
-        if figure.legend_visible:
-            painter.setPen(QPen(color, 2))
-            painter.drawLine(area.right() - 170, legend_y + 6, area.right() - 145, legend_y + 6)
+    painter.restore()
+
+    entries = [(style, points) for style, points in curves if points]
+    if figure.legend_visible and entries:
+        normalized = [
+            ((point[0] - min_x) / (max_x - min_x), (max_y - point[1]) / (max_y - min_y))
+            for _style, points in entries for point in points
+        ]
+        position = figure.legend_position
+        if position == "best":
+            position = choose_best_legend_position(normalized)
+        width = min(190.0, max(100.0, outer.width() * 0.28))
+        row_height = max(14.0, min(20.0, (area.height() - 12) / len(entries)))
+        height = row_height * len(entries) + 10
+        margin = 8.0
+        if position == "outside_right":
+            x, y = area.right() + 12, area.top()
+            width = max(8.0, outer.right() - x - 8)
+        elif position.endswith("left"):
+            x = area.left() + margin
+            y = area.top() + margin if position.startswith("upper") else area.bottom() - height - margin
+        else:
+            x = area.right() - width - margin
+            y = area.top() + margin if position.startswith("upper") else area.bottom() - height - margin
+        legend = QRectF(x, max(outer.top() + 4, y), width, min(height, outer.height() - 8))
+        painter.setPen(QPen(QColor("#888888"), 1))
+        painter.setBrush(QColor(255, 255, 255, 235))
+        painter.drawRect(legend)
+        for index, (style, _points) in enumerate(entries):
+            row_y = legend.top() + 5 + index * row_height
+            color = QColor(style.color) if QColor(style.color).isValid() else QColor("#1769aa")
+            painter.setPen(QPen(color, max(1.0, style.line_width), _line_style(style.line_style)))
+            painter.drawLine(legend.left() + 8, row_y + row_height / 2, legend.left() + 30, row_y + row_height / 2)
             painter.setPen(QColor("#222222"))
             painter.drawText(
-                QRectF(area.right() - 140, legend_y - 4, 135, 20),
+                QRectF(legend.left() + 35, row_y, legend.width() - 40, row_height),
+                Qt.AlignmentFlag.AlignVCenter,
                 style.legend_label or style.material_name,
             )
-            legend_y += 20
 
 
 def export_plot_files(
@@ -360,6 +443,12 @@ class ResultsPlotterWindow(QMainWindow):
         self._rerun_keys: set[str] = set()
         self._pool = QThreadPool(self); self._pool.setMaxThreadCount(2)
         self._updating_table = False
+        self._updating_axes = False
+        self._active_plot_mode = "current"
+        self._axis_settings = {
+            "current": AxisSettings(),
+            "density": AxisSettings(),
+        }
         root = QWidget(); layout = QVBoxLayout(root)
         banner = QLabel("Offline analysis — does not control the instrument")
         banner.setStyleSheet("font-weight: 800; padding: 8px; background: #e8f1fb;")
@@ -401,6 +490,13 @@ class ResultsPlotterWindow(QMainWindow):
         self.title_input = QLineEdit()
         self.x_label_input = QLineEdit(); self.y_label_input = QLineEdit()
         self.legend_check = QCheckBox("Legend"); self.grid_check = QCheckBox("Grid")
+        self.legend_position = QComboBox()
+        for label, value in (
+            ("Best / Auto", "best"), ("Upper Left", "upper_left"),
+            ("Upper Right", "upper_right"), ("Lower Left", "lower_left"),
+            ("Lower Right", "lower_right"), ("Outside Right", "outside_right"),
+        ):
+            self.legend_position.addItem(label, value)
         self.error_check = QCheckBox("Voltage SD error bars")
         self.width_input = QDoubleSpinBox(); self.width_input.setRange(2, 30)
         self.height_input = QDoubleSpinBox(); self.height_input.setRange(2, 30)
@@ -422,6 +518,8 @@ class ResultsPlotterWindow(QMainWindow):
             grid.addWidget(QLabel(label), row, 0); grid.addWidget(widget, row, 1)
         grid.addWidget(self.legend_check, 0, 2); grid.addWidget(self.grid_check, 1, 2)
         grid.addWidget(self.error_check, 2, 2)
+        grid.addWidget(QLabel("Legend position:"), 3, 2)
+        grid.addWidget(self.legend_position, 4, 2)
         grid.addWidget(QLabel("Output directory:"), 8, 0)
         grid.addWidget(self.directory_input, 8, 1); grid.addWidget(self.choose_directory, 8, 2)
         formats = QHBoxLayout()
@@ -430,6 +528,30 @@ class ResultsPlotterWindow(QMainWindow):
         exports = QHBoxLayout(); exports.addWidget(self.export_csv_button)
         exports.addWidget(self.export_plots_button); grid.addLayout(exports, 10, 1, 1, 2)
         layout.addWidget(controls)
+        axis_box = QGroupBox("Axis controls for selected plot")
+        axis_grid = QGridLayout(axis_box)
+        self.axis_mode = QComboBox()
+        self.axis_mode.addItem("Auto", "auto")
+        self.axis_mode.addItem("Manual", "manual")
+        self.x_min_input = QLineEdit("0")
+        self.x_max_input = QLineEdit("1")
+        self.y_min_input = QLineEdit("0")
+        self.y_max_input = QLineEdit("1")
+        self.x_tick_input = QLineEdit("0.2")
+        self.y_tick_input = QLineEdit("0.2")
+        self.auto_range_button = QPushButton("Auto Range")
+        self.reset_axis_button = QPushButton("Reset Axis Defaults")
+        for column, (label, widget) in enumerate((
+            ("Mode:", self.axis_mode), ("X minimum:", self.x_min_input),
+            ("X maximum:", self.x_max_input), ("Y minimum:", self.y_min_input),
+            ("Y maximum:", self.y_max_input), ("X major tick:", self.x_tick_input),
+            ("Y major tick:", self.y_tick_input),
+        )):
+            axis_grid.addWidget(QLabel(label), 0 if column < 4 else 2, (column % 4) * 2)
+            axis_grid.addWidget(widget, 1 if column < 4 else 3, (column % 4) * 2)
+        axis_grid.addWidget(self.auto_range_button, 4, 0, 1, 2)
+        axis_grid.addWidget(self.reset_axis_button, 4, 2, 1, 2)
+        layout.addWidget(axis_box)
         self.status_label = QLabel("Ready; no experiment-control connection is required.")
         self.status_label.setWordWrap(True); layout.addWidget(self.status_label)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(root)
@@ -446,6 +568,15 @@ class ResultsPlotterWindow(QMainWindow):
         self.results_filter.textChanged.connect(self._filter_results_table)
         self.include_partial_check.toggled.connect(self._reanalyze_all)
         self.plot_mode.currentIndexChanged.connect(self._plot_mode_changed)
+        self.legend_position.currentIndexChanged.connect(self._refresh_preview)
+        self.axis_mode.currentIndexChanged.connect(self._axis_controls_changed)
+        for widget in (
+            self.x_min_input, self.x_max_input, self.y_min_input,
+            self.y_max_input, self.x_tick_input, self.y_tick_input,
+        ):
+            widget.textChanged.connect(self._axis_controls_changed)
+        self.auto_range_button.clicked.connect(self._auto_range)
+        self.reset_axis_button.clicked.connect(self._reset_axis_defaults)
         for widget in (
             self.title_input, self.x_label_input, self.y_label_input,
             self.filename_input, self.directory_input,
@@ -719,6 +850,7 @@ class ResultsPlotterWindow(QMainWindow):
         self._refresh_preview()
 
     def _configuration(self) -> PlotConfiguration:
+        self._capture_axis_controls(self._active_plot_mode)
         figure = FigureSettings(
             title=self.title_input.text(),
             x_label_current=(
@@ -730,24 +862,38 @@ class ResultsPlotterWindow(QMainWindow):
                 else FigureSettings().x_label_density
             ),
             y_label=self.y_label_input.text(), legend_visible=self.legend_check.isChecked(),
+            legend_position=str(self.legend_position.currentData()),
             grid_visible=self.grid_check.isChecked(), error_bars_visible=self.error_check.isChecked(),
             width_in=self.width_input.value(), height_in=self.height_input.value(),
             dpi=self.dpi_input.value(), output_filename=self.filename_input.text(),
             output_directory=self.directory_input.text(),
             formats=[name for name, box in (("png", self.png_check), ("svg", self.svg_check), ("pdf", self.pdf_check)) if box.isChecked()],
             plot_mode=str(self.plot_mode.currentData()),
+            current_axis=replace(self._axis_settings["current"]),
+            density_axis=replace(self._axis_settings["density"]),
         )
         return PlotConfiguration(figure, dict(self._styles))
 
     def _apply_configuration(self, configuration: PlotConfiguration) -> None:
         figure = configuration.figure
+        self._axis_settings = {
+            "current": replace(figure.current_axis),
+            "density": replace(figure.density_axis),
+        }
         self.title_input.setText(figure.title)
-        self.plot_mode.setCurrentIndex(max(0, self.plot_mode.findData(figure.plot_mode)))
+        self._updating_axes = True
+        try:
+            self.plot_mode.setCurrentIndex(max(0, self.plot_mode.findData(figure.plot_mode)))
+        finally:
+            self._updating_axes = False
         self.x_label_input.setText(
             figure.x_label_density if figure.plot_mode == "density" else figure.x_label_current
         )
         self.y_label_input.setText(figure.y_label)
         self.legend_check.setChecked(figure.legend_visible); self.grid_check.setChecked(figure.grid_visible)
+        self.legend_position.setCurrentIndex(
+            max(0, self.legend_position.findData(figure.legend_position))
+        )
         self.error_check.setChecked(figure.error_bars_visible)
         self.width_input.setValue(figure.width_in); self.height_input.setValue(figure.height_in)
         self.dpi_input.setValue(figure.dpi); self.filename_input.setText(figure.output_filename)
@@ -756,6 +902,8 @@ class ResultsPlotterWindow(QMainWindow):
         self.pdf_check.setChecked("pdf" in figure.formats)
         for key, style in configuration.curves.items():
             if key in self._styles: self._styles[key] = style
+        self._active_plot_mode = str(self.plot_mode.currentData())
+        self._load_axis_controls(self._active_plot_mode)
         self._rebuild_table(); self._rebuild_results_table(); self._refresh_preview()
 
     def _reset_defaults(self) -> None:
@@ -763,12 +911,92 @@ class ResultsPlotterWindow(QMainWindow):
         self._apply_configuration(PlotConfiguration(defaults, self._styles))
 
     def _plot_mode_changed(self, *_args) -> None:  # type: ignore[no-untyped-def]
+        if self._updating_axes:
+            return
+        try:
+            self._capture_axis_controls(self._active_plot_mode)
+        except ValueError as error:
+            self._show_local_error(f"Axis settings rejected: {error}")
+        self._active_plot_mode = str(self.plot_mode.currentData())
+        # Load the newly selected plot's independent axis state before changing
+        # labels, whose textChanged signal also refreshes the preview.
+        self._load_axis_controls(self._active_plot_mode)
         defaults = FigureSettings()
         self.x_label_input.setText(
             defaults.x_label_density
             if self.plot_mode.currentData() == "density"
             else defaults.x_label_current
         )
+        self._refresh_preview()
+
+    def _capture_axis_controls(self, mode: str) -> None:
+        axis_mode = str(self.axis_mode.currentData())
+        previous = self._axis_settings[mode]
+        if axis_mode == "auto":
+            self._axis_settings[mode] = replace(previous, mode="auto")
+            return
+        try:
+            settings = AxisSettings(
+                mode="manual",
+                x_min=float(self.x_min_input.text()),
+                x_max=float(self.x_max_input.text()),
+                y_min=float(self.y_min_input.text()),
+                y_max=float(self.y_max_input.text()),
+                x_major_tick=float(self.x_tick_input.text()),
+                y_major_tick=float(self.y_tick_input.text()),
+            )
+            validate_axis_settings(settings)
+        except (TypeError, ValueError) as error:
+            raise ValueError(str(error) or "Manual axis values must be numeric") from error
+        self._axis_settings[mode] = settings
+
+    def _load_axis_controls(self, mode: str) -> None:
+        settings = self._axis_settings[mode]
+        self._updating_axes = True
+        try:
+            self.axis_mode.setCurrentIndex(max(0, self.axis_mode.findData(settings.mode)))
+            self.x_min_input.setText(f"{settings.x_min:.12g}")
+            self.x_max_input.setText(f"{settings.x_max:.12g}")
+            self.y_min_input.setText(f"{settings.y_min:.12g}")
+            self.y_max_input.setText(f"{settings.y_max:.12g}")
+            self.x_tick_input.setText(f"{settings.x_major_tick:.12g}")
+            self.y_tick_input.setText(f"{settings.y_major_tick:.12g}")
+            manual = settings.mode == "manual"
+            for widget in (
+                self.x_min_input, self.x_max_input, self.y_min_input,
+                self.y_max_input, self.x_tick_input, self.y_tick_input,
+            ):
+                widget.setEnabled(manual)
+        finally:
+            self._updating_axes = False
+
+    def _axis_controls_changed(self, *_args) -> None:  # type: ignore[no-untyped-def]
+        if self._updating_axes:
+            return
+        manual = self.axis_mode.currentData() == "manual"
+        for widget in (
+            self.x_min_input, self.x_max_input, self.y_min_input,
+            self.y_max_input, self.x_tick_input, self.y_tick_input,
+        ):
+            widget.setEnabled(manual)
+        try:
+            self._capture_axis_controls(self._active_plot_mode)
+            self.status_label.setStyleSheet("")
+            self.status_label.setText("Axis settings applied to the offline preview.")
+            self._refresh_preview()
+        except ValueError as error:
+            self._show_local_error(f"Axis settings rejected: {error}")
+
+    def _auto_range(self) -> None:
+        self._axis_settings[self._active_plot_mode] = replace(
+            self._axis_settings[self._active_plot_mode], mode="auto"
+        )
+        self._load_axis_controls(self._active_plot_mode)
+        self._refresh_preview()
+
+    def _reset_axis_defaults(self) -> None:
+        self._axis_settings[self._active_plot_mode] = AxisSettings()
+        self._load_axis_controls(self._active_plot_mode)
         self._refresh_preview()
 
     def _refresh_preview(self, *_args) -> None:  # type: ignore[no-untyped-def]

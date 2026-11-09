@@ -103,12 +103,50 @@ class CurveStyle:
 
 
 @dataclass(slots=True)
+class AxisSettings:
+    mode: str = "auto"
+    x_min: float = 0.0
+    x_max: float = 1.0
+    y_min: float = 0.0
+    y_max: float = 1.0
+    x_major_tick: float = 0.2
+    y_major_tick: float = 0.2
+
+
+def validate_axis_settings(settings: AxisSettings, *, max_ticks: int = 200) -> None:
+    """Validate one manual scientific-axis definition without touching data."""
+    if settings.mode not in {"auto", "manual"}:
+        raise AnalysisError("Axis mode must be Auto or Manual")
+    if settings.mode == "auto":
+        return
+    values = (
+        settings.x_min, settings.x_max, settings.y_min, settings.y_max,
+        settings.x_major_tick, settings.y_major_tick,
+    )
+    if not all(math.isfinite(value) for value in values):
+        raise AnalysisError("Manual axis values must be finite")
+    if settings.x_min >= settings.x_max:
+        raise AnalysisError("Manual X minimum must be less than X maximum")
+    if settings.y_min >= settings.y_max:
+        raise AnalysisError("Manual Y minimum must be less than Y maximum")
+    if settings.x_major_tick <= 0 or settings.y_major_tick <= 0:
+        raise AnalysisError("Manual major tick intervals must be positive")
+    x_ticks = (settings.x_max - settings.x_min) / settings.x_major_tick
+    y_ticks = (settings.y_max - settings.y_min) / settings.y_major_tick
+    if x_ticks > max_ticks or y_ticks > max_ticks:
+        raise AnalysisError(
+            f"Manual axis definition exceeds the {max_ticks}-major-tick limit"
+        )
+
+
+@dataclass(slots=True)
 class FigureSettings:
     title: str = "Steady-state polarisation comparison"
     x_label_current: str = "Mean measured current (A)"
     x_label_density: str = "Mean current density (A/cm²)"
     y_label: str = "Mean measured voltage (V)"
     legend_visible: bool = True
+    legend_position: str = "best"
     grid_visible: bool = True
     error_bars_visible: bool = True
     width_in: float = 7.0
@@ -118,6 +156,8 @@ class FigureSettings:
     output_directory: str = ""
     formats: list[str] = field(default_factory=lambda: ["png", "svg", "pdf"])
     plot_mode: str = "current"
+    current_axis: AxisSettings = field(default_factory=AxisSettings)
+    density_axis: AxisSettings = field(default_factory=AxisSettings)
 
 
 @dataclass(slots=True)
@@ -482,7 +522,7 @@ def save_plot_configuration(
 ) -> Path:
     path = exclusive_path(directory, stem, "_plot_config.json")
     payload = {
-        "schema": "qpx600dp-m15b-plot-configuration-v1",
+        "schema": "qpx600dp-m15b-plot-configuration-v2",
         "figure": asdict(configuration.figure),
         "curves": {key: asdict(value) for key, value in configuration.curves.items()},
     }
@@ -495,9 +535,24 @@ def save_plot_configuration(
 def load_plot_configuration(path: Path) -> PlotConfiguration:
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        if payload.get("schema") != "qpx600dp-m15b-plot-configuration-v1":
+        if payload.get("schema") not in {
+            "qpx600dp-m15b-plot-configuration-v1",
+            "qpx600dp-m15b-plot-configuration-v2",
+        }:
             raise AnalysisError("Unsupported plot-configuration schema")
-        figure = FigureSettings(**payload["figure"])
+        figure_values = dict(payload["figure"])
+        current_axis = AxisSettings(**figure_values.pop("current_axis", {}))
+        density_axis = AxisSettings(**figure_values.pop("density_axis", {}))
+        figure = FigureSettings(
+            **figure_values, current_axis=current_axis, density_axis=density_axis
+        )
+        validate_axis_settings(figure.current_axis)
+        validate_axis_settings(figure.density_axis)
+        if figure.legend_position not in {
+            "best", "upper_left", "upper_right", "lower_left", "lower_right",
+            "outside_right",
+        }:
+            raise AnalysisError("Unsupported legend position")
         curves = {key: CurveStyle(**value) for key, value in payload["curves"].items()}
         return PlotConfiguration(figure, curves)
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:

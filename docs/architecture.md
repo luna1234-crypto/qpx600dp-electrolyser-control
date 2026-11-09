@@ -414,6 +414,13 @@ they never poll the instrument. Source files are never changed. Processed CSV,
 configuration and processing metadata retain full numeric precision and use
 exclusive sanitized export paths.
 
+`FigureSettings` owns separate validated `AxisSettings` for I–V and j–V plus an
+independent legend-visibility/placement policy. The same immutable plot
+configuration feeds preview and every raster/vector export, so manual ranges,
+major ticks and outside-legend layout cannot diverge between presentation paths.
+Best/Auto legend placement is a bounded point-occupancy calculation over already
+processed coordinates and cannot trigger analysis or backend work.
+
 Keep immutable hardware capabilities separate from user-configured safety limits.
 `QPX600DP_CAPABILITIES` records 80 V, 50 A and 600 W ratings; none is an
 experiment default. Milestone 16 composes one `SafetyValidator` into manual and

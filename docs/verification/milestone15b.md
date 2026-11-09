@@ -42,11 +42,23 @@ editable. Qt-native previews support mean voltage versus measured current or
 current density with optional voltage population-SD error bars. Plot data is
 processed offline and adds no backend polling.
 
+I–V and j–V plots retain separate Auto/Manual axis definitions. Manual X/Y
+limits require finite increasing bounds; major-tick intervals must be positive
+and remain within the bounded tick-count limit. Invalid edits are contained in
+the Plotter status area and leave both processed data and the last valid preview
+unchanged. Auto Range and Reset Axis Defaults act only on the selected plot.
+Legend visibility remains a separate control from Best/Auto, four-corner and
+Outside Right placement. Best/Auto selects the least occupied data corner;
+outside placement reserves figure space so preview and exports do not clip it.
+
 Combined processed CSV, PNG, SVG, PDF, plot-configuration JSON and processing
 metadata JSON use sanitized exclusive filenames with numbered alternatives.
 Metadata records the fixed window, exclusions, software version, timestamp,
 sources and display settings. Numeric presentation formatting does not change
-the processed Decimal values. Source analysis has a documented finite row bound;
+the processed Decimal values. Versioned configuration saves retain both plot
+axes and legend placement while accepting the earlier configuration schema.
+PNG/SVG/PDF rendering consumes those same visible limits, tick intervals and
+legend placement. Source analysis has a documented finite row bound;
 local worker shutdown is deterministic.
 
 Focused tests cover exact window boundaries and known population SD, continuity
@@ -64,3 +76,16 @@ Old Test Bridge import, M14 summary import, GEIS parsing and iR correction remai
 deferred. Stages shorter than 30 continuous valid seconds cannot produce accepted
 scientific points. M15B does not change or extend M15 hardware acceptance and
 does not approve unattended electrolyser operation.
+
+## Scientific-axis and legend refinement — 9 November 2026
+
+- I–V and j–V Auto/Manual axes, range/tick validation, plot-specific state,
+  local-error containment, Auto Range and Reset Axis Defaults: passed.
+- Best/Auto, four-corner and Outside Right legend placement, independent
+  visibility, configuration round-trip and common preview/export rendering:
+  passed.
+- Focused M15B/M18B regressions: **32 passed**.
+- Complete suite, run in two process-isolated Windows Qt groups: **569 passed**
+  (**520 + 49 fake-serial GUI tests**).
+- `compileall`, `pip check`, Simulation Mode smoke and `git diff --check`:
+  passed; both simulated outputs finished OFF and the worker shut down cleanly.

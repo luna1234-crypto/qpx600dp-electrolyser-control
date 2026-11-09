@@ -490,6 +490,11 @@ override.
 
 Multiple experiments can be styled and compared on voltage-versus-current or
 voltage-versus-current-density figures with optional voltage-SD error bars.
+Each plot type keeps independent Auto/Manual scientific-axis settings; manual
+ranges and major-tick intervals are validated locally and are shared exactly by
+the preview and PNG/SVG/PDF exports. Legend visibility is independent from its
+placement (Best/Auto, four corners or Outside Right), with Auto selecting the
+least occupied plot corner and outside legends receiving reserved export space.
 Processed CSV, PNG, SVG, PDF, plot configuration and processing metadata exports
 use sanitized exclusive filenames and never overwrite existing output. Old Test
 Bridge import, M14 summary import, GEIS parsing and iR correction remain deferred.
