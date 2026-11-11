@@ -284,6 +284,9 @@ class MainWindow(QMainWindow):
                 protocol_widget.resume_button.setProperty("semanticAction", "primary")
                 protocol_widget.stop_button.setProperty("semanticAction", "stop")
             plot_panel = ChannelPlotPanel(channel)
+            protocol_panel.set_plot_style(restored.cp_plot_styles.get(channel, "dots"))
+            plot_panel.set_cp_plot_style(str(protocol_panel.plot_style.currentData()))
+            protocol_panel.plot_style_changed.connect(plot_panel.set_cp_plot_style)
             lsv_plot_panel = LsvPlotPanel(channel)
             polarisation_plot_panel = PolarisationPlotPanel(channel)
             panel.refresh_requested.connect(controller.request_refresh)
@@ -1052,6 +1055,10 @@ class MainWindow(QMainWindow):
             ),
             theme=("dark" if self.dark_theme_action.isChecked() else "light"),
             safety_splitter_sizes=splitter_sizes,
+            cp_plot_styles={
+                channel: str(self.protocol_panels[channel].plot_style.currentData())
+                for channel in (1, 2)
+            },
         )
 
     def _save_persistent_settings(self) -> None:
@@ -1082,7 +1089,7 @@ class MainWindow(QMainWindow):
             self,
             "Reset Settings to Defaults?",
             "This resets the remembered port, mode, directories, safety limits, "
-            "defaults, window geometry and main plot visibility. Existing raw CSV "
+            "defaults, CP plot styles, window geometry and main plot visibility. Existing raw/readable CSV "
             "files and external scientific-analysis files are not modified.",
             QMessageBox.StandardButton.Reset | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
@@ -1110,6 +1117,9 @@ class MainWindow(QMainWindow):
             self.safety_validator.set_user_limits(channel, limits)
             self.safety_panel.apply_limits(channel, limits)
             self._apply_channel_defaults(channel)
+            self.protocol_panels[channel].set_plot_style(
+                defaults.cp_plot_styles[channel]
+            )
             self._update_protocol_context(channel)
         self._apply_plot_preferences(defaults.plot_display)
         self._last_safety_splitter_sizes = defaults.safety_splitter_sizes
@@ -1383,16 +1393,35 @@ class MainWindow(QMainWindow):
                 f"CH{channel} {run_name} cancelled before any instrument command."
             )
             return None
-        path = Path(selected)
-        if path.suffix.lower() != ".csv":
-            path = path.with_suffix(".csv")
+        selected_path = Path(selected)
+        selected_name = selected_path.name
+        lower_name = selected_name.lower()
+        if lower_name.endswith("_raw.csv"):
+            base_name = selected_name[:-len("_raw.csv")]
+        elif lower_name.endswith("_readable.csv"):
+            base_name = selected_name[:-len("_readable.csv")]
+        elif selected_path.suffix.lower() == ".csv":
+            base_name = selected_path.stem
+        else:
+            base_name = selected_name
+        base_name = base_name.strip()
+        if not base_name:
+            QMessageBox.warning(self, "CSV destination rejected", "CSV base filename is empty.")
+            return None
+        path = selected_path.with_name(f"{base_name}_raw.csv")
+        readable_path = selected_path.with_name(f"{base_name}_readable.csv")
         try:
             parent = path.parent.resolve()
             if not parent.is_dir() or not os.access(parent, os.W_OK):
                 raise OSError(f"Directory is not writable: {parent}")
             path = parent / path.name
-            if path.exists():
-                raise FileExistsError(f"CSV already exists and will not be overwritten: {path}")
+            readable_path = parent / readable_path.name
+            existing = [candidate for candidate in (path, readable_path) if candidate.exists()]
+            if existing:
+                raise FileExistsError(
+                    "CSV pair already exists and will not be overwritten: "
+                    + ", ".join(str(candidate) for candidate in existing)
+                )
         except OSError as error:
             QMessageBox.warning(self, "CSV destination rejected", str(error))
             return None

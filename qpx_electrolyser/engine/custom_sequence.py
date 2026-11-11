@@ -180,6 +180,8 @@ class SequenceLogSink(ProtocolLogSink):
         self._stage_type = ""
         self._transition_policy = SequenceTransitionPolicy(transition_policy)
         self._handoff_state = ""
+        self._completed_stage_active_s = 0.0
+        self._current_stage_active_s = 0.0
 
     @property
     def active(self) -> bool:
@@ -191,6 +193,9 @@ class SequenceLogSink(ProtocolLogSink):
         return None if writer is None else writer.path
 
     def set_stage(self, index: int, total: int, stage_type: str) -> None:
+        if self._stage_index and index != self._stage_index:
+            self._completed_stage_active_s += self._current_stage_active_s
+            self._current_stage_active_s = 0.0
         self._stage_index = index
         self._stage_total = total
         self._stage_type = stage_type
@@ -206,6 +211,7 @@ class SequenceLogSink(ProtocolLogSink):
         protocol_state: str,
         error: str = "",
         protocol_name: str = "custom_sequence",
+        readable_elapsed_s: float | None = None,
         **metadata: object,
     ) -> None:
         writer = self._writer
@@ -213,6 +219,13 @@ class SequenceLogSink(ProtocolLogSink):
             raise ValueError("Custom Sequence CSV writer is unavailable")
         from datetime import datetime, timezone
 
+        if readable_elapsed_s is not None:
+            self._current_stage_active_s = max(
+                self._current_stage_active_s, float(readable_elapsed_s)
+            )
+            readable_elapsed_s = (
+                self._completed_stage_active_s + float(readable_elapsed_s)
+            )
         writer.append(
             timestamp=datetime.now(timezone.utc),
             elapsed_s=max(0.0, self._monotonic() - self._started_at),
@@ -232,6 +245,7 @@ class SequenceLogSink(ProtocolLogSink):
             sequence_stage_state=protocol_state,
             sequence_transition_policy=self._transition_policy.value,
             sequence_handoff_state=self._handoff_state,
+            readable_elapsed_s=readable_elapsed_s,
             **metadata,
         )
 

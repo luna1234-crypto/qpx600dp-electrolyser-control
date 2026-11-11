@@ -96,10 +96,13 @@ either channel or both. Every complete measurement request runs at background
 priority through the shared command queue; logging and GUI code never call a
 backend directly and never change an instrument setting or output state.
 
-CSV files use Windows-safe UTC names and exclusive creation, so existing files
-are never overwritten. Each row is flushed immediately. Stop, disconnect,
-application shutdown or an error closes the affected file deterministically;
-reconnect never silently resumes an old log.
+Before a run, one operator-selected base name creates an exclusive pair:
+`<base>_raw.csv` retains the complete established traceability schema unchanged,
+while `<base>_readable.csv` contains only numeric active elapsed time, measured
+voltage and measured current. Existing files are never overwritten. Rows are
+flushed immediately. Pause/Resume keeps the same pair; Stop, disconnect,
+application shutdown or an error closes both deterministically. A readable-file
+failure follows the existing safe logging-failure cleanup.
 
 The console demonstration also uses Simulation Mode only:
 
@@ -207,6 +210,9 @@ Simulation Mode project policy of 10 V, 5 A, 50 W, 24 hours maximum duration and
 
 Direct-current and current-density entry passed Simulation Mode acceptance on
 both channels, including simultaneous operation, Pause/Resume and CSV metadata.
+Each channel's CP editor also provides a persistent display-only **Dots**
+(default) or **Line + Dots** live-plot style. Styling changes neither measurement
+requests nor CSV data and remains compatible with both Light and Dark themes.
 
 Start confirms the selected output is OFF, sets voltage then current and verifies
 both read-backs. A separate queued final preflight rechecks the session, OFF state
@@ -666,9 +672,10 @@ opens a port, connects, or sends a command.
 
 M18B adds versioned offline Custom Sequence templates (`*.qpxseq.txt`) with
 Save/Save As/Load/Clear and a validation preview. Every new raw-data run now
-uses an operator-selected, exclusively created CSV path before any hardware
-mutation; Cancel submits no command, Pause/Resume retains the same path and
-companion files share its base name. Only the last directory is remembered.
+uses an operator-selected base path before any hardware mutation; Cancel submits
+no command, Pause/Resume retains the same exclusive `_raw.csv`/`_readable.csv`
+pair and other companion files share its base name. Only the last directory is
+remembered.
 View > Theme switches the operator UI immediately between persistent Light and
 Dark themes. Internal
 and CSV identifiers remain `constant_current`/`constant_voltage` and CC/CV.

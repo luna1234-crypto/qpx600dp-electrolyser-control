@@ -7,7 +7,7 @@ import math
 import time
 
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
@@ -239,11 +239,22 @@ class _PlotCanvas(InteractivePlotCanvas):
         self._snapshot = PlotSnapshot(channel=channel)
         self.last_major_tick_counts = (0, 0, 0)
         self.last_grid_style = ("light", "#e1e5ea", 255)
+        self._trace_style = "dots"
         self.setMinimumHeight(220)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def apply_snapshot(self, snapshot: PlotSnapshot) -> None:
         self._snapshot = snapshot
+        self.update()
+
+    @property
+    def trace_style(self) -> str:
+        return self._trace_style
+
+    def set_trace_style(self, style: str) -> None:
+        if style not in {"dots", "line_dots"}:
+            raise ValueError("CP plot style must be 'dots' or 'line_dots'")
+        self._trace_style = style
         self.update()
 
     def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]
@@ -328,10 +339,12 @@ class _PlotCanvas(InteractivePlotCanvas):
         painter.save()
         painter.setClipRect(area)
         self._draw_trace(
-            painter, area, points, min_time, max_time, min_voltage, max_voltage, "voltage"
+            painter, area, points, min_time, max_time, min_voltage, max_voltage,
+            "voltage", self._trace_style,
         )
         self._draw_trace(
-            painter, area, points, min_time, max_time, min_current, max_current, "current"
+            painter, area, points, min_time, max_time, min_current, max_current,
+            "current", self._trace_style,
         )
         painter.restore()
 
@@ -382,13 +395,16 @@ class _PlotCanvas(InteractivePlotCanvas):
         min_value: float,
         max_value: float,
         field: str,
+        style: str,
     ) -> None:
-        pen = QPen(QColor("#0f6cbd" if field == "voltage" else "#ca5010"), 2)
+        colour = QColor("#0f6cbd" if field == "voltage" else "#ca5010")
+        pen = QPen(colour, 2)
         if field == "current":
             pen.setStyle(Qt.PenStyle.DashLine)
         painter.setPen(pen)
         path = QPainterPath()
         prior_session: int | None = None
+        positions: list[QPointF] = []
         for point in points:
             value = point.voltage_v if field == "voltage" else point.current_a
             x = area.left() + area.width() * (point.elapsed_s - min_time) / max(
@@ -398,12 +414,20 @@ class _PlotCanvas(InteractivePlotCanvas):
                 max_value - min_value, 1e-12
             )
             position = QPointF(x, y)
+            positions.append(position)
             if prior_session != point.session_id:
                 path.moveTo(position)
             else:
                 path.lineTo(position)
             prior_session = point.session_id
-        painter.drawPath(path)
+        if style == "line_dots":
+            painter.drawPath(path)
+        painter.setPen(QPen(colour, 1))
+        painter.setBrush(QBrush(colour))
+        radius = 2.6
+        for position in positions:
+            painter.drawEllipse(position, radius, radius)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
 
 
 class ChannelPlotPanel(QGroupBox):
@@ -452,3 +476,6 @@ class ChannelPlotPanel(QGroupBox):
         self.status.setText(f"CH{self.channel} | {state} | {value.message}")
         self.status.setStyleSheet("color: #a61b1b;" if value.error else "")
         self.canvas.apply_snapshot(value)
+
+    def set_cp_plot_style(self, style: str) -> None:
+        self.canvas.set_trace_style(style)

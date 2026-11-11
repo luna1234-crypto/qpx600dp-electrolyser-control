@@ -57,7 +57,7 @@ def test_versioned_save_restart_restore_and_fixed_schema(tmp_path: Path) -> None
     assert loaded.warnings == ()
     assert loaded.settings == expected
     raw = json.loads(path.read_text(encoding="utf-8"))
-    assert raw["schema_version"] == 2
+    assert raw["schema_version"] == 3
     assert "instrument_serial" not in raw
     assert "confirmation_token" not in raw
     assert set(raw) == {
@@ -65,6 +65,7 @@ def test_versioned_save_restart_restore_and_fixed_schema(tmp_path: Path) -> None
         "safety_limits", "default_active_area_cm2",
         "default_sampling_interval_s", "simulation_mode",
         "window_geometry", "plot_display", "theme", "safety_splitter_sizes",
+        "cp_plot_styles",
     }
 
 
@@ -87,7 +88,7 @@ def test_missing_corrupt_and_old_settings_fall_back_or_migrate(tmp_path: Path) -
         "simulation_mode": False,
     }), encoding="utf-8")
     migrated = SettingsStore(path).load(default_data_directory=tmp_path)
-    assert migrated.settings.schema_version == 2
+    assert migrated.settings.schema_version == 3
     assert migrated.settings.manual_port == "COM9"
     assert migrated.settings.default_active_area_cm2 == 3
     assert migrated.settings.default_sampling_interval_s == 2

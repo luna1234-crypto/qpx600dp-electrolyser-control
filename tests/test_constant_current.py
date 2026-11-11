@@ -616,7 +616,10 @@ def test_active_manual_logger_keeps_protocol_start_enabled_and_owns_single_csv(
         assert protocol_rows
         assert {row["protocol_state"] for row in protocol_rows} >= {"RUNNING", "PAUSED"}
         assert any(not row["protocol_name"] for row in rows)
-        assert len(list(tmp_path.glob("qpx600dp_ch1_*.csv"))) == 1
+        paired_files = list(tmp_path.glob("qpx600dp_ch1_*.csv"))
+        assert len(paired_files) == 2
+        assert any(path.name.endswith("_raw.csv") for path in paired_files)
+        assert any(path.name.endswith("_readable.csv") for path in paired_files)
     finally:
         protocol = window.protocol_controllers[1]
         if protocol.snapshot.owns_channel:

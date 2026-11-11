@@ -20,7 +20,7 @@ from qpx_electrolyser.safety.model import (
 )
 
 
-SETTINGS_SCHEMA_VERSION = 2
+SETTINGS_SCHEMA_VERSION = 3
 _PORT_PATTERN = re.compile(r"COM[1-9]\d*", re.IGNORECASE)
 
 
@@ -63,6 +63,9 @@ class ApplicationSettings:
     plot_display: PlotDisplayPreferences = field(default_factory=PlotDisplayPreferences)
     theme: str = "light"
     safety_splitter_sizes: tuple[int, int] = (190, 730)
+    cp_plot_styles: dict[int, str] = field(
+        default_factory=lambda: {1: "dots", 2: "dots"}
+    )
 
     @classmethod
     def defaults(cls, data_directory: Path | None = None) -> "ApplicationSettings":
@@ -88,6 +91,10 @@ class ApplicationSettings:
             "plot_display": asdict(self.plot_display),
             "theme": self.theme,
             "safety_splitter_sizes": list(self.safety_splitter_sizes),
+            "cp_plot_styles": {
+                str(channel): style
+                for channel, style in sorted(self.cp_plot_styles.items())
+            },
         }
 
 
@@ -212,7 +219,13 @@ class SettingsStore:
                 "plot_display": raw.get("plot_display", {}),
                 "theme": raw.get("theme", "light"),
                 "safety_splitter_sizes": raw.get("safety_splitter_sizes", [190, 730]),
+                "cp_plot_styles": raw.get("cp_plot_styles", {}),
             }
+        if version == 2:
+            migrated = dict(raw)
+            migrated["schema_version"] = SETTINGS_SCHEMA_VERSION
+            migrated.setdefault("cp_plot_styles", {})
+            return migrated
         raise ValueError(f"unsupported settings schema version {version!r}")
 
     @staticmethod
@@ -296,6 +309,19 @@ class SettingsStore:
         except (TypeError, ValueError):
             warnings.append("Invalid persisted splitter position was replaced by default.")
             splitter = (190, 730)
+        raw_cp_styles = raw.get("cp_plot_styles", {})
+        if not isinstance(raw_cp_styles, Mapping):
+            raw_cp_styles = {}
+            warnings.append("Invalid persisted CP plot styles were replaced by defaults.")
+        cp_plot_styles: dict[int, str] = {}
+        for channel in (1, 2):
+            style = raw_cp_styles.get(str(channel), raw_cp_styles.get(channel, "dots"))
+            if style not in {"dots", "line_dots"}:
+                warnings.append(
+                    f"Invalid persisted CH{channel} CP plot style was replaced by Dots."
+                )
+                style = "dots"
+            cp_plot_styles[channel] = str(style)
         return SettingsLoadResult(ApplicationSettings(
             manual_port=port,
             data_export_directory=directory,
@@ -307,6 +333,7 @@ class SettingsStore:
             plot_display=plots,
             theme=theme,
             safety_splitter_sizes=splitter,
+            cp_plot_styles=cp_plot_styles,
         ), tuple(warnings))
 
     @staticmethod

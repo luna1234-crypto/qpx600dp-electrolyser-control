@@ -1464,6 +1464,7 @@ class ConstantCurrentController(QObject):
                 protocol_state=state.value,
                 error=error,
                 protocol_name=self._protocol_name,
+                readable_elapsed_s=self._elapsed_active(),
                 **self._protocol_csv_metadata(),
             )
             return
@@ -1481,6 +1482,7 @@ class ConstantCurrentController(QObject):
             error=error,
             protocol_name=self._protocol_name,
             protocol_state=state.value,
+            readable_elapsed_s=self._elapsed_active(),
             **self._protocol_csv_metadata(),
         )
 

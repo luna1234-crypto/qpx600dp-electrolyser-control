@@ -68,6 +68,12 @@ CSV_COLUMNS = (
     "sequence_handoff_state",
 )
 
+READABLE_CSV_COLUMNS = (
+    "Elapsed time (s)",
+    "Voltage (V)",
+    "Current (A)",
+)
+
 
 class CsvWriter(Protocol):
     path: Path
@@ -113,6 +119,7 @@ class CsvWriter(Protocol):
         sequence_stage_state: str = "",
         sequence_transition_policy: str = "",
         sequence_handoff_state: str = "",
+        readable_elapsed_s: float | None = None,
     ) -> None: ...
 
     def close(self) -> None: ...
@@ -163,6 +170,7 @@ class ProtocolLogSink(Protocol):
         sequence_stage_state: str = "",
         sequence_transition_policy: str = "",
         sequence_handoff_state: str = "",
+        readable_elapsed_s: float | None = None,
     ) -> None: ...
 
     def suspend_sampling(self) -> None: ...
@@ -188,13 +196,44 @@ class CsvLogFile:
             instant = created_at or datetime.now(timezone.utc)
             stamp = instant.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
             self.path = directory / f"qpx600dp_ch{channel}_{stamp}.csv"
+        self.readable_path: Path | None = None
+        self._readable_stream: TextIO | None = None
+        self._readable_writer: csv.DictWriter[str] | None = None
+        self._readable_enabled = True
+        if explicit_path and self.path.name.lower().endswith("_raw.csv"):
+            base_name = self.path.name[:-len("_raw.csv")]
+            self.readable_path = self.path.with_name(f"{base_name}_readable.csv")
+            if self.readable_path.exists():
+                raise FileExistsError(
+                    f"Readable CSV already exists and will not be overwritten: {self.readable_path}"
+                )
         self._stream: TextIO | None = self.path.open("x", newline="", encoding="utf-8")
         self._writer = csv.DictWriter(self._stream, fieldnames=CSV_COLUMNS, extrasaction="raise")
         try:
             self._writer.writeheader()
             self._stream.flush()
+            if self.readable_path is not None:
+                self._readable_stream = self.readable_path.open(
+                    "x", newline="", encoding="utf-8"
+                )
+                self._readable_writer = csv.DictWriter(
+                    self._readable_stream,
+                    fieldnames=READABLE_CSV_COLUMNS,
+                    extrasaction="raise",
+                )
+                self._readable_writer.writeheader()
+                self._readable_stream.flush()
         except BaseException:
             self.close()
+            try:
+                self.path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if self.readable_path is not None:
+                try:
+                    self.readable_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             raise
 
     def append(
@@ -238,6 +277,7 @@ class CsvLogFile:
         sequence_stage_state: str = "",
         sequence_transition_policy: str = "",
         sequence_handoff_state: str = "",
+        readable_elapsed_s: float | None = None,
     ) -> None:
         stream = self._stream
         if stream is None:
@@ -334,11 +374,41 @@ class CsvLogFile:
         }
         self._writer.writerow(values)
         stream.flush()
+        if (
+            self._readable_enabled
+            and status == "ok"
+            and readback is not None
+            and self._readable_writer is not None
+        ):
+            readable_stream = self._readable_stream
+            if readable_stream is None:
+                raise ValueError("Readable CSV log is closed")
+            elapsed = elapsed_s if readable_elapsed_s is None else readable_elapsed_s
+            if not math.isfinite(elapsed) or elapsed < 0:
+                raise ValueError("Readable CSV elapsed time must be finite and nonnegative")
+            self._readable_writer.writerow({
+                "Elapsed time (s)": f"{elapsed:.12g}",
+                "Voltage (V)": f"{readback.measured_voltage_v:.12g}",
+                "Current (A)": f"{readback.measured_current_a:.12g}",
+            })
+            readable_stream.flush()
+
+    def set_readable_enabled(self, enabled: bool) -> None:
+        """Select the one sample producer allowed to feed the readable companion."""
+        self._readable_enabled = bool(enabled)
 
     def close(self) -> None:
+        readable_stream, self._readable_stream = self._readable_stream, None
         stream, self._stream = self._stream, None
-        if stream is not None:
-            stream.close()
+        first_error: OSError | None = None
+        for candidate in (readable_stream, stream):
+            if candidate is not None:
+                try:
+                    candidate.close()
+                except OSError as error:
+                    first_error = first_error or error
+        if first_error is not None:
+            raise first_error
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,6 +453,7 @@ class ChannelLoggingController(QObject):
         self._next_slot = 0
         self._pending_request_id: int | None = None
         self._sampling_suspended = False
+        self._protocol_owns_readable = False
         self._cancellation_key = f"csv-logger-channel-{channel}"
         self._snapshot = LoggingSnapshot(channel=channel)
         self._timer = QTimer(self)
@@ -429,6 +500,7 @@ class ChannelLoggingController(QObject):
         self._next_slot = 0
         self._pending_request_id = None
         self._sampling_suspended = False
+        self._protocol_owns_readable = False
         self._publish(LoggingSnapshot(
             channel=self._channel,
             active=True,
@@ -497,6 +569,7 @@ class ChannelLoggingController(QObject):
         sequence_stage_state: str = "",
         sequence_transition_policy: str = "",
         sequence_handoff_state: str = "",
+        readable_elapsed_s: float | None = None,
     ) -> None:
         """Append a protocol row through this logger's one open writer.
 
@@ -508,6 +581,10 @@ class ChannelLoggingController(QObject):
         if not self._snapshot.active or writer is None:
             raise ValueError("Active channel CSV logger is unavailable")
         connection = self._connection.snapshot
+        self._protocol_owns_readable = True
+        set_readable_enabled = getattr(writer, "set_readable_enabled", None)
+        if callable(set_readable_enabled):
+            set_readable_enabled(True)
         try:
             writer.append(
                 timestamp=self._utc_now(),
@@ -548,6 +625,7 @@ class ChannelLoggingController(QObject):
                 sequence_stage_state=sequence_stage_state,
                 sequence_transition_policy=sequence_transition_policy,
                 sequence_handoff_state=sequence_handoff_state,
+                readable_elapsed_s=readable_elapsed_s,
             )
         except (OSError, ValueError) as append_error:
             self._fail_file(append_error)
@@ -558,6 +636,8 @@ class ChannelLoggingController(QObject):
             message=f"Logged {protocol_name.replace('_', ' ').title()} {status} row",
             error=False,
         ))
+        if protocol_state in {"COMPLETED", "FAILED"}:
+            self._protocol_owns_readable = False
 
     def suspend_sampling(self) -> None:
         """Temporarily suppress standalone polls while a hardware output settles."""
@@ -667,6 +747,9 @@ class ChannelLoggingController(QObject):
         if writer is None:
             raise ValueError("CSV writer is unavailable")
         connection = self._connection.snapshot
+        set_readable_enabled = getattr(writer, "set_readable_enabled", None)
+        if callable(set_readable_enabled):
+            set_readable_enabled(not self._protocol_owns_readable)
         writer.append(
             timestamp=self._utc_now(),
             elapsed_s=max(0.0, self._monotonic() - self._started_at),
