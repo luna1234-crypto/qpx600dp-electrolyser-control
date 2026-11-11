@@ -1,33 +1,5 @@
 # Windows visual smoke test (milestone 12)
 
-## Milestone 15B Results / Plotter (offline)
-
-1. Leave the application disconnected and choose **Tools → Results / Plotter**.
-   Confirm the non-modal window says “Offline analysis — does not control the instrument”.
-2. Import at least two M15 raw CSV experiments containing completed stages of at
-   least 30 continuous RUNNING/Output-ON seconds. Set distinct material names,
-   legend labels, colours, markers and display order; hide and restore one curve.
-3. Import an M15 file whose completed stage has less than 30 continuous valid
-   seconds. Confirm it reports `Insufficient stable 30-second window` and does not
-   produce an averaged point.
-4. Preview voltage versus current, then voltage versus current density. If area
-   is absent, enter an override and confirm the source is marked overridden.
-5. For I–V choose Manual axes, enter finite increasing X/Y bounds and positive
-   major-tick intervals, and confirm the preview updates. Enter an invalid bound
-   and confirm a local error appears without losing results. Use Auto Range,
-   switch to j–V, set different axes, then switch back and confirm each plot
-   retained its own settings. Exercise Reset Axis Defaults.
-6. Exercise Best/Auto, each corner and Outside Right legend placement; toggle
-   legend visibility separately and confirm no legend is clipped at two figure
-   sizes.
-7. Save/load a plot configuration and confirm both axis sets and legend position
-   return. Export processed CSV, metadata and PNG/SVG/PDF
-   twice; confirm numbered alternatives are created and no file is overwritten.
-   Confirm each exported figure matches the visible ranges, ticks and legend.
-8. While a Simulation protocol owns a channel, open, analyse and close the Plotter.
-   Confirm the protocol state, output and logging are unaffected and the GUI stays
-   responsive. Close the Plotter independently.
-
 ## Milestone 15 Continuous Stage Handoff (Simulation Mode)
 
 1. Connect in Simulation Mode and add CH1 stages: CV 1.0 V / 0.08 A / 5 s,
@@ -250,9 +222,7 @@ Keep Simulation Mode selected and disconnected initially:
    separate CH1/CH2 results appear.
 4. Repeat with only CH1 active and CH2 idle. Confirm CH2 is authoritatively read
    but is not unnecessarily written, while CH1 stops and confirms OFF.
-5. Confirm normal CH1 Stop/failure does not stop an active CH2 run. Open Results /
-   Plotter during a run and confirm it remains offline and cannot trigger any
-   safety or instrument action.
+5. Confirm normal CH1 Stop/failure does not stop an active CH2 run.
 6. Inspect `logs/safety_events.csv`: it must be append-only, contain timestamp,
    channel, cause, requested action and confirmed/unconfirmed final state, and
    contain no instrument serial identity.
@@ -284,8 +254,8 @@ Keep the application disconnected throughout the restore checks:
    Tools > Reset Settings to Defaults, Cancel once, then confirm once while
    disconnected. Verify Simulation Mode, independent default safety limits,
    default directory/area/interval and all plot groups are restored.
-6. Confirm existing M15B plot-configuration files remain unchanged. Close and
-   verify there is no residual process or QThread warning.
+6. Confirm existing raw data and external analysis files remain unchanged. Close
+   and verify there is no residual process or QThread warning.
 
 Do not connect a port during this checklist. Persistence never restores outputs,
 protocol ownership, confirmation tokens or instrument identity.
@@ -308,14 +278,12 @@ protocol ownership, confirmation tokens or instrument identity.
    it appears only beside the affected channel/control.
 5. Collapse, expand and resize the live-time, LSV and polarisation plot sections.
    Confirm sampling and CSV recording continue without extra backend reads.
-6. Open Results / Plotter and import a real M15 file whose final natural stage
-   has `completed`/`Protocol duration completed` but no `stage_completed` row.
-   Confirm it is eligible when a continuous 30-second window exists. Import a
-   stopped run; confirm earlier completed stages remain valid and the interrupted
-   stage is rejected.
-7. Change visibility, colour, marker, size, line style/width and order. Confirm
-   immediate preview, save/load configuration round-trip, and no experiment
-   controller/output change. Close cleanly with no residual QThread warning.
+6. Confirm Tools has no in-application scientific post-processing action and
+   existing user CSV/export/configuration files remain untouched.
+7. Hover over closed mode selectors, protocol combo boxes and numeric safety
+   fields, then move the mouse wheel. Confirm the containing page scrolls while
+   values do not change. Open a dropdown and confirm its list can scroll without
+   silently committing a new selection. Verify keyboard input still works.
 8. Drag the Unified Safety/channel splitter, Collapse and Restore it, restart,
    and confirm the position returns while connection and Emergency All-Off stay
    visible. Switch View > Theme between Light and Dark and verify readable tabs,
@@ -327,8 +295,10 @@ protocol ownership, confirmation tokens or instrument identity.
     leaves the channel untouched. Confirm an existing file is rejected, CH1/CH2
     use independent names, Resume retains the selected file and polarisation
     companions share its base.
-11. In Results / Plotter import at least two M15 files. Sort/filter stage rows;
-    verify completed-before-Stop remains accepted, stopped is excluded by
-    default, optional qualifying PARTIAL is labelled, and FAILED is excluded.
-    Confirm separate lines/markers/error bars with no blue filled polygon and
-    that Dark UI still exports scientific figures on the configured white default.
+11. On every live time, LSV and polarisation plot, right-drag a rectangle and
+    confirm a visible rubber band and region zoom. Click near points and confirm
+    tooltips show elapsed time (or explicitly unavailable completed-point time),
+    measured V/I and channel/stage where present. Use Auto Range / Reset Zoom.
+12. Collapse Unified Safety, verify validation remains active, then relaunch and
+    confirm the last valid independent CH1/CH2 limits return while Unified Safety
+    starts expanded. Confirm the application remains DISCONNECTED.

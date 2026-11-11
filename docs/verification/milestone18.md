@@ -17,22 +17,12 @@ Qt-native tabs and layouts retain keyboard navigation and DPI scaling.
 
 ## Confirmed defect fixes
 
-- Real M15 raw CSVs may omit a redundant `stage_completed` row for a naturally
-  completed final child stage. The analyser now accepts the unambiguous
-  `completed` + COMPLETED + `Protocol duration completed` shape. It does not
-  accept `Custom Sequence stopped by operator`; completed stages before Stop
-  remain independently valid.
-- Results / Plotter now has typed controls for curve visibility, colour, marker,
-  marker size, line style, line width and order. Changes repaint immediately and
-  persist through the existing configuration format.
 - CH2 Constant Voltage Start no longer moves focus or scroll/navigation to the
   Sequence Editor. Snapshot updates preserve selected tabs, focus locality and
   scroll position. Established CH1/CH2 routing remains isolated.
 
 ## Automated evidence
 
-- real-schema natural completion, Stop and Pause/Resume continuity;
-- typed Plotter style editing and configuration round-trip;
 - fixed-header/Emergency accessibility and seven-tab channel composition;
 - CH2 CV route, selected-tab, focus and scroll stability;
 - channel-local compact status and atomic measured power; and
@@ -58,24 +48,15 @@ sent. Manual DPI and small-screen acceptance follows the checklist in
 - Each new logger/protocol/scan/sequence file is chosen before mutation and
   created exclusively; cancel submits zero commands, Resume keeps the same
   writer and companion files derive from the selected base name.
-- M15B exposes sortable/filterable stage results and optional, clearly marked
-  PARTIAL inclusion only for deliberately stopped stages with a complete valid
-  final 30 seconds. FAILED stages remain excluded.
-- Curve paths have no brush and are created per experiment, so independent
-  curves are never filled or joined. Light/Dark themes apply immediately and
-  persist; scientific exports retain the configured white default background.
-- M15B I–V and j–V previews now keep independent Auto/Manual ranges and major
-  tick intervals, with local validation, Auto Range and per-plot reset actions.
-  Legend visibility remains independent from persisted Best/Auto, corner and
-  Outside Right placement; preview and PNG/SVG/PDF use the same settings.
+- Light/Dark themes apply immediately and persist.
 
 Focused coverage includes settings migration/splitter/theme restore, template
-round-trip, CSV cancellation/exclusive naming, stage rules/results filtering,
-two-curve no-fill rendering and unchanged M9–M18 controller regressions.
+round-trip, CSV cancellation/exclusive naming and unchanged M9–M18 controller
+regressions.
 
 ## M18B validation result — 2026-11-09
 
-- focused M18B/Custom Sequence/M15B/settings/UI regressions: **62 passed**;
+- focused M18B/Custom Sequence/settings/UI regressions: **62 passed**;
 - complete pytest suite: **559 passed**;
 - package, entrypoint and tests `compileall`: passed;
 - `pip check`: no broken requirements;
@@ -85,10 +66,38 @@ two-curve no-fill rendering and unchanged M9–M18 controller regressions.
 
 ## Validation result — 2026-11-05
 
-- focused M18/M15B and M9-M17 regressions: **137 passed**;
+- focused M18 and M9-M17 regressions: **137 passed**;
 - complete pytest suite: **554 passed**;
 - package, entrypoint and tests `compileall`: passed;
 - `pip check`: no broken requirements;
 - default-Simulation automated smoke: passed, including dual-channel protocols,
   CSV/plots, final Output Off, disconnect and clean worker shutdown; and
+- `git diff --check`: passed.
+
+## Final M18 control-application follow-up — 11 November 2026
+
+- Removed the in-application offline scientific post-processing window, its
+  processed exports/configuration and dedicated code/tests. Existing user files
+  are untouched; unknown legacy settings keys remain tolerated.
+- Preserved the complete raw CSV schema, operator-selected exclusive naming,
+  Pause/Resume writer reuse and independent CH1/CH2 logging.
+- Closed selectors and numeric spin boxes ignore wheel edits and redirect wheel
+  motion to the containing panel. Keyboard, typing, buttons and open dropdowns
+  remain deliberate input paths.
+- All live time, Staircase LSV and polarisation plots use their existing bounded
+  samples for right-drag rectangular zoom and nearest-point tooltips. Auto Range /
+  Reset Zoom changes display state only and adds no polling.
+- Persisted independent CH1/CH2 safety limits are active before connection, and
+  Unified Safety starts expanded every session. Collapse remains visibility-only.
+- Scientific post-processing is explicitly external; this application remains
+  responsible for control, safety, raw logging and live plotting.
+
+Validation:
+
+- focused removal/input/plot/persistence/raw-CSV regressions: passed;
+- complete pytest suite: **546 passed**;
+- package, entrypoint and tests `compileall`: passed;
+- `pip check`: no broken requirements;
+- default-Simulation automated smoke: passed with both outputs OFF, clean
+  disconnect and worker shutdown; and
 - `git diff --check`: passed.

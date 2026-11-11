@@ -609,33 +609,6 @@ acceptance are complete. Supervised resistor-load acceptance subsequently passed
 for Safe-Off and Continuous Real Hardware transitions. This does not approve
 electrolyser science or unattended operation.
 
-## Milestone 15B - Results / Scientific Plotter (optional extension)
-
-Implemented a strictly isolated offline Results / Plotter window for existing
-M15 stage-aware raw CSV files. It imports and compares multiple experiments,
-accepts material/legend/style edits and an explicit active-area override, and
-produces voltage-versus-current and voltage-versus-current-density previews with
-optional population-voltage-SD error bars.
-
-Only completed stages with a final continuous 30 seconds of valid RUNNING,
-Output-ON measurements produce a point. Pause, Resume, OFF, handoff/settling,
-starting/stopping/cleanup, error and invalid rows break or are excluded from the
-window. Short stages visibly report `Insufficient stable 30-second window`.
-Exports include a combined processed CSV, PNG/SVG/PDF plots, plot configuration
-and processing metadata, all through exclusive sanitized filenames.
-
-Scientific presentation now includes independent Auto/Manual axes for I–V and
-j–V, validated X/Y ranges and major ticks, Auto Range/reset actions, and
-persisted legend placement including least-overlap Best/Auto and unclipped
-Outside Right. Preview and PNG/SVG/PDF share the same display configuration.
-
-M15B is read-only and optional: it imports no transport, driver, queue, channel
-engine, protocol controller or safety transition and submits no instrument
-operation. Its asynchronous workers and exceptions are local, and experiment
-control starts and runs without opening or loading it. Old Test Bridge files,
-M14 summaries, GEIS parsing and iR correction remain deferred. M16–M20 retain
-their original numbering.
-
 ## Milestone 16 - Full safety and emergency system
 
 Original roadmap task: Emergency All Outputs Off and complete fault handling.
@@ -651,7 +624,7 @@ channel. A channel still ON receives at most one guarded safety-priority Output
 Off before authoritative readback. CH1 and CH2 results remain separate; any
 unconfirmed state closes the session and presents a physical-front-panel warning.
 Normal channel-local failures stay isolated. Events append without instrument
-serial numbers to the safety-event log. Offline Plotter behavior is unchanged.
+serial numbers to the safety-event log.
 Simulation and fake-backend acceptance is complete. Supervised physical
 resistor-load acceptance used two independent 100-ohm loads: CH1 and CH2 each
 operated normally in Constant Voltage mode at 4.000 V with a 0.080 A limit,
@@ -675,7 +648,7 @@ never constructs a physical backend until manual Connect, never enumerates a
 port, and never restores output or protocol state. Remembered Real Hardware mode
 still uses all existing confirmations. Settings contain no credentials,
 instrument serial identity or transient confirmation token. A confirmed reset
-restores documented defaults without touching M15B plot-configuration files.
+restores documented defaults without touching raw data or external analysis files.
 See [verification details](verification/milestone17.md).
 
 ## Milestone 18 - UI refinement
@@ -689,19 +662,17 @@ styling is visually distinct; normal Qt keyboard navigation and DPI-aware
 layouts support smaller Windows screens and 100/125/150% scaling.
 
 The known CH2 CV focus/navigation defect is covered by stable tab/focus/scroll
-tests and all CH1/CH2 controller routes retain their established isolation.
-M15B now accepts naturally completed final stages in real M15 CSVs while still
-rejecting interrupted stages, and provides typed, immediately previewed and
-persistent visibility/colour/marker/line/order controls. See
+tests and all CH1/CH2 controller routes retain their established isolation. See
 [verification details](verification/milestone18.md).
 
 M18B completes the refinement with a persisted Safety/channel splitter,
 Light/Dark operator themes, CP/CA display terminology, versioned Custom Sequence
 templates, and exclusive operator-named CSV files selected before mutation.
-The offline Plotter adds sortable/filterable stage results, guarded PARTIAL
-inclusion and independent no-fill curve rendering. Internal protocol and CSV IDs,
-instrument state names, controller ownership and guarded Output behavior remain
-unchanged.
+The final follow-up removes in-application scientific post-processing while
+preserving complete raw CSVs. It adds wheel-safe value controls, right-drag zoom,
+nearest-point live-plot tooltips and always-expanded startup safety. Internal
+protocol and CSV IDs, instrument state names, controller ownership and guarded
+Output behavior remain unchanged.
 
 ## Milestone 19 - Windows packaging
 

@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGroupBox, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from qpx_electrolyser.engine.stepped_scan import StaircaseLsvPoint
+from qpx_electrolyser.gui.plots.interaction import DisplayPoint, InteractivePlotCanvas
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,9 +116,10 @@ class LsvPlotController(QObject):
         self.snapshot_changed.emit(self._snapshot)
 
 
-class _LsvCanvas(QWidget):
-    def __init__(self) -> None:
+class _LsvCanvas(InteractivePlotCanvas):
+    def __init__(self, channel: int) -> None:
         super().__init__()
+        self._channel = channel
         self._points: tuple[LsvPlotPoint, ...] = ()
         self.setMinimumHeight(150)
 
@@ -140,13 +142,19 @@ class _LsvCanvas(QWidget):
         if not self._points:
             painter.drawText(area, Qt.AlignmentFlag.AlignCenter, "No representative points")
             return
-        min_v = min(point.voltage_v for point in self._points)
-        max_v = max(point.voltage_v for point in self._points)
-        max_y = max(
+        full_min_v = min(point.voltage_v for point in self._points)
+        full_max_v = max(point.voltage_v for point in self._points)
+        full_max_y = max(
             max(point.current_a, point.current_density_a_cm2 or 0.0)
             for point in self._points
         ) or 1.0
+        min_v, max_v, min_y, max_y = self.visible_bounds(
+            full_min_v, full_max_v, 0.0, full_max_y
+        )
         span_v = max(max_v - min_v, 1e-12)
+        display_points: list[DisplayPoint] = []
+        painter.save()
+        painter.setClipRect(area)
         for field, color, dashed in (
             ("current_a", "#1769aa", False),
             ("current_density_a_cm2", "#c62828", True),
@@ -159,15 +167,27 @@ class _LsvCanvas(QWidget):
                     continue
                 pos = QPointF(
                     area.left() + area.width() * (point.voltage_v - min_v) / span_v,
-                    area.bottom() - area.height() * value / max_y,
+                    area.bottom() - area.height() * (value - min_y) / max(
+                        max_y - min_y, 1e-12
+                    ),
                 )
                 path.lineTo(pos) if started else path.moveTo(pos)
                 started = True
+                display_points.append(DisplayPoint(
+                    pos,
+                    f"CH{self._channel} | Step {point.point_index}\n"
+                    "Elapsed: unavailable for completed-point data\n"
+                    f"Measured voltage: {point.voltage_v:.6g} V\n"
+                    f"Measured current: {point.current_a:.6g} A",
+                ))
             pen = QPen(QColor(color), 2)
             if dashed:
                 pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.drawPath(path)
+        painter.restore()
+        self.set_interaction_geometry(area, display_points)
+        self.draw_interaction_overlay(painter)
 
 
 class LsvPlotPanel(QGroupBox):
@@ -176,13 +196,16 @@ class LsvPlotPanel(QGroupBox):
     def __init__(self, channel: int) -> None:
         super().__init__(f"Channel {channel} Staircase LSV I–V / j–V")
         self._channel = channel
-        self.canvas = _LsvCanvas()
+        self.canvas = _LsvCanvas(channel)
         self.status = QLabel("Waiting for Staircase LSV point results")
         self.clear_button = QPushButton("Clear LSV plot")
         self.clear_button.clicked.connect(self.clear_requested)
+        self.reset_zoom_button = QPushButton("Auto Range / Reset Zoom")
+        self.reset_zoom_button.clicked.connect(self.canvas.reset_zoom)
         layout = QVBoxLayout(self)
         layout.addWidget(self.canvas)
         layout.addWidget(self.status)
+        layout.addWidget(self.reset_zoom_button)
         layout.addWidget(self.clear_button)
 
     @Slot(object)

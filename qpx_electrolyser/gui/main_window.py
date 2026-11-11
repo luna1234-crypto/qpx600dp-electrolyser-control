@@ -82,6 +82,7 @@ from qpx_electrolyser.gui.constant_current_panel import ConstantCurrentPanel
 from qpx_electrolyser.gui.constant_voltage_panel import ConstantVoltagePanel
 from qpx_electrolyser.gui.current_scan_panel import CurrentScanPanel
 from qpx_electrolyser.gui.custom_sequence_panel import CustomSequencePanel
+from qpx_electrolyser.gui.input_guard import WheelValueGuard, protect_wheel_value_widgets
 from qpx_electrolyser.gui.plots.realtime import ChannelPlotController, ChannelPlotPanel
 from qpx_electrolyser.gui.plots.lsv import LsvPlotController, LsvPlotPanel
 from qpx_electrolyser.gui.plots.polarisation import (
@@ -600,8 +601,15 @@ class MainWindow(QMainWindow):
         self.main_vertical_splitter.setChildrenCollapsible(True)
         self.main_vertical_splitter.addWidget(self.safety_panel)
         self.main_vertical_splitter.addWidget(scroll)
-        self.main_vertical_splitter.setSizes(list(restored.safety_splitter_sizes))
-        self._last_safety_splitter_sizes = restored.safety_splitter_sizes
+        restored_safety_sizes = restored.safety_splitter_sizes
+        if restored_safety_sizes[0] <= 0:
+            restored_safety_sizes = ApplicationSettings.defaults().safety_splitter_sizes
+        restored_safety_sizes = (
+            max(140, restored_safety_sizes[0]),
+            max(100, restored_safety_sizes[1]),
+        )
+        self.main_vertical_splitter.setSizes(list(restored_safety_sizes))
+        self._last_safety_splitter_sizes = restored_safety_sizes
         splitter_controls = QHBoxLayout()
         self.collapse_safety_button = QPushButton("Collapse Safety")
         self.restore_safety_button = QPushButton("Restore Safety")
@@ -623,15 +631,9 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_action)
 
         tools_menu = self.menuBar().addMenu("&Tools")
-        results_action = QAction("Results / Plotter...", self)
-        results_action.setToolTip("Offline analysis — does not control the instrument")
-        results_action.triggered.connect(self._open_results_plotter)
-        tools_menu.addAction(results_action)
-        tools_menu.addSeparator()
         reset_settings_action = QAction("Reset Settings to Defaults...", self)
         reset_settings_action.triggered.connect(self._reset_settings_to_defaults)
         tools_menu.addAction(reset_settings_action)
-        self._results_plotter_window = None
 
         view_menu = self.menuBar().addMenu("&View")
         theme_menu = view_menu.addMenu("Theme")
@@ -675,6 +677,8 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
         self._restore_window_geometry(restored.window_geometry)
+        self._wheel_value_guard = WheelValueGuard(self)
+        protect_wheel_value_widgets(self, self._wheel_value_guard)
         if settings_warnings:
             self.statusBar().showMessage("; ".join(settings_warnings))
 
@@ -717,7 +721,10 @@ class MainWindow(QMainWindow):
         self.main_vertical_splitter.setSizes([0, max(100, sum(sizes))])
 
     def _restore_safety_panel(self) -> None:
-        self.main_vertical_splitter.setSizes(list(self._last_safety_splitter_sizes))
+        sizes = self._last_safety_splitter_sizes
+        if sizes[0] <= 0:
+            sizes = ApplicationSettings.defaults().safety_splitter_sizes
+        self.main_vertical_splitter.setSizes([max(140, sizes[0]), max(100, sizes[1])])
 
     def _apply_theme(self, theme: str) -> None:
         dark = theme == "dark"
@@ -855,6 +862,9 @@ class MainWindow(QMainWindow):
 
     def _current_settings(self) -> ApplicationSettings:
         snapshot = self._connection_controller.snapshot
+        splitter_sizes = tuple(self.main_vertical_splitter.sizes())
+        if splitter_sizes[0] <= 0:
+            splitter_sizes = self._last_safety_splitter_sizes
         return ApplicationSettings(
             manual_port=snapshot.port_name,
             data_export_directory=str(self._data_directory),
@@ -876,7 +886,7 @@ class MainWindow(QMainWindow):
                 ),
             ),
             theme=("dark" if self.dark_theme_action.isChecked() else "light"),
-            safety_splitter_sizes=tuple(self.main_vertical_splitter.sizes()),
+            safety_splitter_sizes=splitter_sizes,
         )
 
     def _save_persistent_settings(self) -> None:
@@ -907,8 +917,8 @@ class MainWindow(QMainWindow):
             self,
             "Reset Settings to Defaults?",
             "This resets the remembered port, mode, directories, safety limits, "
-            "defaults, window geometry and main plot visibility. It does not modify "
-            "M15B plot-configuration files.",
+            "defaults, window geometry and main plot visibility. Existing raw CSV "
+            "files and external scientific-analysis files are not modified.",
             QMessageBox.StandardButton.Reset | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -954,34 +964,10 @@ class MainWindow(QMainWindow):
             "Simulation is the default. Real Hardware uses only a manually entered COM port. "
             "Independent logging, guarded protocols and scans retain the shared command queue. "
             "Session-local CH1/CH2 safety limits and Emergency All-Off add validation and "
-            "authoritative per-channel OFF reporting. The optional Results / Plotter remains "
-            "offline and cannot control the instrument.\n\n"
+            "authoritative per-channel OFF reporting. This application stores complete raw "
+            "experimental CSV data and live plots; scientific post-processing is external.\n\n"
             f"Settings file:\n{self._settings_store.path if self._settings_store else 'Disabled for this session'}",
         )
-
-    def _open_results_plotter(self) -> None:
-        """Lazily open the optional analysis extension without control coupling."""
-        try:
-            if self._results_plotter_window is None:
-                from qpx_electrolyser.gui.results_plotter import ResultsPlotterWindow
-
-                window = ResultsPlotterWindow(self._data_directory, self)
-                window.destroyed.connect(self._results_plotter_closed)
-                self._results_plotter_window = window
-            self._results_plotter_window.show()
-            self._results_plotter_window.raise_()
-            self._results_plotter_window.activateWindow()
-        except Exception as error:
-            self._results_plotter_window = None
-            QMessageBox.warning(
-                self,
-                "Results / Plotter unavailable",
-                "The optional offline-analysis extension could not be opened. "
-                f"Experiment control is unaffected.\n\n{error}",
-            )
-
-    def _results_plotter_closed(self, *_args) -> None:  # type: ignore[no-untyped-def]
-        self._results_plotter_window = None
 
     def _apply_safety_limits(self, channel: int, limits: SafetyLimits) -> None:
         manual = self.channel_controllers[channel].snapshot

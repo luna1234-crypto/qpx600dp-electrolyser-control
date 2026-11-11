@@ -57,9 +57,7 @@ loss and application shutdown may affect both channels.
 
 `logs/safety_events.csv` is append-only and flushed per event. Its stable fields
 are UTC timestamp, channel, cause, requested action and `OFF_CONFIRMED` or
-`OFF_UNCONFIRMED`. QPX600DP identity serial data is redacted. M15B remains an
-optional offline reader and has no reference to the validator, queue, emergency
-controller or instrument interfaces.
+`OFF_UNCONFIRMED`. QPX600DP identity serial data is redacted.
 
 ## Automated evidence
 
@@ -71,7 +69,7 @@ controller or instrument interfaces.
 - independent per-channel confirmation and disconnect on unconfirmed OFF;
 - protocol cleanup reuse without a second output write;
 - append/flush schema and serial-number redaction;
-- preserved M9-M15 protocol and M15B offline-analysis regressions.
+- preserved M9-M15 protocol regressions.
 
 ## Validation result — 2026-11-05
 

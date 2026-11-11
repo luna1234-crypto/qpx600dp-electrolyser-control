@@ -12,8 +12,8 @@ guarded Real Hardware follow-up, Milestone 10 bounded real-time plots, and
 Milestone 11 independent Constant Voltage protocols with supervised two-channel
 resistor-load acceptance, Milestone 12 independent Voltage Sweep / Staircase LSV,
 Milestone 13 stepped current scans, Milestone 14 steady-state power-supply
-polarisation, Milestone 15 per-channel Custom Sequences, the optional M15B
-offline Results / Plotter, M16 unified safety, M17 safe persistence and the
+polarisation, Milestone 15 per-channel Custom Sequences, M16 unified safety,
+M17 safe persistence and the
 Milestone 18 refined dual-channel operator interface.
 
 All current implementation and every future Milestone 18–20 target the Aim-TTi
@@ -469,36 +469,13 @@ query-free settling period. It adds no boundary Output On/Off command, polling
 loop or CSV writer. Supervised Continuous-handoff acceptance passed; it remains
 operator-supervised resistor-load evidence, not unattended electrolyser approval.
 
-## Milestone 15B Results / Scientific Plotter
+## Control, raw data and live plots
 
-The optional **Tools → Results / Plotter** window performs offline, read-only
-analysis of existing M15 stage-aware raw CSV files. It is clearly labelled
-“Offline analysis — does not control the instrument”, remains usable while
-disconnected, imports multiple immutable source files asynchronously, and has no
-reference to the serial transport, instrument driver, shared queue, channel
-engine, protocol controllers or output transitions. A load, parse, preview or
-export failure is contained inside the window and cannot stop an experiment.
-
-Completed M15 stages produce one processed scientific point only when their
-final uninterrupted RUNNING/Output-ON segment supplies a full continuous
-30-second window. Pause, OFF, Resume, handoff/settling, cleanup and invalid/error
-rows break continuity and are excluded; shorter stages are reported as
-`Insufficient stable 30-second window` rather than silently averaged. The
-processor retains Decimal precision and reports population voltage/current SD,
-time bounds and current density from recorded area or an explicit labelled
-override.
-
-Multiple experiments can be styled and compared on voltage-versus-current or
-voltage-versus-current-density figures with optional voltage-SD error bars.
-Each plot type keeps independent Auto/Manual scientific-axis settings; manual
-ranges and major-tick intervals are validated locally and are shared exactly by
-the preview and PNG/SVG/PDF exports. Legend visibility is independent from its
-placement (Best/Auto, four corners or Outside Right), with Auto selecting the
-least occupied plot corner and outside legends receiving reserved export space.
-Processed CSV, PNG, SVG, PDF, plot configuration and processing metadata exports
-use sanitized exclusive filenames and never overwrite existing output. Old Test
-Bridge import, M14 summary import, GEIS parsing and iR correction remain deferred.
-See [Milestone 15B verification](docs/verification/milestone15b.md).
+This application performs instrument control, safety enforcement, complete raw
+CSV logging and live experiment plotting only. Scientific post-processing is
+external. Existing user CSV, export and plot-configuration files are never
+modified or deleted by this change. The application does not create a reduced
+three-column scientific export.
 
 ## Milestone 5 offline physical backend
 
@@ -659,7 +636,7 @@ visibility. It never stores credentials, instrument identity, confirmation
 tokens, output state or protocol state. Every launch remains **DISCONNECTED**:
 restored Real Hardware mode still requires manual Connect and every existing
 confirmation. **Tools > Reset Settings to Defaults** is guarded by confirmation
-and does not modify M15B plot-configuration files.
+and does not modify raw data or external scientific-analysis files.
 
 ## Milestone 18 refined operator interface
 
@@ -682,27 +659,22 @@ CH2 Constant Voltage Start), retains channel-local validation beside the
 affected panel and remains usable on smaller Windows displays and at 100%, 125%
 and 150% scaling.
 
-M15B now recognises the real M15 final-stage completion schema: a natural child
-`completed` row with `Protocol duration completed` is accepted even when the
-redundant `stage_completed` marker is absent. An operator-stopped stage remains
-rejected, while already completed earlier stages remain valid. Curve visibility,
-colour, marker, marker size, line style/width and display order now have typed
-controls that update preview immediately and round-trip through plot
-configuration files.
-
 M18B adds versioned offline Custom Sequence templates (`*.qpxseq.txt`) with
 Save/Save As/Load/Clear and a validation preview. Every new raw-data run now
 uses an operator-selected, exclusively created CSV path before any hardware
 mutation; Cancel submits no command, Pause/Resume retains the same path and
 companion files share its base name. Only the last directory is remembered.
-M15B includes a sortable/filterable stage Results Table and an explicit option
-to include a deliberately stopped stage only when it contains a complete valid
-final 30-second window; FAILED stages remain excluded. Scientific curves are
-drawn independently with no inter-experiment fill. View > Theme switches the
-operator UI immediately between persistent Light and Dark themes, while
-scientific exports retain their configured white default background. Internal
+View > Theme switches the operator UI immediately between persistent Light and
+Dark themes. Internal
 and CSV identifiers remain `constant_current`/`constant_voltage` and CC/CV.
 This remains two-electrode power-supply control, not potentiostat control.
+
+The final M18 follow-up removes the in-application offline Results / Plotter.
+Live time, Staircase LSV and polarisation plots remain and now support
+right-drag rectangular zoom, nearest-point tooltips and Auto Range / Reset Zoom.
+Mouse-wheel motion over closed selectors and numeric inputs scrolls the
+containing page instead of changing experimental values. Unified Safety always
+starts expanded while restored CH1/CH2 limits are enforced immediately.
 
 Issue 14 gives two guaranteed power-envelope points, 10 V / 50 A and
 80 V / 7.5 A, but no complete mathematical expression for the graph. The
@@ -768,10 +740,9 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | Independent stepped Current Scan | Simulation and supervised CH1/CH2 100-ohm Real Hardware functional acceptance passed; low-current readings are not calibration |
 | Steady-State Polarisation | Simulation and supervised CH1/CH2 100-ohm resistor-load functional acceptance passed; quantitative low-current metrology, electrolyser science and unattended operation remain unapproved |
 | M15 Custom sequence editor | Simulation, guarded fake-serial and supervised Safe-Off/Continuous resistor-load acceptance passed; unattended electrolyser operation unapproved |
-| M15B Results / Scientific Plotter | Optional isolated offline M15 CSV analysis and scientific export implemented; no hardware-control access |
 | M16 Unified safety/emergency system | Simulation/FakeSerial and supervised dual-channel 100-ohm Emergency All-Off acceptance passed; physical USB-disconnection acceptance not performed |
 | M17 configuration persistence | Implemented with versioned atomic per-user settings and safe disconnected restore |
-| M18/M18B UI refinement | Implemented; fixed connection/Emergency header, persisted safety/channel splitter and themes, CP/CA terminology, sequence templates, operator-named exclusive CSVs, stage Results Table and independent no-fill scientific curves |
+| M18/M18B UI refinement | Implemented; fixed connection/Emergency header, safety/channel splitter, themes, CP/CA terminology, sequence templates, operator-named exclusive raw CSVs, wheel-safe inputs and interactive live plots; scientific post-processing is external |
 | M19 Windows packaging | Pending; no packaged executable is claimed |
 | M20 final regression/stress testing | Pending; no 24-hour final-system result is claimed |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |
@@ -797,7 +768,6 @@ not control potential against a reference electrode.
 - [Milestone 13 Current Scan verification](docs/verification/milestone13.md)
 - [Milestone 14 Steady-State Polarisation verification](docs/verification/milestone14.md)
 - [Milestone 15 Custom Sequence verification](docs/verification/milestone15.md)
-- [Milestone 15B Results / Scientific Plotter verification](docs/verification/milestone15b.md)
 - [Milestone 16 Unified Safety verification](docs/verification/milestone16.md)
 - [Milestone 17 Configuration Persistence verification](docs/verification/milestone17.md)
 - [Milestone 18 UI Refinement verification](docs/verification/milestone18.md)

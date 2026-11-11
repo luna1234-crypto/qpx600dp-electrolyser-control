@@ -19,7 +19,7 @@ It migrates schema 0, safely handles missing/corrupt/unsupported configuration,
 rejects invalid and out-of-capability safety values through `SafetyValidator`,
 and falls back without crashing. Off-screen geometry is moved to an available
 screen. Reset Settings to Defaults is default-Cancel, requires a disconnected
-idle application and does not touch M15B plot-configuration files.
+idle application and does not touch raw data or external analysis files.
 
 ## Safety boundary
 
@@ -43,13 +43,13 @@ the operator's settings file.
 - no output/protocol restoration;
 - off-screen window recovery;
 - plot visibility and default area/interval restoration; and
-- confirmed reset without M15B configuration modification.
+- confirmed reset without raw-data modification.
 
 No COM port or physical hardware is required or accessed by this milestone.
 
 ## Validation result — 2026-11-05
 
-- focused persistence and M9-M16/M15B regressions: **46 passed**;
+- focused persistence and M9-M16 regressions: **46 passed**;
 - complete pytest suite: **547 passed**;
 - package, entrypoint and tests `compileall`: passed;
 - `pip check`: no broken requirements;

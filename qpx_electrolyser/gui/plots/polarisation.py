@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGroupBox, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from qpx_electrolyser.engine.polarisation import PolarisationPoint
+from qpx_electrolyser.gui.plots.interaction import DisplayPoint, InteractivePlotCanvas
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +18,8 @@ class PolarisationPlotPoint:
     current_density_a_cm2: float
     mean_voltage_v: float
     step_index: int
+    mean_current_a: float | None = None
+    active_end_s: float | None = None
 
 
 class BoundedPolarisationSeries:
@@ -63,7 +66,11 @@ class PolarisationPlotController(QObject):
         if not isinstance(point, PolarisationPoint) or point.channel != self.channel:
             return
         self.series.append(PolarisationPlotPoint(
-            point.commanded_current_density_a_cm2, point.mean_voltage_v, point.step_index
+            point.commanded_current_density_a_cm2,
+            point.mean_voltage_v,
+            point.step_index,
+            point.mean_current_a,
+            point.active_end_s,
         ))
         self.snapshot = PolarisationPlotSnapshot(
             self.channel, tuple(self.series.points), self.series.total
@@ -77,9 +84,10 @@ class PolarisationPlotController(QObject):
         self.snapshot_changed.emit(self.snapshot)
 
 
-class _Canvas(QWidget):
-    def __init__(self) -> None:
+class _Canvas(InteractivePlotCanvas):
+    def __init__(self, channel: int) -> None:
         super().__init__()
+        self._channel = channel
         self.points: tuple[PolarisationPlotPoint, ...] = ()
         self.setMinimumHeight(150)
 
@@ -102,16 +110,39 @@ class _Canvas(QWidget):
             return
         xs = [p.current_density_a_cm2 for p in self.points]
         ys = [p.mean_voltage_v for p in self.points]
-        min_x, max_x = min(xs), max(xs); min_y, max_y = min(ys), max(ys)
+        full_min_x, full_max_x = min(xs), max(xs)
+        full_min_y, full_max_y = min(ys), max(ys)
+        min_x, max_x, min_y, max_y = self.visible_bounds(
+            full_min_x, full_max_x, full_min_y, full_max_y
+        )
         span_x = max(max_x-min_x, 1e-12); span_y = max(max_y-min_y, 1e-12)
         path = QPainterPath()
+        display_points: list[DisplayPoint] = []
+        painter.save(); painter.setClipRect(area)
         for index, point in enumerate(self.points):
             position = QPointF(
                 area.left() + area.width()*(point.current_density_a_cm2-min_x)/span_x,
                 area.bottom() - area.height()*(point.mean_voltage_v-min_y)/span_y,
             )
             path.lineTo(position) if index else path.moveTo(position)
+            elapsed = (
+                "unavailable" if point.active_end_s is None
+                else f"{point.active_end_s:.6g} s"
+            )
+            current = (
+                "unavailable" if point.mean_current_a is None
+                else f"{point.mean_current_a:.6g} A"
+            )
+            display_points.append(DisplayPoint(
+                position,
+                f"CH{self._channel} | Step {point.step_index}\n"
+                f"Elapsed: {elapsed}\nMeasured voltage: {point.mean_voltage_v:.6g} V\n"
+                f"Measured current: {current}",
+            ))
         painter.setPen(QPen(QColor("#1769aa"), 2)); painter.drawPath(path)
+        painter.restore()
+        self.set_interaction_geometry(area, display_points)
+        self.draw_interaction_overlay(painter)
 
 
 class PolarisationPlotPanel(QGroupBox):
@@ -120,11 +151,14 @@ class PolarisationPlotPanel(QGroupBox):
     def __init__(self, channel: int) -> None:
         super().__init__(f"Channel {channel} Polarisation: mean V vs j")
         self.channel = channel
-        self.canvas = _Canvas()
+        self.canvas = _Canvas(channel)
         self.status = QLabel("Waiting for completed polarisation steps")
         clear = QPushButton("Clear polarisation plot")
         clear.clicked.connect(self.clear_requested)
-        layout = QVBoxLayout(self); layout.addWidget(self.canvas); layout.addWidget(self.status); layout.addWidget(clear)
+        self.reset_zoom_button = QPushButton("Auto Range / Reset Zoom")
+        self.reset_zoom_button.clicked.connect(self.canvas.reset_zoom)
+        layout = QVBoxLayout(self); layout.addWidget(self.canvas); layout.addWidget(self.status)
+        layout.addWidget(self.reset_zoom_button); layout.addWidget(clear)
 
     @Slot(object)
     def apply_snapshot(self, snapshot: object) -> None:

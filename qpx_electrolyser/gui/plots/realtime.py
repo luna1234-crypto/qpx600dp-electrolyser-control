@@ -24,6 +24,7 @@ from qpx_electrolyser.app.connection_controller import (
     ConnectionState,
 )
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback
+from qpx_electrolyser.gui.plots.interaction import DisplayPoint, InteractivePlotCanvas
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +230,7 @@ class ChannelPlotController(QObject):
             self._refresh_timer.start()
 
 
-class _PlotCanvas(QWidget):
+class _PlotCanvas(InteractivePlotCanvas):
     def __init__(self, channel: int) -> None:
         super().__init__()
         self._channel = channel
@@ -259,12 +260,18 @@ class _PlotCanvas(QWidget):
         painter.setPen(QPen(QColor("#777777"), 1))
         painter.drawRect(area)
         points = self._snapshot.points
-        max_time = max((point.elapsed_s for point in points), default=1.0)
-        max_time = max(1.0, max_time)
+        full_max_time = max((point.elapsed_s for point in points), default=1.0)
+        full_max_time = max(1.0, full_max_time)
         max_voltage = max((point.voltage_v for point in points), default=1.0)
         max_current = max((point.current_a for point in points), default=1.0)
         max_voltage = max(1e-9, max_voltage * 1.1)
         max_current = max(1e-9, max_current * 1.1)
+        min_time, max_time, min_voltage, max_voltage = self.visible_bounds(
+            0.0, full_max_time, 0.0, max_voltage
+        )
+        _unused_x0, _unused_x1, min_current, max_current = self.visible_bounds(
+            0.0, full_max_time, 0.0, max_current
+        )
 
         painter.setPen(QColor("#444444"))
         painter.drawText(QRectF(area.left(), area.bottom() + 8, area.width(), 22),
@@ -274,16 +281,44 @@ class _PlotCanvas(QWidget):
         painter.drawText(QRectF(area.right() + 6, area.top(), 56, 22),
                          Qt.AlignmentFlag.AlignLeft, f"{max_current:.3g} A")
         painter.drawText(QRectF(2, area.bottom() - 18, 56, 22),
-                         Qt.AlignmentFlag.AlignRight, "0 V")
+                         Qt.AlignmentFlag.AlignRight, f"{min_voltage:.3g} V")
         painter.drawText(QRectF(area.right() + 6, area.bottom() - 18, 56, 22),
-                         Qt.AlignmentFlag.AlignLeft, "0 A")
+                         Qt.AlignmentFlag.AlignLeft, f"{min_current:.3g} A")
         painter.drawText(QRectF(area.left(), area.bottom() - 2, 80, 20),
-                         Qt.AlignmentFlag.AlignLeft, "0")
+                         Qt.AlignmentFlag.AlignLeft, f"{min_time:.3g}")
         painter.drawText(QRectF(area.right() - 80, area.bottom() - 2, 80, 20),
                          Qt.AlignmentFlag.AlignRight, f"{max_time:.3g}")
 
-        self._draw_trace(painter, area, points, max_time, max_voltage, "voltage")
-        self._draw_trace(painter, area, points, max_time, max_current, "current")
+        painter.save()
+        painter.setClipRect(area)
+        self._draw_trace(
+            painter, area, points, min_time, max_time, min_voltage, max_voltage, "voltage"
+        )
+        self._draw_trace(
+            painter, area, points, min_time, max_time, min_current, max_current, "current"
+        )
+        painter.restore()
+
+        display_points: list[DisplayPoint] = []
+        for point in points:
+            x = area.left() + area.width() * (point.elapsed_s - min_time) / max(
+                max_time - min_time, 1e-12
+            )
+            tooltip = (
+                f"CH{self._channel}\nElapsed: {point.elapsed_s:.6g} s\n"
+                f"Measured voltage: {point.voltage_v:.6g} V\n"
+                f"Measured current: {point.current_a:.6g} A"
+            )
+            for value, lower, upper in (
+                (point.voltage_v, min_voltage, max_voltage),
+                (point.current_a, min_current, max_current),
+            ):
+                y = area.bottom() - area.height() * (value - lower) / max(
+                    upper - lower, 1e-12
+                )
+                display_points.append(DisplayPoint(QPointF(x, y), tooltip))
+        self.set_interaction_geometry(area, display_points)
+        self.draw_interaction_overlay(painter)
 
         legend_y = 5.0
         painter.setPen(QPen(QColor("#1769aa"), 3))
@@ -300,7 +335,9 @@ class _PlotCanvas(QWidget):
         painter: QPainter,
         area: QRectF,
         points: tuple[PlotPoint, ...],
+        min_time: float,
         max_time: float,
+        min_value: float,
         max_value: float,
         field: str,
     ) -> None:
@@ -312,8 +349,12 @@ class _PlotCanvas(QWidget):
         prior_session: int | None = None
         for point in points:
             value = point.voltage_v if field == "voltage" else point.current_a
-            x = area.left() + area.width() * point.elapsed_s / max_time
-            y = area.bottom() - area.height() * value / max_value
+            x = area.left() + area.width() * (point.elapsed_s - min_time) / max(
+                max_time - min_time, 1e-12
+            )
+            y = area.bottom() - area.height() * (value - min_value) / max(
+                max_value - min_value, 1e-12
+            )
             position = QPointF(x, y)
             if prior_session != point.session_id:
                 path.moveTo(position)
@@ -339,11 +380,14 @@ class ChannelPlotPanel(QGroupBox):
         self.clear_button = QPushButton("Clear plot")
         self.clear_button.setObjectName(f"channel{channel}ClearPlot")
         self.clear_button.clicked.connect(self.clear_requested)
+        self.reset_zoom_button = QPushButton("Auto Range / Reset Zoom")
+        self.reset_zoom_button.clicked.connect(self.canvas.reset_zoom)
 
         latest = QHBoxLayout()
         latest.addWidget(self.latest_voltage)
         latest.addWidget(self.latest_current)
         latest.addStretch(1)
+        latest.addWidget(self.reset_zoom_button)
         latest.addWidget(self.clear_button)
         layout = QVBoxLayout(self)
         layout.addWidget(self.canvas, 1)

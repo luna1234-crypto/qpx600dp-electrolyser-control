@@ -13,9 +13,6 @@ QPX 600 DP/
     config/
         README.md
     qpx_electrolyser/
-        analysis/
-            __init__.py
-            m15_results.py
         app/
             __init__.py
             application.py
@@ -41,6 +38,7 @@ QPX 600 DP/
         gui/
             plots/
                 __init__.py
+                interaction.py
                 lsv.py
                 polarisation.py
                 realtime.py
@@ -54,8 +52,8 @@ QPX 600 DP/
             constant_voltage_panel.py
             current_scan_panel.py
             custom_sequence_panel.py
+            input_guard.py
             polarisation_panel.py
-            results_plotter.py
             safety_panel.py
             voltage_scan_panel.py
             main_window.py
@@ -109,7 +107,6 @@ QPX 600 DP/
             milestone13.md
             milestone14.md
             milestone15.md
-            milestone15b.md
             milestone16.md
             milestone17.md
             model_correction_qpx600dp.md
@@ -141,7 +138,7 @@ QPX 600 DP/
         test_custom_sequence.py
         test_hardware_check.py
         test_logging_config.py
-        test_m15_results.py
+        test_m18_final_followup.py
         test_model_identity.py
         test_pyserial_output_diagnostic.py
         test_qpx600dp_driver.py

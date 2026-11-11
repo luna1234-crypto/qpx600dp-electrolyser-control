@@ -97,7 +97,7 @@ independent of the selected transport.
 | ConstantCurrentController, one per channel | Own explicit state, active monotonic time, queue requests, measured results and either a local CSV or an active logger sink | No backend reference, shared-port access, second writer for an active logger or GUI widgets |
 | TestProtocol implementations | Generate planned steps and averaging rules | No GUI, serial handles or wall-clock sleeps |
 | SafetyValidator | Validate full protocol against software and documented hardware capability before Start | No silent clamping or device writes |
-| SettingsStore / ApplicationSettings | Migrate, validate and atomically persist whitelisted user preferences | No connection, backend, output or protocol-state restoration; no M15B configuration ownership |
+| SettingsStore / ApplicationSettings | Migrate, validate and atomically persist whitelisted user preferences | No connection, backend, output or protocol-state restoration |
 | ChannelLoggingController / CsvLogFile, one per channel | Monotonic scheduling through the shared queue; exclusive creation, CSV rows, flush/close and file errors | No direct backend, plot buffer or software diagnostic logging |
 | ChannelPlotController / ChannelPlotPanel, one per channel | Consume existing measurement signals, retain bounded/downsampled display points, coalesce repaints and render voltage/current | No queue submission, backend access, CSV ownership or output control |
 | ConstantVoltageController / panel, one per channel | Specialize the Milestone 9 state machine for target voltage/current limit operation, including guarded real confirmation | No direct backend, extra polling, duplicate CSV writer, automatic retry or reconnect |
@@ -397,29 +397,10 @@ CSV columns record the transition policy and handoff state; transition evidence
 uses `stage_handoff_started`, `stage_handoff_settling` and
 `stage_handoff_completed` without adding a polling loop or a second writer.
 
-M15B is a strictly optional offline-analysis boundary. Qt-independent code under
-`qpx_electrolyser.analysis` opens immutable M15 raw CSV files, validates stage
-metadata, splits continuity at every excluded state and computes the fixed final
-30-second statistics using Decimal values. The presentation module imports only
-that analysis boundary and Qt; it has no dependency on application connection,
-protocol, queue, driver, transport or output-control modules. The main window
-loads it lazily from a non-modal Tools action and contains load failures locally,
-so the experiment-control application remains primary and starts normally when
-the extension is unavailable.
-
-Analysis runs in a dedicated bounded Qt thread pool. Source size is bounded and
-window shutdown drains its local workers without touching experiment workers.
-Preview and PNG/SVG/PDF rendering are Qt-native and consume processed points only;
-they never poll the instrument. Source files are never changed. Processed CSV,
-configuration and processing metadata retain full numeric precision and use
-exclusive sanitized export paths.
-
-`FigureSettings` owns separate validated `AxisSettings` for I–V and j–V plus an
-independent legend-visibility/placement policy. The same immutable plot
-configuration feeds preview and every raster/vector export, so manual ranges,
-major ticks and outside-legend layout cannot diverge between presentation paths.
-Best/Auto legend placement is a bounded point-occupancy calculation over already
-processed coordinates and cannot trigger analysis or backend work.
+Scientific post-processing is outside this control application. Runtime data
+flow ends at complete raw CSV files and bounded live plots. No reduced processed
+export or offline-analysis worker is part of the application, and existing user
+CSV/export/configuration files are never rewritten or deleted.
 
 Keep immutable hardware capabilities separate from user-configured safety limits.
 `QPX600DP_CAPABILITIES` records 80 V, 50 A and 600 W ratings; none is an
@@ -438,8 +419,8 @@ are rejected. Saves flush a same-directory temporary file and replace the target
 atomically. The model contains no credentials, identity, confirmation tokens,
 output state, ownership or protocol state. A restored port/mode only updates the
 DISCONNECTED controller snapshot; it cannot instantiate or connect a backend.
-Main-window geometry is clamped to an available screen. M15B plot configuration
-remains a separate operator-managed file and is never overwritten by reset.
+Main-window geometry is clamped to an available screen. Unknown legacy settings
+keys are ignored, so settings written by older builds remain startup-safe.
 
 Milestone 18 changes composition, not control ownership. `ChannelWorkspace`
 reparents the existing Manual and M9-M15 panels into one `QTabWidget` per
@@ -450,36 +431,30 @@ hosted by checkable `CollapsiblePlotSection` splitters; their existing sample
 signals, bounded stores and zero-polling behavior are unchanged. Tab selection,
 focus and scroll position are never changed by snapshot delivery.
 
-The M15B completion predicate accepts either an explicit `stage_completed`
-event or the natural child-protocol terminal record (`completed`, COMPLETED,
-`Protocol duration completed`). It deliberately rejects the otherwise similar
-`Custom Sequence stopped by operator` terminal record. Offline style widgets
-mutate only `CurveStyle` and repaint processed data; they import no control
-objects.
-
 M18B keeps the fixed connection/Emergency header and places `SafetyPanel` above
-the channel/plot scroll area in a vertical `QSplitter`; M17 persists only its
-sizes and the Light/Dark theme. Theme styles affect operator widgets only:
-scientific exports still render from `FigureSettings` on a white default canvas.
+the channel/plot scroll area in a vertical `QSplitter`; M17 persists its usable
+sizes and the Light/Dark theme. Every session expands Unified Safety while the
+restored independent limits are already active; collapse is display-only.
 `SequenceTemplate` is an offline, versioned JSON document; load uses structural,
 capability and safety validation but cannot acquire a channel. Explicit CSV
 selection is represented by passing a `.csv` path to the existing `CsvLogFile`,
 which still opens with exclusive mode and remains the sole writer. Controllers,
 queue ownership, sampling and guarded Output transitions are unchanged.
 
-The M15B Results Table is another view of immutable `StageResult` objects.
-Natural completions and completed stages preceding Stop remain valid; optional
-PARTIAL inclusion requires a deliberately stopped stage with a full continuous
-30-second window, while FAILED stages can never become accepted. Plot rendering
-sets `NoBrush` before every independent curve path, preventing Qt from implicitly
-closing/filling one experiment or visually joining separate experiments.
+The final M18 input guard consumes wheel events over closed combo boxes and
+numeric spin boxes and moves the containing scroll area instead. It does not
+intercept typing, keyboard navigation, arrow buttons or an open combo popup.
+Live plot canvases consume their existing bounded display snapshots only.
+Right-drag changes a display-only normalized viewport and nearest-point tooltips
+read already-rendered points; neither interaction submits queue work or mutates
+logged data. Auto Range / Reset Zoom restores the full display viewport.
 
 `EmergencyAllOffController` is orchestration, not an instrument owner: it only
 submits through the shared `ConnectionController` queue, reuses protocol Stop and
 guarded Output-Off behavior, and records independent CH1/CH2 outcomes through
 `SafetyEventLog`. The append-only event schema is timestamp, channel, cause,
 requested action and confirmed/unconfirmed final state; identity serial fields
-are redacted. The M15B analysis boundary imports none of these control objects.
+are redacted.
 
 Milestone 9 uses separate Simulation and Real Hardware Constant Current policy
 objects, both 10 V, 5 A, 50 W and at most 24 hours. Simulation permits intervals
@@ -539,8 +514,8 @@ logging acceptance are complete. Milestones 10/11 add live plots and Constant
 Voltage without extra polling or another worker. Milestones 12 and 13 add
 Staircase LSV and Current Scan through the same reusable stepped-scan core. Their
 shared guarded Real Hardware follow-up and supervised resistor-load functional
-acceptance are complete. Milestones 14/15 add polarisation and Custom Sequence;
-M15B is isolated offline analysis. Milestone 16 adds shared per-channel safety
+acceptance are complete. Milestones 14/15 add polarisation and Custom Sequence.
+Milestone 16 adds shared per-channel safety
 limits, event records and independently confirmed global Emergency All-Off.
 Physical Emergency All-Off acceptance remains pending; all work targets QPX600DP.
 Final M20 concurrency/stress testing must extend cancellation, stale-reply,
