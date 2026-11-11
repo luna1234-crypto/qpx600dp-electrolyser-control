@@ -210,8 +210,9 @@ Simulation Mode project policy of 10 V, 5 A, 50 W, 24 hours maximum duration and
 
 Direct-current and current-density entry passed Simulation Mode acceptance on
 both channels, including simultaneous operation, Pause/Resume and CSV metadata.
-Each channel's CP editor also provides a persistent display-only **Dots**
-(default) or **Line + Dots** live-plot style. Styling changes neither measurement
+Each channel's always-visible Live Data plot toolbar provides an independent,
+persistent display-only **Dots** (default) or **Line + Dots** CP curve style.
+The selector stays enabled during a run; styling changes neither measurement
 requests nor CSV data and remains compatible with both Light and Dark themes.
 
 Start confirms the selected output is OFF, sets voltage then current and verifies

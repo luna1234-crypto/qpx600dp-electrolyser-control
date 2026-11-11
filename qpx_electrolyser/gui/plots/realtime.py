@@ -9,6 +9,7 @@ import time
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
+    QComboBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -448,11 +449,26 @@ class ChannelPlotPanel(QGroupBox):
         self.clear_button.clicked.connect(self.clear_requested)
         self.reset_zoom_button = QPushButton("Auto Range / Reset Zoom")
         self.reset_zoom_button.clicked.connect(self.canvas.reset_zoom)
+        self.plot_style_label = QLabel("Plot style")
+        self.plot_style_combo = QComboBox()
+        self.plot_style_combo.setObjectName(f"channel{channel}CpPlotStyle")
+        self.plot_style_combo.addItem("Dots", "dots")
+        self.plot_style_combo.addItem("Line + Dots", "line_dots")
+        self.plot_style_combo.setToolTip(
+            "Display-only CP curve style; sampling and CSV data are unchanged."
+        )
+        self.plot_style_combo.currentIndexChanged.connect(
+            lambda _index: self.canvas.set_trace_style(
+                str(self.plot_style_combo.currentData())
+            )
+        )
 
         latest = QHBoxLayout()
         latest.addWidget(self.latest_voltage)
         latest.addWidget(self.latest_current)
         latest.addStretch(1)
+        latest.addWidget(self.plot_style_label)
+        latest.addWidget(self.plot_style_combo)
         latest.addWidget(self.reset_zoom_button)
         latest.addWidget(self.clear_button)
         layout = QVBoxLayout(self)
@@ -478,4 +494,6 @@ class ChannelPlotPanel(QGroupBox):
         self.canvas.apply_snapshot(value)
 
     def set_cp_plot_style(self, style: str) -> None:
-        self.canvas.set_trace_style(style)
+        index = self.plot_style_combo.findData(style)
+        self.plot_style_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.canvas.set_trace_style(str(self.plot_style_combo.currentData()))

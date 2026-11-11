@@ -22,7 +22,6 @@ class ConstantCurrentPanel(QGroupBox):
     pause_requested = Signal()
     resume_requested = Signal()
     stop_requested = Signal()
-    plot_style_changed = Signal(str)
 
     def __init__(self, channel: int) -> None:
         super().__init__(f"Channel {channel} Chronopotentiometry (CP)")
@@ -49,13 +48,6 @@ class ConstantCurrentPanel(QGroupBox):
         self.voltage_input.setText("2")
         self.duration_input.setText("10")
         self.interval_input.setText("1")
-        self.plot_style = QComboBox()
-        self.plot_style.setObjectName(f"channel{channel}CpPlotStyle")
-        self.plot_style.addItem("Dots", "dots")
-        self.plot_style.addItem("Line + Dots", "line_dots")
-        self.plot_style.setToolTip(
-            "Display-only CP live-plot style; measurements and CSV data are unchanged."
-        )
 
         inputs = QGridLayout()
         self.input_mode_label = QLabel("Current input mode:")
@@ -79,8 +71,6 @@ class ConstantCurrentPanel(QGroupBox):
         inputs.addWidget(self.duration_input, 5, 1)
         inputs.addWidget(QLabel("Interval (s):"), 6, 0)
         inputs.addWidget(self.interval_input, 6, 1)
-        inputs.addWidget(QLabel("CP live plot:"), 7, 0)
-        inputs.addWidget(self.plot_style, 7, 1)
 
         self.start_button = QPushButton("Start")
         self.pause_button = QPushButton("Pause")
@@ -142,15 +132,8 @@ class ConstantCurrentPanel(QGroupBox):
         self.pause_button.clicked.connect(self.pause_requested)
         self.resume_button.clicked.connect(self.resume_requested)
         self.stop_button.clicked.connect(self.stop_requested)
-        self.plot_style.currentIndexChanged.connect(
-            lambda _index: self.plot_style_changed.emit(str(self.plot_style.currentData()))
-        )
         self._current_mode_changed()
         self.apply_snapshot(self._snapshot)
-
-    def set_plot_style(self, style: str) -> None:
-        index = self.plot_style.findData(style)
-        self.plot_style.setCurrentIndex(index if index >= 0 else 0)
 
     def _current_mode_changed(self) -> None:
         density = self.input_mode.currentData() == CurrentInputMode.CURRENT_DENSITY.value
@@ -261,8 +244,6 @@ class ConstantCurrentPanel(QGroupBox):
             self.interval_input,
         ):
             widget.setEnabled(editable)
-        # Plot styling is display-only and remains available during a run.
-        self.plot_style.setEnabled(True)
         self.start_button.setEnabled(
             editable and self._start_validation_message is None
         )

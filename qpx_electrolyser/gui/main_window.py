@@ -284,9 +284,7 @@ class MainWindow(QMainWindow):
                 protocol_widget.resume_button.setProperty("semanticAction", "primary")
                 protocol_widget.stop_button.setProperty("semanticAction", "stop")
             plot_panel = ChannelPlotPanel(channel)
-            protocol_panel.set_plot_style(restored.cp_plot_styles.get(channel, "dots"))
-            plot_panel.set_cp_plot_style(str(protocol_panel.plot_style.currentData()))
-            protocol_panel.plot_style_changed.connect(plot_panel.set_cp_plot_style)
+            plot_panel.set_cp_plot_style(restored.cp_plot_styles.get(channel, "dots"))
             lsv_plot_panel = LsvPlotPanel(channel)
             polarisation_plot_panel = PolarisationPlotPanel(channel)
             panel.refresh_requested.connect(controller.request_refresh)
@@ -1056,7 +1054,7 @@ class MainWindow(QMainWindow):
             theme=("dark" if self.dark_theme_action.isChecked() else "light"),
             safety_splitter_sizes=splitter_sizes,
             cp_plot_styles={
-                channel: str(self.protocol_panels[channel].plot_style.currentData())
+                channel: str(self.plot_panels[channel].plot_style_combo.currentData())
                 for channel in (1, 2)
             },
         )
@@ -1117,7 +1115,7 @@ class MainWindow(QMainWindow):
             self.safety_validator.set_user_limits(channel, limits)
             self.safety_panel.apply_limits(channel, limits)
             self._apply_channel_defaults(channel)
-            self.protocol_panels[channel].set_plot_style(
+            self.plot_panels[channel].set_cp_plot_style(
                 defaults.cp_plot_styles[channel]
             )
             self._update_protocol_context(channel)

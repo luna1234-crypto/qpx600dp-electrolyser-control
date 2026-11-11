@@ -176,14 +176,20 @@ def test_cp_plot_styles_are_independent_persisted_and_applied(
         settings_store=store, settings=loaded,
     )
     try:
-        assert window.protocol_panels[1].plot_style.currentData() == "line_dots"
-        assert window.protocol_panels[2].plot_style.currentData() == "dots"
+        window.show()
+        window.dashboard.show_page("Live Data")
+        qapp.processEvents()
+        assert window.plot_panels[1].plot_style_combo.isVisibleTo(window)
+        assert window.plot_panels[2].plot_style_combo.isVisibleTo(window)
+        assert window.plot_panels[1].plot_style_combo.currentData() == "line_dots"
+        assert window.plot_panels[2].plot_style_combo.currentData() == "dots"
         assert window.plot_panels[1].canvas.trace_style == "line_dots"
         assert window.plot_panels[2].canvas.trace_style == "dots"
-        window.protocol_panels[1].plot_style.setCurrentIndex(0)
+        window.plot_panels[1].plot_style_combo.setCurrentIndex(0)
         qapp.processEvents()
         assert window.plot_panels[1].canvas.trace_style == "dots"
         assert window.plot_panels[2].canvas.trace_style == "dots"
+        assert window.plot_panels[1].plot_style_combo.isEnabled()
         persisted = window._current_settings()
         assert persisted.cp_plot_styles == {1: "dots", 2: "dots"}
     finally:
