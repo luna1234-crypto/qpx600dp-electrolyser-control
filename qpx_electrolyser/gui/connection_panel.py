@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from qpx_electrolyser.app.connection_controller import ConnectionSnapshot, ConnectionState
@@ -41,12 +42,16 @@ class ConnectionPanel(QGroupBox):
     }
 
     def __init__(self) -> None:
-        super().__init__("Instrument connection")
+        super().__init__("")
+        self.setObjectName("commandBarConnection")
+        self.setFlat(True)
         self._applying_snapshot = False
-        self.simulation_checkbox = QRadioButton("Simulation Mode (no hardware I/O)")
+        self.simulation_checkbox = QRadioButton("Simulation")
+        self.simulation_checkbox.setToolTip("Simulation Mode — no hardware I/O")
         self.simulation_checkbox.setObjectName("simulationModeRadio")
         self.simulation_checkbox.setChecked(True)
-        self.real_hardware_radio = QRadioButton("Real Hardware (explicit port, guarded)")
+        self.real_hardware_radio = QRadioButton("Real Hardware")
+        self.real_hardware_radio.setToolTip("Guarded Real Hardware — explicit manual port")
         self.real_hardware_radio.setObjectName("realHardwareModeRadio")
         self._mode_group = QButtonGroup(self)
         self._mode_group.addButton(self.simulation_checkbox)
@@ -79,7 +84,7 @@ class ConnectionPanel(QGroupBox):
         modes.addWidget(self.mode_indicator)
 
         controls = QHBoxLayout()
-        controls.addWidget(QLabel("Manual port:"))
+        controls.addWidget(QLabel("Port:"))
         controls.addWidget(self.port_input, 1)
         controls.addWidget(self.connect_button)
         controls.addWidget(self.disconnect_button)
@@ -91,11 +96,28 @@ class ConnectionPanel(QGroupBox):
         information.addWidget(self.identification_value, 1, 1)
         information.setColumnStretch(1, 1)
 
+        self.advanced_widget = QWidget()
+        self.advanced_widget.setObjectName("advancedConnectionDetails")
+        advanced_layout = QVBoxLayout(self.advanced_widget)
+        advanced_layout.setContentsMargins(0, 4, 0, 0)
+        advanced_layout.addLayout(information)
+        advanced_layout.addWidget(self.detail_label)
+        self.advanced_widget.hide()
+        self.advanced_button = QPushButton("Connection details")
+        self.advanced_button.setObjectName("advancedConnectionButton")
+        self.advanced_button.setCheckable(True)
+        self.advanced_button.toggled.connect(self.advanced_widget.setVisible)
+
         layout = QVBoxLayout(self)
-        layout.addLayout(modes)
-        layout.addLayout(controls)
-        layout.addLayout(information)
-        layout.addWidget(self.detail_label)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        command = QHBoxLayout()
+        command.addLayout(modes)
+        command.addLayout(controls, 1)
+        command.addWidget(self.status_indicator)
+        command.addWidget(self.advanced_button)
+        layout.addLayout(command)
+        layout.addWidget(self.advanced_widget)
 
         self.connect_button.clicked.connect(self.connect_requested)
         self.disconnect_button.clicked.connect(self.disconnect_requested)

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QScrollArea,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -83,6 +84,13 @@ from qpx_electrolyser.gui.constant_voltage_panel import ConstantVoltagePanel
 from qpx_electrolyser.gui.current_scan_panel import CurrentScanPanel
 from qpx_electrolyser.gui.custom_sequence_panel import CustomSequencePanel
 from qpx_electrolyser.gui.input_guard import WheelValueGuard, protect_wheel_value_widgets
+from qpx_electrolyser.gui.operator_dashboard import (
+    ExperimentSelector,
+    LiveDataPage,
+    OperatorDashboard,
+    card,
+    scroll_page,
+)
 from qpx_electrolyser.gui.plots.realtime import ChannelPlotController, ChannelPlotPanel
 from qpx_electrolyser.gui.plots.lsv import LsvPlotController, LsvPlotPanel
 from qpx_electrolyser.gui.plots.polarisation import (
@@ -140,31 +148,23 @@ class MainWindow(QMainWindow):
 
         shell = QWidget()
         shell_layout = QVBoxLayout(shell)
-        shell_layout.setContentsMargins(10, 8, 10, 8)
+        shell_layout.setContentsMargins(12, 8, 12, 8)
         shell_layout.setSpacing(8)
         fixed_header = QWidget()
         fixed_header.setObjectName("alwaysVisibleControlHeader")
         self.always_visible_header = fixed_header
-        initial_mode_colour = (
-            "#075985" if connection_controller.snapshot.simulation_mode else "#7f1d1d"
-        )
-        fixed_header.setStyleSheet(
-            f"#alwaysVisibleControlHeader {{ border: 3px solid {initial_mode_colour}; "
-            "border-radius: 6px; padding: 3px; }}"
-        )
-        header_layout = QVBoxLayout(fixed_header)
-        header_layout.setContentsMargins(8, 4, 8, 4)
-        header_layout.setSpacing(6)
-        root = QWidget()
-        layout = QVBoxLayout(root)
-        layout.setContentsMargins(10, 8, 10, 12)
-        layout.setSpacing(10)
+        fixed_header.setProperty("surface", "commandBar")
+        fixed_header.setProperty("hardwareMode", "simulation")
+        header_layout = QHBoxLayout(fixed_header)
+        header_layout.setContentsMargins(12, 6, 12, 6)
+        header_layout.setSpacing(12)
 
-        title = QLabel("Aim-TTi QPX600DP | Electrolyser testing")
+        title = QLabel("QPX600DP Lab")
         title_font = title.font()
-        title_font.setPointSize(16)
+        title_font.setPointSize(14)
         title_font.setBold(True)
         title.setFont(title_font)
+        title.setObjectName("applicationTitle")
         header_layout.addWidget(title)
 
         self.connection_panel = ConnectionPanel()
@@ -177,13 +177,16 @@ class MainWindow(QMainWindow):
         connection_controller.snapshot_changed.connect(self._apply_connection_snapshot)
         connection_controller.error_reported.connect(self._show_connection_error)
         self.connection_panel.apply_snapshot(connection_controller.snapshot)
-        header_layout.addWidget(self.connection_panel)
+        header_layout.addWidget(self.connection_panel, 1)
 
         self.safety_panel = SafetyPanel(self.safety_validator, show_emergency=False)
         self.safety_panel.limits_changed.connect(self._apply_safety_limits)
         header_layout.addWidget(self.safety_panel.emergency_button)
 
-        logging_row = QHBoxLayout()
+        self.logging_settings_widget = QWidget()
+        self.logging_settings_widget.setObjectName("csvDefaultsPanel")
+        logging_row = QHBoxLayout(self.logging_settings_widget)
+        logging_row.setContentsMargins(0, 0, 0, 0)
         logging_row.addWidget(QLabel("CSV output directory:"))
         self._data_directory = Path(restored.data_export_directory).resolve()
         self.logging_directory_value = QLabel(str(self._data_directory))
@@ -207,7 +210,6 @@ class MainWindow(QMainWindow):
         self.logging_interval.setDecimals(3)
         self.logging_interval.setValue(restored.default_sampling_interval_s)
         logging_row.addWidget(self.logging_interval)
-        header_layout.addLayout(logging_row)
         shell_layout.addWidget(fixed_header)
 
         self.channel_controllers: dict[int, ManualChannelController] = {}
@@ -273,6 +275,14 @@ class MainWindow(QMainWindow):
             current_scan_panel = CurrentScanPanel(channel)
             polarisation_panel = PolarisationPanel(channel)
             sequence_panel = CustomSequencePanel(channel)
+            for protocol_widget in (
+                protocol_panel, voltage_protocol_panel, voltage_scan_panel,
+                current_scan_panel, polarisation_panel, sequence_panel,
+            ):
+                protocol_widget.start_button.setProperty("semanticAction", "primary")
+                protocol_widget.pause_button.setProperty("semanticAction", "pause")
+                protocol_widget.resume_button.setProperty("semanticAction", "primary")
+                protocol_widget.stop_button.setProperty("semanticAction", "stop")
             plot_panel = ChannelPlotPanel(channel)
             lsv_plot_panel = LsvPlotPanel(channel)
             polarisation_plot_panel = PolarisationPlotPanel(channel)
@@ -542,84 +552,182 @@ class MainWindow(QMainWindow):
         self.safety_panel.emergency_requested.connect(self.emergency_controller.request)
         self.emergency_controller.snapshot_changed.connect(self._apply_emergency_snapshot)
 
-        channel_areas = QHBoxLayout()
-        channel_areas.setSpacing(10)
+        # Permanent compact channel summaries live directly below the command bar.
+        summary_row = QHBoxLayout()
+        summary_row.setSpacing(12)
         for channel in (1, 2):
-            workspace = ChannelWorkspace(
-                channel,
-                (
-                    self.channel_panels[channel],
-                    self.protocol_panels[channel],
-                    self.voltage_protocol_panels[channel],
-                    self.voltage_scan_panels[channel],
-                    self.current_scan_panels[channel],
-                    self.polarisation_panels[channel],
-                    self.sequence_panels[channel],
-                ),
-            )
+            workspace = ChannelWorkspace(channel)
             self.channel_workspaces[channel] = workspace
-            channel_areas.addWidget(workspace, 1)
+            summary_row.addWidget(workspace, 1)
             self._update_protocol_context(channel)
-        layout.addLayout(channel_areas)
+        shell_layout.addLayout(summary_row)
 
+        self.dashboard = OperatorDashboard()
+
+        dashboard_body = QWidget()
+        dashboard_layout = QVBoxLayout(dashboard_body)
+        dashboard_layout.setContentsMargins(4, 4, 4, 4)
+        self.safety_summary_card = card(
+            "Safety active",
+            "CH1 and CH2 software limits are loaded and enforced. Detailed limits are "
+            "hidden until explicitly opened; hiding them never disables enforcement.",
+            "Edit Safety",
+            lambda: self._show_safety_editor(),
+        )
+        self.safety_summary_card.setObjectName("safetyActiveSummary")
+        dashboard_layout.addWidget(self.safety_summary_card)
+        dashboard_layout.addWidget(card(
+            "Ready for supervised operation",
+            "Choose Manual Control or Experiments after connecting. Simulation is the "
+            "default. Real Hardware never connects automatically and always uses guarded "
+            "confirmations. This is two-electrode power-supply control, not potentiostat control.",
+        ))
+        dashboard_layout.addStretch(1)
+        self.content_scroll = scroll_page(dashboard_body, "dashboardScroll")
+        self.dashboard.add_page(self.content_scroll)
+
+        manual_body = QWidget()
+        manual_layout = QHBoxLayout(manual_body)
+        manual_layout.setContentsMargins(4, 4, 4, 4)
+        manual_layout.setSpacing(12)
+        for channel in (1, 2):
+            self.channel_panels[channel].setFlat(True)
+            manual_layout.addWidget(self.channel_panels[channel], 1)
+        self.manual_scroll = scroll_page(manual_body, "manualControlScroll")
+        self.dashboard.add_page(self.manual_scroll)
+
+        self.experiment_selector = ExperimentSelector({
+            channel: (
+                self.protocol_panels[channel],
+                self.voltage_protocol_panels[channel],
+                self.voltage_scan_panels[channel],
+                self.current_scan_panels[channel],
+                self.polarisation_panels[channel],
+                self.sequence_panels[channel],
+            )
+            for channel in (1, 2)
+        })
+        self.experiment_selector.selection_changed.connect(
+            self._sync_legacy_experiment_selection
+        )
+        self.dashboard.add_page(self.experiment_selector)
+
+        self.live_data_page = LiveDataPage(self.plot_panels)
+        self.plot_panels[1].canvas.zoom_changed.connect(
+            self.plot_panels[2].canvas.set_horizontal_zoom
+        )
+        self.plot_panels[2].canvas.zoom_changed.connect(
+            self.plot_panels[1].canvas.set_horizontal_zoom
+        )
+        live_tabs = QTabWidget()
+        live_tabs.setObjectName("liveDataPlotTabs")
+        live_tabs.setDocumentMode(True)
+        live_tabs.addTab(self.live_data_page, "Voltage / Current vs Time")
+        lsv_section = CollapsiblePlotSection(
+            "Staircase LSV I–V / j–V plots",
+            (self.lsv_plot_panels[1], self.lsv_plot_panels[2]),
+        )
+        polarisation_section = CollapsiblePlotSection(
+            "Polarisation plots",
+            (self.polarisation_plot_panels[1], self.polarisation_plot_panels[2]),
+        )
+        live_tabs.addTab(lsv_section, "LSV")
+        live_tabs.addTab(polarisation_section, "Polarisation")
+        self.dashboard.add_page(live_tabs)
         self.plot_sections = {
-            "time": CollapsiblePlotSection(
-                "Live voltage/current time plots",
-                (self.plot_panels[1], self.plot_panels[2]),
-            ),
-            "lsv": CollapsiblePlotSection(
-                "Staircase LSV I–V / j–V plots",
-                (self.lsv_plot_panels[1], self.lsv_plot_panels[2]),
-            ),
-            "polarisation": CollapsiblePlotSection(
-                "Polarisation plots",
-                (self.polarisation_plot_panels[1], self.polarisation_plot_panels[2]),
-            ),
+            "time": self.live_data_page,
+            "lsv": lsv_section,
+            "polarisation": polarisation_section,
         }
-        for section in self.plot_sections.values():
-            layout.addWidget(section)
+
+        files_body = QWidget()
+        files_layout = QVBoxLayout(files_body)
+        files_layout.setContentsMargins(4, 4, 4, 4)
+        files_layout.addWidget(card(
+            "Raw CSV files",
+            "Every new run asks for an operator-selected raw CSV path. Files are never "
+            "silently overwritten; Pause/Resume keeps the same writer.",
+        ))
+        files_layout.addWidget(self.logging_settings_widget)
+        sequence_card = card(
+            "Custom Sequence templates",
+            "Save, Save As, Load and Clear validated *.qpxseq.txt templates in the "
+            "Custom Sequence editor. Loading a template never connects or starts output.",
+            "Open Custom Sequence",
+            lambda: self._show_experiment(1, 5),
+        )
+        files_layout.addWidget(sequence_card)
+        files_layout.addStretch(1)
+        self.dashboard.add_page(scroll_page(files_body, "filesTemplatesScroll"))
+
+        settings_body = QWidget()
+        settings_layout = QVBoxLayout(settings_body)
+        settings_layout.setContentsMargins(4, 4, 4, 4)
+        settings_summary = card(
+            "Safety active",
+            "Independent CH1/CH2 limits are restored and enforced immediately. "
+            "The detailed editor starts hidden.",
+            "Edit Safety",
+            lambda: self._toggle_safety_editor(True),
+        )
+        settings_layout.addWidget(settings_summary)
+        self.main_vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.main_vertical_splitter.setObjectName("safetyChannelSplitter")
+        self.main_vertical_splitter.setChildrenCollapsible(True)
+        safety_placeholder = QWidget()
+        placeholder_layout = QVBoxLayout(safety_placeholder)
+        placeholder_layout.setContentsMargins(0, 0, 0, 0)
+        placeholder_layout.addWidget(self.safety_panel)
+        self.main_vertical_splitter.addWidget(safety_placeholder)
+        settings_defaults = QWidget()
+        defaults_layout = QVBoxLayout(settings_defaults)
+        defaults_layout.setContentsMargins(0, 0, 0, 0)
+        defaults_layout.addWidget(card(
+            "Display and defaults",
+            "Theme is available from View → Theme. Connection and protocol state are "
+            "never restored; every session starts disconnected.",
+        ))
+        self.diagnostics_detail = QLabel(
+            f"Application diagnostics: {log_file}\n"
+            f"Append-only safety events: {self.safety_event_log.path}"
+        )
+        self.diagnostics_detail.setObjectName("diagnosticsEventHistory")
+        self.diagnostics_detail.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.diagnostics_detail.setWordWrap(True)
+        self.diagnostics_detail.hide()
+        self.show_diagnostics_button = QPushButton("Diagnostics & event history")
+        self.show_diagnostics_button.setCheckable(True)
+        self.show_diagnostics_button.toggled.connect(self.diagnostics_detail.setVisible)
+        defaults_layout.addWidget(self.show_diagnostics_button)
+        defaults_layout.addWidget(self.diagnostics_detail)
+        self.collapse_safety_button = QPushButton("Hide Safety Editor")
+        self.restore_safety_button = QPushButton("Edit Safety")
+        self.collapse_safety_button.clicked.connect(self._collapse_safety_panel)
+        self.restore_safety_button.clicked.connect(self._restore_safety_panel)
+        button_row = QHBoxLayout()
+        button_row.addWidget(self.collapse_safety_button)
+        button_row.addWidget(self.restore_safety_button)
+        button_row.addStretch(1)
+        defaults_layout.addLayout(button_row)
+        defaults_layout.addStretch(1)
+        self.main_vertical_splitter.addWidget(settings_defaults)
+        self.main_vertical_splitter.setSizes([0, 1])
+        self._last_safety_splitter_sizes = (
+            max(180, restored.safety_splitter_sizes[0]),
+            max(180, restored.safety_splitter_sizes[1]),
+        )
+        settings_layout.addWidget(self.main_vertical_splitter, 1)
+        self.dashboard.add_page(scroll_page(settings_body, "settingsScroll"))
+        shell_layout.addWidget(self.dashboard, 1)
+        self.collapse_safety_button.setEnabled(False)
 
         self._disconnect_pending = False
         self._close_pending = False
         self._allow_close = False
         self._coordination_deadline = 0.0
 
-        notice = QLabel(
-            "Simulation is the default. Real Hardware requires deliberate mode selection, a "
-            "manually entered COM port and explicit Connect; ports are never enumerated. "
-            "This is two-electrode power-supply control, not potentiostat control."
-        )
-        notice.setWordWrap(True)
-        layout.addWidget(notice)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidget(root)
-        self.content_scroll = scroll
-        self.main_vertical_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.main_vertical_splitter.setObjectName("safetyChannelSplitter")
-        self.main_vertical_splitter.setChildrenCollapsible(True)
-        self.main_vertical_splitter.addWidget(self.safety_panel)
-        self.main_vertical_splitter.addWidget(scroll)
-        restored_safety_sizes = restored.safety_splitter_sizes
-        if restored_safety_sizes[0] <= 0:
-            restored_safety_sizes = ApplicationSettings.defaults().safety_splitter_sizes
-        restored_safety_sizes = (
-            max(140, restored_safety_sizes[0]),
-            max(100, restored_safety_sizes[1]),
-        )
-        self.main_vertical_splitter.setSizes(list(restored_safety_sizes))
-        self._last_safety_splitter_sizes = restored_safety_sizes
-        splitter_controls = QHBoxLayout()
-        self.collapse_safety_button = QPushButton("Collapse Safety")
-        self.restore_safety_button = QPushButton("Restore Safety")
-        self.collapse_safety_button.clicked.connect(self._collapse_safety_panel)
-        self.restore_safety_button.clicked.connect(self._restore_safety_panel)
-        splitter_controls.addStretch(1)
-        splitter_controls.addWidget(self.collapse_safety_button)
-        splitter_controls.addWidget(self.restore_safety_button)
-        header_layout.addLayout(splitter_controls)
-        shell_layout.addWidget(self.main_vertical_splitter, 1)
         self.setCentralWidget(shell)
         self.statusBar().showMessage("Disconnected | Simulation available | Diagnostic logging active")
         self.statusBar().setToolTip(str(log_file))
@@ -702,6 +810,26 @@ class MainWindow(QMainWindow):
         if section is not None:
             section.setVisible(visible)
 
+    def _sync_legacy_experiment_selection(self, channel: int, experiment: int) -> None:
+        """Keep compatibility selection state without moving or duplicating editors."""
+        workspace = self.channel_workspaces.get(channel)
+        if workspace is not None:
+            workspace.tabs.setCurrentIndex(experiment + 1)
+
+    def _show_experiment(self, channel: int, experiment: int) -> None:
+        self.dashboard.show_page("Experiments")
+        self.experiment_selector.select(channel, experiment)
+
+    def _show_safety_editor(self) -> None:
+        self.dashboard.show_page("Settings")
+        self._restore_safety_panel()
+
+    def _toggle_safety_editor(self, visible: bool) -> None:
+        if visible:
+            self._restore_safety_panel()
+        else:
+            self._collapse_safety_panel()
+
     def _apply_plot_preferences(self, preferences: PlotDisplayPreferences) -> None:
         self.show_time_plots_action.setChecked(preferences.show_time_plots)
         self.show_lsv_plots_action.setChecked(preferences.show_lsv_plots)
@@ -719,38 +847,71 @@ class MainWindow(QMainWindow):
         if sizes[0] > 0:
             self._last_safety_splitter_sizes = sizes
         self.main_vertical_splitter.setSizes([0, max(100, sum(sizes))])
+        self.collapse_safety_button.setEnabled(False)
+        self.restore_safety_button.setEnabled(True)
 
     def _restore_safety_panel(self) -> None:
         sizes = self._last_safety_splitter_sizes
         if sizes[0] <= 0:
             sizes = ApplicationSettings.defaults().safety_splitter_sizes
         self.main_vertical_splitter.setSizes([max(140, sizes[0]), max(100, sizes[1])])
+        self.collapse_safety_button.setEnabled(True)
+        self.restore_safety_button.setEnabled(False)
 
     def _apply_theme(self, theme: str) -> None:
         dark = theme == "dark"
         self.dark_theme_action.setChecked(dark)
         self.light_theme_action.setChecked(not dark)
         self.setProperty("uiTheme", theme)
-        self.setStyleSheet(
-            "" if not dark else """
-            QMainWindow, QWidget { background-color: #1f242b; color: #eef2f6; }
-            QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox,
-            QListWidget, QTableWidget, QTabWidget::pane, QScrollArea {
-                background-color: #2b313a; color: #f6f8fa; border: 1px solid #596270;
-            }
-            QPushButton { background-color: #39414c; color: #ffffff; border: 1px solid #737e8c;
-                          padding: 4px 8px; border-radius: 3px; }
-            QPushButton:disabled { color: #8f98a4; background-color: #2b3138; }
-            QPushButton:hover { background-color: #4a5563; }
-            QTabBar::tab { background: #313844; color: #eef2f6; padding: 6px 9px; }
-            QTabBar::tab:selected { background: #526174; color: white; }
-            QGroupBox { border: 1px solid #596270; margin-top: 8px; padding-top: 7px; }
-            QGroupBox::title { subcontrol-origin: margin; left: 7px; }
-            QToolTip { color: #ffffff; background: #11151a; border: 1px solid #9da7b3; }
-            QMenuBar, QMenu, QStatusBar { background: #252b33; color: #ffffff; }
-            QHeaderView::section { background: #3a424d; color: #ffffff; padding: 4px; }
-            """
-        )
+        colours = {
+            "window": "#17191f" if dark else "#f5f6f8",
+            "surface": "#22252d" if dark else "#ffffff",
+            "surface2": "#2b2f38" if dark else "#f9fafb",
+            "text": "#f3f4f6" if dark else "#242424",
+            "muted": "#b5bbc5" if dark else "#5f6368",
+            "border": "#454b57" if dark else "#d9dde3",
+            "hover": "#323844" if dark else "#eef3f8",
+        }
+        self.setStyleSheet(f"""
+            * {{ font-family: 'Segoe UI'; font-size: 10pt; }}
+            QMainWindow, QWidget {{ background: {colours['window']}; color: {colours['text']}; }}
+            QWidget#alwaysVisibleControlHeader, QFrame[surface='card'],
+            QGroupBox[surface='card'] {{ background: {colours['surface']};
+                border: 1px solid {colours['border']}; border-radius: 8px; }}
+            QWidget#alwaysVisibleControlHeader {{ border-bottom: 3px solid #0f6cbd; }}
+            QWidget#alwaysVisibleControlHeader[hardwareMode='real'] {{ border-bottom-color: #d13438; }}
+            QLabel#applicationTitle {{ font-size: 14pt; font-weight: 700; }}
+            QLabel[role='sectionTitle'] {{ font-size: 11pt; font-weight: 700; }}
+            QListWidget#primaryNavigation {{ background: {colours['surface']};
+                border: 1px solid {colours['border']}; border-radius: 8px; padding: 4px; }}
+            QListWidget#primaryNavigation::item {{ padding: 10px 12px; border-radius: 5px; }}
+            QListWidget#primaryNavigation::item:selected {{ background: #0f6cbd; color: white; }}
+            QListWidget#primaryNavigation::item:hover:!selected {{ background: {colours['hover']}; }}
+            QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QListWidget,
+            QTableWidget {{ background: {colours['surface']}; color: {colours['text']};
+                border: 1px solid {colours['border']}; border-radius: 4px; padding: 4px; }}
+            QPushButton {{ background: {colours['surface2']}; color: {colours['text']};
+                border: 1px solid {colours['border']}; padding: 6px 10px; border-radius: 4px; }}
+            QPushButton:hover {{ background: {colours['hover']}; }}
+            QPushButton:default {{ background: #0f6cbd; color: white; border-color: #0f6cbd; }}
+            QPushButton[semanticAction='primary']:enabled {{ background: #0f6cbd; color: white;
+                border-color: #0f6cbd; }}
+            QPushButton[semanticAction='pause']:enabled {{ background: #f9e08e; color: #4d3b00;
+                border-color: #c19c00; }}
+            QPushButton[semanticAction='stop']:enabled {{ background: #ca5010; color: white;
+                border-color: #a23b00; }}
+            QPushButton:disabled {{ color: {colours['muted']}; background: {colours['surface2']}; }}
+            QTabWidget::pane {{ border: 1px solid {colours['border']}; background: {colours['surface']}; }}
+            QTabBar::tab {{ background: {colours['surface2']}; padding: 7px 12px; }}
+            QTabBar::tab:selected {{ background: #0f6cbd; color: white; }}
+            QGroupBox {{ border: 0; margin-top: 12px; padding-top: 6px; font-weight: 600; }}
+            QGroupBox::title {{ subcontrol-origin: margin; left: 4px; }}
+            QScrollArea {{ border: 0; background: transparent; }}
+            QMenuBar, QMenu, QStatusBar {{ background: {colours['surface']}; color: {colours['text']}; }}
+            QToolTip {{ color: {colours['text']}; background: {colours['surface']};
+                border: 1px solid {colours['border']}; padding: 4px; }}
+            QSplitter::handle {{ background: {colours['border']}; height: 4px; width: 4px; }}
+        """)
 
     def _save_sequence_template(self, channel: int, save_as: bool) -> None:
         panel = self.sequence_panels[channel]
@@ -947,7 +1108,8 @@ class MainWindow(QMainWindow):
             self._apply_channel_defaults(channel)
             self._update_protocol_context(channel)
         self._apply_plot_preferences(defaults.plot_display)
-        self.main_vertical_splitter.setSizes(list(defaults.safety_splitter_sizes))
+        self._last_safety_splitter_sizes = defaults.safety_splitter_sizes
+        self._collapse_safety_panel()
         self._apply_theme(defaults.theme)
         self._restore_window_geometry(defaults.window_geometry)
         self.statusBar().showMessage(
@@ -2217,6 +2379,13 @@ class MainWindow(QMainWindow):
             stage=stage,
             csv=csv_status,
         )
+        if hasattr(self, "live_data_page"):
+            active_channels = {
+                selected for selected in (1, 2)
+                if self._channel_protocol_owned(selected)
+                or self.logging_controllers[selected].snapshot.active
+            }
+            self.live_data_page.set_active_channels(active_channels)
 
     def _channel_protocol_owned(self, channel: int) -> bool:
         return (
@@ -2296,11 +2465,11 @@ class MainWindow(QMainWindow):
 
     def _apply_connection_snapshot(self, snapshot: ConnectionSnapshot) -> None:
         self.connection_panel.apply_snapshot(snapshot)
-        mode_colour = "#7f1d1d" if not snapshot.simulation_mode else "#075985"
-        self.always_visible_header.setStyleSheet(
-            f"#alwaysVisibleControlHeader {{ border: 3px solid {mode_colour}; "
-            "border-radius: 6px; padding: 3px; }}"
+        self.always_visible_header.setProperty(
+            "hardwareMode", "simulation" if snapshot.simulation_mode else "real"
         )
+        self.always_visible_header.style().unpolish(self.always_visible_header)
+        self.always_visible_header.style().polish(self.always_visible_header)
         for panel in self.channel_panels.values():
             panel.set_real_hardware_mode(not snapshot.simulation_mode)
         for channel in self.protocol_panels:

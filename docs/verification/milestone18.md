@@ -1,19 +1,20 @@
 # Milestone 18 — UI Refinement
 
-## Implemented boundary
+## Final operator dashboard boundary
 
-The control application now keeps connection/mode/status, independent safety
-limits and Emergency All-Off in a fixed, always-visible header. Existing CH1 and
-CH2 widgets are reparented into reusable channel workspaces with compact status
-and seven protocol tabs: Manual, CC, CV, Voltage Scan, Current Scan,
-Polarisation and Custom Sequence. No controller, queue, serial command, logging
-writer, sample flow or exactly-once Output transition was changed.
+The control application keeps application identity, connection/mode/status and
+Emergency All-Off in a fixed command bar. Permanent CH1/CH2 cards remain visible
+while a left rail opens Dashboard, Manual Control, Experiments, Live Data, Files
+& Templates and Settings. Experiments displays exactly one selected
+channel/editor. Existing widgets are reparented; no controller, queue, serial
+command, logging writer, sample flow or exactly-once Output transition changed.
 
-The compact strip shows authoritative Output state, same-readback measured V/I/P,
-CV/CC availability, active protocol/state, scan or sequence stage and CSV path.
-Plot groups are checkable/collapsible and the two channels can be resized with a
-splitter. Mode-coloured header borders distinguish Simulation from Real Hardware;
-Qt-native tabs and layouts retain keyboard navigation and DPI scaling.
+The cards show authoritative Output state, same-readback measured V/I/P, active
+protocol/state, scan or sequence stage and CSV path. Safety enforcement loads
+before connection, but its detailed editor starts hidden behind Edit Safety.
+CH1/CH2 time graphs are vertical, splitter-resizable, share time zoom and retain
+independent Y axes; one active graph may occupy the full area. Qt-native controls
+retain keyboard navigation and DPI scaling.
 
 ## Confirmed defect fixes
 
@@ -87,8 +88,8 @@ regressions.
 - All live time, Staircase LSV and polarisation plots use their existing bounded
   samples for right-drag rectangular zoom and nearest-point tooltips. Auto Range /
   Reset Zoom changes display state only and adds no polling.
-- Persisted independent CH1/CH2 safety limits are active before connection, and
-  Unified Safety starts expanded every session. Collapse remains visibility-only.
+- Persisted independent CH1/CH2 safety limits are active before connection. The
+  detailed editor starts hidden and explicit disclosure/collapse is visibility-only.
 - Scientific post-processing is explicitly external; this application remains
   responsible for control, safety, raw logging and live plotting.
 
@@ -101,3 +102,15 @@ Validation:
 - default-Simulation automated smoke: passed with both outputs OFF, clean
   disconnect and worker shutdown; and
 - `git diff --check`: passed.
+
+## Final dashboard regression scope — 11 November 2026
+
+- six-page navigation and exactly one experiment editor;
+- fixed command bar/Emergency and permanent independent CH1/CH2 cards;
+- Windows-small-screen/DPI-aware geometry, keyboard navigation and wheel guards;
+- hidden-but-active persisted Safety and explicit Edit Safety disclosure;
+- CH1-above-CH2 vertical Live Data layout, synchronised time zoom, independent
+  Y views, local maximise/restore and existing point tooltips;
+- no Results / Scientific Plotter entry or analysis subsystem; unknown legacy
+  settings remain startup-safe; and
+- unchanged raw CSV fields, protocol routes and Simulation behavior.

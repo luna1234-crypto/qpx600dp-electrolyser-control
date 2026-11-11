@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import QRubberBand, QToolTip, QWidget
 
@@ -21,6 +21,7 @@ class InteractivePlotCanvas(QWidget):
 
     POINT_TOLERANCE_PX = 12.0
     MIN_ZOOM_DRAG_PX = 6
+    zoom_changed = Signal(float, float)
 
     def __init__(self) -> None:
         super().__init__()
@@ -43,6 +44,17 @@ class InteractivePlotCanvas(QWidget):
 
     def reset_zoom(self) -> None:
         self._zoom_view = (0.0, 1.0, 0.0, 1.0)
+        self.update()
+        self.zoom_changed.emit(0.0, 1.0)
+
+    def set_horizontal_zoom(self, minimum: float, maximum: float) -> None:
+        """Synchronise time zoom without changing this graph's independent Y view."""
+        if not (0.0 <= minimum < maximum <= 1.0):
+            return
+        _x0, _x1, y0, y1 = self._zoom_view
+        if (minimum, maximum) == (_x0, _x1):
+            return
+        self._zoom_view = (minimum, maximum, y0, y1)
         self.update()
 
     def visible_bounds(
@@ -141,6 +153,7 @@ class InteractivePlotCanvas(QWidget):
         if candidate[1] > candidate[0] and candidate[3] > candidate[2]:
             self._zoom_view = candidate
             self.update()
+            self.zoom_changed.emit(candidate[0], candidate[1])
 
     def _show_nearest_tooltip(self, position: QPointF, global_position) -> None:
         nearest: DisplayPoint | None = None

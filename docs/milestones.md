@@ -654,23 +654,34 @@ See [verification details](verification/milestone17.md).
 ## Milestone 18 - UI refinement
 
 Original roadmap task: refine the operator UI. Implemented for QPX600DP without
-changing protocol semantics: connection/mode/safety/Emergency remain fixed and
-visible, while reusable CH1/CH2 workspaces provide compact status and tabs for
-Manual, CC, CV, Voltage Scan, Current Scan, Polarisation and Custom Sequence.
-Plots are collapsible and splitter-resizable; errors stay channel-local; mode
-styling is visually distinct; normal Qt keyboard navigation and DPI-aware
-layouts support smaller Windows screens and 100/125/150% scaling.
+changing protocol semantics. A fixed command bar retains connection/mode/status
+and Emergency All-Off; permanent CH1/CH2 cards retain authoritative Output,
+V/I/P, protocol/stage and CSV status. A left rail separates Dashboard, Manual,
+Experiments, Live Data, Files & Templates and Settings. Experiments shows only
+one selected channel/editor (CP, CA, Voltage Sweep / LSV, Current Sweep,
+Polarisation or Custom Sequence), eliminating the long page and duplicated
+framing while preserving the original widgets and signal routes.
+
+Safety limits restore and enforce immediately; their editor starts hidden behind
+Edit Safety. Live CH1/CH2 time plots use a draggable vertical splitter, shared
+time zoom, independent Y axes and local maximise/restore. Mouse-wheel guards,
+right-drag zoom, point tooltips, Light/Dark themes, sequence templates and
+operator-selected raw CSVs remain. Segoe UI, semantic colours and DPI-aware Qt
+layouts support keyboard use and Windows 100/125/150% scaling. Offline M15B
+scientific analysis and processed export are removed; scientific post-processing
+is external and existing user files remain untouched.
 
 The known CH2 CV focus/navigation defect is covered by stable tab/focus/scroll
 tests and all CH1/CH2 controller routes retain their established isolation. See
 [verification details](verification/milestone18.md).
 
-M18B completes the refinement with a persisted Safety/channel splitter,
+M18B completes the refinement with a display-only Safety editor splitter,
 Light/Dark operator themes, CP/CA display terminology, versioned Custom Sequence
 templates, and exclusive operator-named CSV files selected before mutation.
 The final follow-up removes in-application scientific post-processing while
 preserving complete raw CSVs. It adds wheel-safe value controls, right-drag zoom,
-nearest-point live-plot tooltips and always-expanded startup safety. Internal
+nearest-point live-plot tooltips and hidden-but-immediately-enforced startup
+safety limits. Internal
 protocol and CSV IDs, instrument state names, controller ownership and guarded
 Output behavior remain unchanged.
 

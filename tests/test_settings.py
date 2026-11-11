@@ -223,7 +223,8 @@ def test_gui_close_saves_and_restart_restores_channel_independence(
         assert second.logging_interval.value() == 2.5
         assert not second.show_time_plots_action.isChecked()
         assert second.dark_theme_action.isChecked()
-        assert second.main_vertical_splitter.sizes()[0] > 0
+        assert second.main_vertical_splitter.sizes()[0] == 0
+        assert second._last_safety_splitter_sizes[0] > 0
     finally:
         second.close(); qapp.processEvents()
         assert second_controller.shutdown(1)

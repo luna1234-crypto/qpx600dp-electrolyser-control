@@ -191,7 +191,7 @@ def test_all_live_plot_canvases_support_zoom_and_point_tooltips(qapp: QApplicati
     time_canvas.close(); lsv_canvas.close(); polar_canvas.close()
 
 
-def test_safety_limits_restore_independently_and_panel_starts_expanded(
+def test_safety_limits_restore_independently_and_editor_starts_hidden(
     qapp: QApplication, tmp_path: Path,
 ) -> None:
     data = tmp_path / "data"; data.mkdir()
@@ -211,10 +211,8 @@ def test_safety_limits_restore_independently_and_panel_starts_expanded(
         assert connection.snapshot.state is ConnectionState.DISCONNECTED
         assert window.safety_validator.user_limits(1) == settings.safety_limits[1]
         assert window.safety_validator.user_limits(2) == settings.safety_limits[2]
-        assert window.main_vertical_splitter.sizes()[0] > 0
-        assert window.safety_panel.isVisibleTo(window)
-        window._collapse_safety_panel()
         assert window.main_vertical_splitter.sizes()[0] == 0
+        assert not window.safety_panel.isVisibleTo(window)
         persisted = window._current_settings()
         assert persisted.safety_splitter_sizes[0] > 0
         assert persisted.safety_limits == settings.safety_limits

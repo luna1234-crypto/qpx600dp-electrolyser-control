@@ -47,16 +47,19 @@ def _window(qapp: QApplication, tmp_path: Path) -> tuple[ConnectionController, M
     return connection, window
 
 
-def test_always_visible_header_channel_tabs_and_collapsible_plots(
+def test_fixed_command_bar_navigation_single_editor_and_live_data(
     qapp: QApplication, tmp_path: Path,
 ) -> None:
     connection, window = _window(qapp, tmp_path)
     try:
-        assert window.safety_panel.parentWidget() is window.main_vertical_splitter
         assert window.safety_panel.emergency_button.parentWidget() is window.always_visible_header
         assert window.connection_panel.parentWidget() is window.always_visible_header
         assert window.always_visible_header.parentWidget() is window.centralWidget()
-        assert window.content_scroll.parentWidget() is window.main_vertical_splitter
+        assert window.dashboard.navigation.count() == 6
+        assert [window.dashboard.navigation.item(index).text() for index in range(6)] == [
+            "Dashboard", "Manual Control", "Experiments", "Live Data",
+            "Files & Templates", "Settings",
+        ]
         for channel in (1, 2):
             workspace = window.channel_workspaces[channel]
             assert workspace.tabs.count() == 7
@@ -64,19 +67,21 @@ def test_always_visible_header_channel_tabs_and_collapsible_plots(
                 "Manual", "Chronopotentiometry (CP)", "Chronoamperometry (CA)", "Voltage Scan", "Current Scan",
                 "Polarisation", "Custom Sequence",
             ]
-        original = window.main_vertical_splitter.sizes()
+        assert window.main_vertical_splitter.sizes()[0] == 0
+        window._show_safety_editor()
+        assert window.dashboard.pages.currentIndex() == 5
+        assert window.main_vertical_splitter.sizes()[0] > 0
         window._collapse_safety_panel()
         assert window.main_vertical_splitter.sizes()[0] == 0
         window._restore_safety_panel()
         assert window.main_vertical_splitter.sizes()[0] > 0
         window._apply_theme("dark")
         assert window.dark_theme_action.isChecked()
-        assert original[1] > 0
-        section = window.plot_sections["time"]
-        section.setChecked(False)
-        assert not section.splitter.isVisible()
-        section.setChecked(True)
-        assert section.splitter.isVisible()
+        assert window.live_data_page.splitter.orientation().name == "Vertical"
+        window._show_experiment(2, 1)
+        assert window.experiment_selector.selected_channel == 2
+        assert window.experiment_selector.selected_experiment == 1
+        assert window.experiment_selector.editor_stack.currentWidget().widget() is window.voltage_protocol_panels[2]
     finally:
         window.close(); connection.shutdown(2)
 
@@ -88,7 +93,7 @@ def test_ch2_cv_start_routes_to_ch2_and_keeps_tab_focus_and_scroll(
     calls: list[tuple[object, ...]] = []
     try:
         workspace = window.channel_workspaces[2]
-        workspace.tabs.setCurrentIndex(2)
+        window._show_experiment(2, 1)
         panel = window.voltage_protocol_panels[2]
         panel.target_voltage_input.setFocus()
         before_scroll = window.content_scroll.verticalScrollBar().value()

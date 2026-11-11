@@ -22,11 +22,12 @@ class ChannelWorkspace(QGroupBox):
         "Polarisation", "Custom Sequence",
     )
 
-    def __init__(self, channel: int, panels: tuple[QWidget, ...]) -> None:
-        super().__init__(f"Channel {channel}")
+    def __init__(self, channel: int, panels: tuple[QWidget, ...] = ()) -> None:
+        super().__init__(f"CH{channel}")
         self.channel = channel
         self.setObjectName(f"channelWorkspace{channel}")
-        self.setMinimumWidth(360)
+        self.setProperty("surface", "card")
+        self.setMinimumWidth(300)
         layout = QVBoxLayout(self)
         status = QWidget()
         status.setObjectName(f"channelCompactStatus{channel}")
@@ -50,11 +51,18 @@ class ChannelWorkspace(QGroupBox):
         self.tabs.setObjectName(f"channelProtocolTabs{channel}")
         self.tabs.setDocumentMode(True)
         self.tabs.setUsesScrollButtons(True)
-        for name, panel in zip(self.TAB_NAMES, panels, strict=True):
-            if isinstance(panel, QGroupBox):
-                panel.setFlat(True)
-            self.tabs.addTab(panel, name)
-        layout.addWidget(self.tabs, 1)
+        if panels:
+            for name, panel in zip(self.TAB_NAMES, panels, strict=True):
+                if isinstance(panel, QGroupBox):
+                    panel.setFlat(True)
+                self.tabs.addTab(panel, name)
+            layout.addWidget(self.tabs, 1)
+        else:
+            # Kept as a compatibility/navigation model; editors live in the
+            # dashboard's single selected-editor stack.
+            for name in self.TAB_NAMES:
+                self.tabs.addTab(QWidget(), name)
+            self.tabs.hide()
 
     def update_status(
         self,
@@ -69,7 +77,7 @@ class ChannelWorkspace(QGroupBox):
     ) -> None:
         self.output_value.setText(f"Output: {output}")
         palette = {
-            "ON": "background:#b42318;color:white;font-weight:800;padding:3px;",
+            "ON": "background:#605e5c;color:white;font-weight:800;padding:3px;",
             "OFF": "background:#067647;color:white;font-weight:800;padding:3px;",
         }
         self.output_value.setStyleSheet(palette.get(output, "font-weight:700;padding:3px;"))

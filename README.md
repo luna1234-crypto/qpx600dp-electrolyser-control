@@ -640,24 +640,23 @@ and does not modify raw data or external scientific-analysis files.
 
 ## Milestone 18 refined operator interface
 
-Connection/mode state and the prominent Emergency All-Off action remain fixed.
-Unified Safety and the two channel workspaces share a persisted, draggable
-vertical splitter with explicit Collapse/Restore controls, reducing whole-page
-scrolling while retaining immediate safety access.
-CH1 and CH2 each use the same compact workspace: an always-visible Output,
-measured V/I/P, CV/CC availability, protocol/stage and CSV status strip plus
-keyboard-navigable tabs for Manual, Chronopotentiometry (CP),
-Chronoamperometry (CA), Voltage Scan, Current Scan,
-Polarisation and Custom Sequence. The original panels and controllers are
-reparented rather than reimplemented, so protocol semantics and signal routes
-are unchanged. Live time, LSV and polarisation plots are independently
-collapsible and use resizable two-channel splitters.
+The final operator shell is a compact Fluent 2-inspired laboratory dashboard.
+Its fixed command bar contains application identity, explicit Simulation/Real
+Hardware mode, manual port, connection state and Emergency All-Off. Permanent
+CH1/CH2 cards show authoritative Output, measured V/I/P, protocol/stage and CSV
+status. A keyboard-accessible left rail opens Dashboard, Manual Control,
+Experiments, Live Data, Files & Templates and Settings. Experiments uses one
+channel selector and one CP/CA/Voltage Sweep/Current Sweep/Polarisation/Custom
+Sequence selector, so only the requested editor is visible. Existing panels and
+controllers are reparented rather than reimplemented; backend state machines,
+queue ownership, raw data and guarded Output transitions are unchanged.
 
-Simulation and Real Hardware are surrounded by distinct mode-coloured header
-borders. The tabbed layout avoids the former long-page focus jump (including
-CH2 Constant Voltage Start), retains channel-local validation beside the
-affected panel and remains usable on smaller Windows displays and at 100%, 125%
-and 150% scaling.
+Safety limits load and enforce immediately, while the detailed editor is hidden
+behind explicit **Edit Safety** disclosure. Hiding it never disables validation
+or hides critical command-bar warnings. Advanced connection details, CSV
+defaults and template tools are similarly disclosed only in their relevant
+pages. The layout uses Segoe UI, neutral cards, semantic status colours and
+DPI-aware Qt layouts for Windows 100%, 125% and 150%.
 
 M18B adds versioned offline Custom Sequence templates (`*.qpxseq.txt`) with
 Save/Save As/Load/Clear and a validation preview. Every new raw-data run now
@@ -669,12 +668,17 @@ Dark themes. Internal
 and CSV identifiers remain `constant_current`/`constant_voltage` and CC/CV.
 This remains two-electrode power-supply control, not potentiostat control.
 
-The final M18 follow-up removes the in-application offline Results / Plotter.
-Live time, Staircase LSV and polarisation plots remain and now support
-right-drag rectangular zoom, nearest-point tooltips and Auto Range / Reset Zoom.
+The final M18 follow-up removes the in-application offline Results / Scientific
+Plotter. Scientific post-processing is external; existing user exports remain
+untouched and unknown legacy settings keys are ignored safely. Live time,
+Staircase LSV and polarisation plots remain. The Live Data page stacks CH1 above
+CH2 in a draggable vertical splitter, synchronises time zoom while retaining
+independent Y axes, and provides per-channel maximise/restore. Right-drag
+rectangular zoom, nearest-point tooltips and Auto Range / Reset Zoom use existing
+samples only and submit no instrument work.
 Mouse-wheel motion over closed selectors and numeric inputs scrolls the
-containing page instead of changing experimental values. Unified Safety always
-starts expanded while restored CH1/CH2 limits are enforced immediately.
+containing page instead of changing experimental values. Keyboard input and an
+open dropdown remain deliberate edit paths.
 
 Issue 14 gives two guaranteed power-envelope points, 10 V / 50 A and
 80 V / 7.5 A, but no complete mathematical expression for the graph. The
@@ -742,7 +746,7 @@ No Qt platform override is applied to ordinary Windows launches. An optional
 | M15 Custom sequence editor | Simulation, guarded fake-serial and supervised Safe-Off/Continuous resistor-load acceptance passed; unattended electrolyser operation unapproved |
 | M16 Unified safety/emergency system | Simulation/FakeSerial and supervised dual-channel 100-ohm Emergency All-Off acceptance passed; physical USB-disconnection acceptance not performed |
 | M17 configuration persistence | Implemented with versioned atomic per-user settings and safe disconnected restore |
-| M18/M18B UI refinement | Implemented; fixed connection/Emergency header, safety/channel splitter, themes, CP/CA terminology, sequence templates, operator-named exclusive raw CSVs, wheel-safe inputs and interactive live plots; scientific post-processing is external |
+| M18/M18B UI refinement | Implemented; compact command bar and navigation dashboard, permanent CH1/CH2 summaries, progressive Safety/advanced details, one experiment editor, stacked/synchronised live plots, themes, CP/CA terminology, templates, operator-named raw CSVs and wheel-safe inputs; scientific post-processing is external |
 | M19 Windows packaging | Pending; no packaged executable is claimed |
 | M20 final regression/stress testing | Pending; no 24-hour final-system result is claimed |
 | Windows and real-hardware validation | Milestone 5 guarded and Milestone 7 GUI standard-load Output-On/Off validation passed on both channels; electrolyser validation remains pending and out of scope |

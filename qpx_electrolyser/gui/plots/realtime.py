@@ -321,11 +321,11 @@ class _PlotCanvas(InteractivePlotCanvas):
         self.draw_interaction_overlay(painter)
 
         legend_y = 5.0
-        painter.setPen(QPen(QColor("#1769aa"), 3))
+        painter.setPen(QPen(QColor("#0f6cbd"), 3))
         painter.drawLine(QPointF(area.left(), legend_y + 6), QPointF(area.left() + 18, legend_y + 6))
         painter.setPen(QColor("#222222"))
         painter.drawText(QRectF(area.left() + 23, legend_y, 100, 18), "Voltage (V)")
-        painter.setPen(QPen(QColor("#c62828"), 3))
+        painter.setPen(QPen(QColor("#ca5010"), 3))
         painter.drawLine(QPointF(area.left() + 120, legend_y + 6), QPointF(area.left() + 138, legend_y + 6))
         painter.setPen(QColor("#222222"))
         painter.drawText(QRectF(area.left() + 143, legend_y, 100, 18), "Current (A)")
@@ -341,7 +341,7 @@ class _PlotCanvas(InteractivePlotCanvas):
         max_value: float,
         field: str,
     ) -> None:
-        pen = QPen(QColor("#1769aa" if field == "voltage" else "#c62828"), 2)
+        pen = QPen(QColor("#0f6cbd" if field == "voltage" else "#ca5010"), 2)
         if field == "current":
             pen.setStyle(Qt.PenStyle.DashLine)
         painter.setPen(pen)

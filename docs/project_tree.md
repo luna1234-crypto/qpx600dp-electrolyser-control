@@ -57,6 +57,7 @@ QPX 600 DP/
             safety_panel.py
             voltage_scan_panel.py
             main_window.py
+            operator_dashboard.py
         instrument/
             __init__.py
             _validation.py
@@ -152,6 +153,7 @@ QPX 600 DP/
         test_simulator.py
         test_ui_refinement.py
         test_m18b_refinement.py
+        test_operator_dashboard.py
     .gitattributes
     .gitignore
     main.py

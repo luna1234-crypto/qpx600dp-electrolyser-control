@@ -1,4 +1,29 @@
-# Windows visual smoke test (milestone 12)
+# Windows visual smoke test
+
+## Final operator dashboard checks (Simulation Mode)
+
+1. Launch disconnected. Confirm the fixed command bar and Emergency All-Off are
+   visible, as are permanent CH1/CH2 Output, V/I/P and protocol summary cards.
+2. Use the left rail to visit Dashboard, Manual Control, Experiments, Live Data,
+   Files & Templates and Settings. Confirm no whole-page protocol wall appears.
+3. In Experiments select each channel and CP, CA, Voltage Sweep / LSV, Current
+   Sweep, Polarisation and Custom Sequence. Confirm exactly one editor is shown,
+   keyboard focus remains local and CH1/CH2 routes remain independent.
+4. Confirm the compact Safety active summary is visible while detailed limits
+   start hidden. Open Edit Safety, verify restored independent values, hide it
+   again and confirm unsafe Start remains blocked with its channel-local message.
+5. Connect the simulator and generate both-channel samples. In Live Data confirm
+   CH1 is above CH2, time zoom synchronises, Y axes remain independent,
+   right-drag zoom and point tooltips work, and maximise/restore is display-only.
+6. With only one channel active, confirm its graph uses the available area. Use
+   Auto Range / Reset Zoom and verify no CSV or protocol state changes.
+7. At Windows 100%, 125% and 150% scaling, and at a 760×540 window, confirm the
+   command bar, Emergency button, navigation and affected channel error remain
+   reachable. Tab through controls without mouse use.
+8. Wheel over closed selectors and spin boxes: the page scrolls and values do not
+   change. Open a dropdown and confirm deliberate selection and keyboard use work.
+9. Confirm Tools has no Results / Scientific Plotter and existing user files are
+   untouched. Scientific post-processing is external.
 
 ## Milestone 15 Continuous Stage Handoff (Simulation Mode)
 
@@ -299,6 +324,7 @@ protocol ownership, confirmation tokens or instrument identity.
     confirm a visible rubber band and region zoom. Click near points and confirm
     tooltips show elapsed time (or explicitly unavailable completed-point time),
     measured V/I and channel/stage where present. Use Auto Range / Reset Zoom.
-12. Collapse Unified Safety, verify validation remains active, then relaunch and
-    confirm the last valid independent CH1/CH2 limits return while Unified Safety
-    starts expanded. Confirm the application remains DISCONNECTED.
+12. Hide the detailed Unified Safety editor, verify validation remains active,
+    then relaunch and confirm the last valid independent CH1/CH2 limits return
+    while the editor starts hidden behind Edit Safety. Confirm the application
+    remains DISCONNECTED.

@@ -422,19 +422,19 @@ DISCONNECTED controller snapshot; it cannot instantiate or connect a backend.
 Main-window geometry is clamped to an available screen. Unknown legacy settings
 keys are ignored, so settings written by older builds remain startup-safe.
 
-Milestone 18 changes composition, not control ownership. `ChannelWorkspace`
-reparents the existing Manual and M9-M15 panels into one `QTabWidget` per
-channel and renders a read-only compact status derived from immutable controller
-snapshots. It does not submit commands. Connection, safety limits and Emergency
-All-Off live in a fixed header outside the protocol scroll area. Plot panels are
-hosted by checkable `CollapsiblePlotSection` splitters; their existing sample
-signals, bounded stores and zero-polling behavior are unchanged. Tab selection,
-focus and scroll position are never changed by snapshot delivery.
+Milestone 18 changes composition, not control ownership. `OperatorDashboard`
+owns navigation and presentation only. It reparents the existing Manual and
+M9-M15 widgets into Manual and single-selected-editor pages; no editor is copied
+and controllers keep their signal routes. `ChannelWorkspace` is a permanent
+read-only summary card derived from immutable snapshots and submits no command.
+Connection/mode/status and Emergency All-Off remain in a fixed command bar.
 
-M18B keeps the fixed connection/Emergency header and places `SafetyPanel` above
-the channel/plot scroll area in a vertical `QSplitter`; M17 persists its usable
-sizes and the Light/Dark theme. Every session expands Unified Safety while the
-restored independent limits are already active; collapse is display-only.
+Detailed `SafetyPanel` editing is progressively disclosed from Dashboard or
+Settings. M17-restored CH1/CH2 limits are active before the editor is shown;
+collapse is display-only. The Files & Templates page exposes raw CSV defaults
+and navigation to the unchanged Custom Sequence template editor. Light/Dark
+theme and safe window geometry remain persisted, while every launch stays
+disconnected.
 `SequenceTemplate` is an offline, versioned JSON document; load uses structural,
 capability and safety validation but cannot acquire a channel. Explicit CSV
 selection is represented by passing a `.csv` path to the existing `CsvLogFile`,
@@ -444,10 +444,18 @@ queue ownership, sampling and guarded Output transitions are unchanged.
 The final M18 input guard consumes wheel events over closed combo boxes and
 numeric spin boxes and moves the containing scroll area instead. It does not
 intercept typing, keyboard navigation, arrow buttons or an open combo popup.
-Live plot canvases consume their existing bounded display snapshots only.
-Right-drag changes a display-only normalized viewport and nearest-point tooltips
-read already-rendered points; neither interaction submits queue work or mutates
-logged data. Auto Range / Reset Zoom restores the full display viewport.
+Live plot canvases consume their existing bounded display snapshots only. CH1 is
+stacked above CH2 in a vertical splitter; normalized X/time zoom is mirrored to
+the peer canvas while each retains its own Y viewport. A single active channel
+may use the full page, and maximise/restore never changes protocol state.
+Right-drag changes a display-only viewport and nearest-point tooltips read
+already-rendered points; neither interaction submits queue work or mutates
+logged data. Auto Range / Reset Zoom restores the full viewport.
+
+The offline M15B scientific Plotter and processed exports are not part of this
+application. Unknown legacy settings keys remain tolerated and user files are
+never inspected or removed. Scientific post-processing belongs to an external
+tool; this application remains control, safety, raw logging and live plotting.
 
 `EmergencyAllOffController` is orchestration, not an instrument owner: it only
 submits through the shared `ConnectionController` queue, reuses protocol Stop and
