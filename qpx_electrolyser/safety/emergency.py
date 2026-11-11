@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from qpx_electrolyser.app.connection_controller import ConnectionController, ConnectionState
 from qpx_electrolyser.instrument.base_power_supply import PowerSupplyInterface
-from qpx_electrolyser.instrument.channel_readback import read_channel
+from qpx_electrolyser.instrument.channel_readback import ChannelReadback, read_channel
 from qpx_electrolyser.instrument.connection_worker import CommandPriority
 from qpx_electrolyser.safety.event_log import SafetyEventLog
 
@@ -21,6 +21,7 @@ class EmergencyChannelResult:
     output_off_write_sent: bool
     confirmed_off: bool
     message: str
+    readback: ChannelReadback | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +152,11 @@ class EmergencyAllOffController(QObject):
                     if readback.output_enabled:
                         raise RuntimeError("Authoritative read-back still reports Output ON.")
                     results.append(EmergencyChannelResult(
-                        channel, write_sent, True, "Output OFF authoritatively confirmed"
+                        channel,
+                        write_sent,
+                        True,
+                        "Output OFF authoritatively confirmed",
+                        readback,
                     ))
                 except Exception as error:
                     results.append(EmergencyChannelResult(

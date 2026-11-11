@@ -39,9 +39,14 @@ class ConnectionSnapshot:
     simulation_mode: bool
     port_name: str
     instrument_id: str | None
-    initial_readbacks: tuple[ChannelReadback, ...]
+    channel_readbacks: tuple[ChannelReadback, ...]
     message: str
     session_id: int = 0
+
+    @property
+    def initial_readbacks(self) -> tuple[ChannelReadback, ...]:
+        """Compatibility alias for the current authoritative session readbacks."""
+        return self.channel_readbacks
 
     @property
     def mode_label(self) -> str:
@@ -67,6 +72,31 @@ class _WorkerSignals(QObject):
 
 
 RealBackendFactory = Callable[[str], PowerSupplyInterface]
+
+
+def _result_channel_readbacks(result: object) -> tuple[ChannelReadback, ...]:
+    """Extract authoritative readbacks returned by one completed queue operation."""
+    found: list[ChannelReadback] = []
+
+    def collect(value: object) -> None:
+        if isinstance(value, ChannelReadback):
+            found.append(value)
+            return
+        if isinstance(value, (tuple, list)):
+            for item in value:
+                collect(item)
+            return
+        readback = getattr(value, "readback", None)
+        if isinstance(readback, ChannelReadback):
+            found.append(readback)
+        readbacks = getattr(value, "readbacks", None)
+        if isinstance(readbacks, (tuple, list)):
+            for item in readbacks:
+                if isinstance(item, ChannelReadback):
+                    found.append(item)
+
+    collect(result)
+    return tuple(found)
 
 
 def _physical_backend(port_name: str) -> PowerSupplyInterface:
@@ -100,12 +130,13 @@ class ConnectionController(QObject):
             simulation_mode=True,
             port_name="",
             instrument_id=None,
-            initial_readbacks=(),
+            channel_readbacks=(),
             message="Simulation Mode ready. No hardware I/O is performed.",
         )
         self._shutting_down = False
         self._session_id = 0
         self._failure_during_disconnect: str | None = None
+        self._command_sessions: dict[int, int] = {}
         self._worker_signals = _WorkerSignals()
         self._worker_signals.connected.connect(
             self._handle_connected, Qt.ConnectionType.QueuedConnection
@@ -151,7 +182,7 @@ class ConnectionController(QObject):
             state=ConnectionState.DISCONNECTED,
             simulation_mode=enabled,
             instrument_id=None,
-            initial_readbacks=(),
+            channel_readbacks=(),
             message=message,
         ))
 
@@ -177,7 +208,7 @@ class ConnectionController(QObject):
             state=ConnectionState.DISCONNECTED,
             port_name=normalized,
             instrument_id=None,
-            initial_readbacks=(),
+            channel_readbacks=(),
             message=message,
         ))
 
@@ -197,7 +228,7 @@ class ConnectionController(QObject):
             self._snapshot,
             state=ConnectionState.CONNECTING,
             instrument_id=None,
-            initial_readbacks=(),
+            channel_readbacks=(),
             message=f"Connecting to {target}; identifying and reading both channels...",
         ))
         if not self._worker.request_connect(session_id=self._session_id + 1):
@@ -210,7 +241,7 @@ class ConnectionController(QObject):
         self._publish(replace(
             self._snapshot,
             state=ConnectionState.DISCONNECTING,
-            initial_readbacks=(),
+            channel_readbacks=(),
             message="Closing the instrument session without changing either output...",
         ))
         if not self._worker.request_disconnect(session_id=self._snapshot.session_id):
@@ -229,7 +260,7 @@ class ConnectionController(QObject):
             self._reject("Connect and initialize the selected instrument before submitting a command.")
             return None
         try:
-            return self._worker.submit(
+            ticket = self._worker.submit(
                 name,
                 operation,
                 priority=priority,
@@ -239,6 +270,8 @@ class ConnectionController(QObject):
                 session_id=self._snapshot.session_id,
                 diagnostic_reason=diagnostic_reason,
             )
+            self._command_sessions[ticket.request_id] = self._snapshot.session_id
+            return ticket
         except (CommandWorkerError, TypeError, ValueError) as error:
             self._reject(str(error))
             return None
@@ -288,7 +321,7 @@ class ConnectionController(QObject):
             self._snapshot,
             state=ConnectionState.CONNECTED,
             instrument_id=result.identification,
-            initial_readbacks=result.readbacks,
+            channel_readbacks=result.readbacks,
             message=f"{target} identified and both channels read successfully.",
             session_id=self._session_id,
         ))
@@ -299,11 +332,12 @@ class ConnectionController(QObject):
             return
         failure = self._failure_during_disconnect
         self._failure_during_disconnect = None
+        self._command_sessions.clear()
         self._publish(replace(
             self._snapshot,
             state=ConnectionState.ERROR if failure else ConnectionState.DISCONNECTED,
             instrument_id=None,
-            initial_readbacks=(),
+            channel_readbacks=(),
             message=failure or "Session closed. Output state is unknown and was not changed.",
         ))
         if failure:
@@ -314,19 +348,35 @@ class ConnectionController(QObject):
         if self._shutting_down:
             return
         self._logger.error("Connection operation failed: operation=%s; message=%s", operation, message)
+        self._command_sessions.clear()
         self._publish(replace(
             self._snapshot,
             state=ConnectionState.ERROR,
             instrument_id=None,
-            initial_readbacks=(),
+            channel_readbacks=(),
             message=message,
         ))
         self.error_reported.emit(message)
 
     @Slot(int, str, object)
     def _handle_command_completed(self, request_id: int, name: str, result: object) -> None:
-        if not self._shutting_down:
-            self.command_completed.emit(request_id, name, result)
+        if self._shutting_down:
+            return
+        command_session = self._command_sessions.pop(request_id, None)
+        if (
+            command_session == self._snapshot.session_id
+            and self._snapshot.state is ConnectionState.CONNECTED
+        ):
+            returned = _result_channel_readbacks(result)
+            if returned:
+                current = {item.channel: item for item in self._snapshot.channel_readbacks}
+                for readback in returned:
+                    current[readback.channel] = readback
+                self._publish(replace(
+                    self._snapshot,
+                    channel_readbacks=tuple(current[channel] for channel in sorted(current)),
+                ))
+        self.command_completed.emit(request_id, name, result)
 
     @Slot(int, str, object)
     def _handle_command_failed(
@@ -334,6 +384,7 @@ class ConnectionController(QObject):
     ) -> None:
         if self._shutting_down:
             return
+        self._command_sessions.pop(request_id, None)
         self._logger.error(
             "Instrument command failed: request_id=%d; name=%s; error=%s",
             request_id,
@@ -349,7 +400,7 @@ class ConnectionController(QObject):
             self._publish(replace(
                 self._snapshot,
                 state=ConnectionState.DISCONNECTING,
-                initial_readbacks=(),
+                channel_readbacks=(),
                 message="Real-hardware command failed; closing the shared session...",
             ))
             if not self._worker.request_disconnect(session_id=self._snapshot.session_id):

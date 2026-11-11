@@ -81,7 +81,7 @@ class ManualChannelController(QObject):
     def request_refresh(self) -> None:
         self._submit(
             "refresh",
-            lambda supply: _display_snapshot(read_channel(supply, self._channel)),
+            lambda supply: read_channel(supply, self._channel),
         )
 
     @Slot(str)
@@ -107,9 +107,9 @@ class ManualChannelController(QObject):
             self._validation_failed(str(error))
             return
 
-        def operation(supply: PowerSupplyInterface) -> ChannelSnapshot:
+        def operation(supply: PowerSupplyInterface) -> ChannelReadback:
             supply.set_voltage(self._channel, voltage)
-            return _display_snapshot(read_channel(supply, self._channel))
+            return read_channel(supply, self._channel)
 
         self._submit("set-voltage", operation)
 
@@ -133,9 +133,9 @@ class ManualChannelController(QObject):
             self._validation_failed(str(error))
             return
 
-        def operation(supply: PowerSupplyInterface) -> ChannelSnapshot:
+        def operation(supply: PowerSupplyInterface) -> ChannelReadback:
             supply.set_current(self._channel, current)
-            return _display_snapshot(read_channel(supply, self._channel))
+            return read_channel(supply, self._channel)
 
         self._submit("set-current", operation)
 
@@ -160,17 +160,17 @@ class ManualChannelController(QObject):
             self._validation_failed(str(error))
             return
 
-        def operation(supply: PowerSupplyInterface) -> ChannelSnapshot:
+        def operation(supply: PowerSupplyInterface) -> ChannelReadback:
             supply.output_on(self._channel)
-            return _display_snapshot(read_channel(supply, self._channel))
+            return read_channel(supply, self._channel)
 
         self._submit("output-on", operation)
 
     @Slot()
     def request_output_off(self) -> None:
-        def operation(supply: PowerSupplyInterface) -> ChannelSnapshot:
+        def operation(supply: PowerSupplyInterface) -> ChannelReadback:
             supply.output_off(self._channel)
-            return _display_snapshot(read_channel(supply, self._channel))
+            return read_channel(supply, self._channel)
 
         self._submit("output-off", operation, priority=CommandPriority.SAFETY)
 
@@ -224,19 +224,19 @@ class ManualChannelController(QObject):
     @Slot(object)
     def _connection_changed(self, snapshot: ConnectionSnapshot) -> None:
         if snapshot.state is ConnectionState.CONNECTED:
-            if not self._snapshot.connected and self._pending_request_id is None:
+            if self._pending_request_id is None:
                 matching = next(
-                    (item for item in snapshot.initial_readbacks if item.channel == self._channel),
+                    (item for item in snapshot.channel_readbacks if item.channel == self._channel),
                     None,
                 )
-                if matching is None:
+                if matching is None and not self._snapshot.connected:
                     self._publish(ChannelSnapshot(
                         channel=self._channel,
                         message="Initial read-back missing",
                         error=True,
                         faulted=True,
                     ))
-                else:
+                elif matching is not None:
                     self._publish(_display_snapshot(matching))
             return
         self._connection.cancel_commands(self._cancellation_key)
@@ -250,10 +250,10 @@ class ManualChannelController(QObject):
         self._pending_request_id = None
         if (
             self._connection.snapshot.state is ConnectionState.CONNECTED
-            and isinstance(result, ChannelSnapshot)
+            and isinstance(result, ChannelReadback)
             and result.channel == self._channel
         ):
-            self._publish(result)
+            self._publish(_display_snapshot(result))
 
     @Slot(int, str, object)
     def _command_failed(self, request_id: int, _name: str, error: BaseException) -> None:

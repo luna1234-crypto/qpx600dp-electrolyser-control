@@ -1983,7 +1983,7 @@ class MainWindow(QMainWindow):
             )
             current_states = ", ".join(
                 f"CH{item.channel}={'ON' if item.output_enabled else 'OFF'}"
-                for item in self._connection_controller.snapshot.initial_readbacks
+                for item in self._connection_controller.snapshot.channel_readbacks
             )
             transition_warning = (
                 "Compatible CC/CV boundaries remain energized during handoff.\n"
@@ -2075,12 +2075,17 @@ class MainWindow(QMainWindow):
             return
         connection = self._connection_controller.snapshot
         manual = self.channel_controllers[channel].snapshot
+        authoritative = next(
+            (item for item in connection.channel_readbacks if item.channel == channel),
+            None,
+        )
         common_available = (
             connection.state.value == "connected"
+            and authoritative is not None
+            and authoritative.output_enabled is False
             and manual.connected
             and not manual.pending
             and not manual.faulted
-            and manual.output_enabled is False
         )
         self.protocol_panels[channel].set_context(
             available=(

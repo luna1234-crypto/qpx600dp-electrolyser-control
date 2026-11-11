@@ -129,7 +129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         fail_smoke_test("Simulation Mode smoke test did not connect in time.")
                     QTimer.singleShot(25, verify_connected_smoke_test)
                     return
-                if len(connection_controller.snapshot.initial_readbacks) != 2:
+                if len(connection_controller.snapshot.channel_readbacks) != 2:
                     fail_smoke_test("Simulation Mode smoke test did not read both channels.")
                 for logger_controller in window.logging_controllers.values():
                     if not logger_controller.start(window.data_directory, 0.1):

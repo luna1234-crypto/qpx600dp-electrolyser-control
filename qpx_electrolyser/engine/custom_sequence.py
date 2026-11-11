@@ -407,7 +407,7 @@ class CustomSequenceController(QObject):
     def _validate_connected_preflight(self) -> None:
         initial = next(
             (
-                item for item in self._connection.snapshot.initial_readbacks
+                item for item in self._connection.snapshot.channel_readbacks
                 if item.channel == self._channel
             ),
             None,
@@ -791,7 +791,7 @@ class CustomSequenceController(QObject):
         assert sink is not None
         range_name = next(
             item.voltage_range_name
-            for item in self._connection.snapshot.initial_readbacks
+            for item in self._connection.snapshot.channel_readbacks
             if item.channel == self._channel
         )
         directory = sink.file_path.parent if sink.file_path is not None else Path.cwd()

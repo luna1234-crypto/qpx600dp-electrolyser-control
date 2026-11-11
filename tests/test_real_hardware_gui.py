@@ -700,7 +700,7 @@ def test_real_resume_quiescence_is_cancelled_by_terminal_or_session_event(
             simulation_mode=False,
             port_name="REDACTED",
             instrument_id=None,
-            initial_readbacks=(),
+            channel_readbacks=(),
             message="test event",
             session_id=7 if event == "disconnect" else 8,
         ))
