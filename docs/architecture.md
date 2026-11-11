@@ -435,6 +435,12 @@ collapse is display-only. The Files & Templates page exposes raw CSV defaults
 and navigation to the unchanged Custom Sequence template editor. Light/Dark
 theme and safe window geometry remain persisted, while every launch stays
 disconnected.
+
+`ModeOptionCard` is a presentation-only `QRadioButton` subclass. It keeps the
+existing button group, mode signals and default-cancel hardware warning, while
+painting a whole-card hit target with a checked indicator, selected-state text,
+focus and disabled states. No mode-card paint or click path creates a backend;
+only the unchanged explicit Connect action can do that.
 `SequenceTemplate` is an offline, versioned JSON document; load uses structural,
 capability and safety validation but cannot acquire a channel. Explicit CSV
 selection is represented by passing a `.csv` path to the existing `CsvLogFile`,
@@ -451,6 +457,9 @@ may use the full page, and maximise/restore never changes protocol state.
 Right-drag changes a display-only viewport and nearest-point tooltips read
 already-rendered points; neither interaction submits queue work or mutates
 logged data. Auto Range / Reset Zoom restores the full viewport.
+The time canvas draws six major positions per axis from its already calculated
+visible bounds. Theme-aware low-contrast gridlines and compact unit-bearing tick
+labels are paint-only; they neither retain new data nor submit queue work.
 
 The offline M15B scientific Plotter and processed exports are not part of this
 application. Unknown legacy settings keys remain tolerated and user files are

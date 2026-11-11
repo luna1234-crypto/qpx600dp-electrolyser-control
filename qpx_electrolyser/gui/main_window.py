@@ -912,6 +912,10 @@ class MainWindow(QMainWindow):
                 border: 1px solid {colours['border']}; padding: 4px; }}
             QSplitter::handle {{ background: {colours['border']}; height: 4px; width: 4px; }}
         """)
+        self.connection_panel.simulation_checkbox.update()
+        self.connection_panel.real_hardware_radio.update()
+        for panel in self.plot_panels.values():
+            panel.canvas.update()
 
     def _save_sequence_template(self, channel: int, save_as: bool) -> None:
         panel = self.sequence_panels[channel]

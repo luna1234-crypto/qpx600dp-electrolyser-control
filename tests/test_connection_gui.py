@@ -8,7 +8,8 @@ import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 import pytest
 
@@ -136,6 +137,60 @@ def test_real_mode_warning_cancel_keeps_simulation_selected(
         assert panel.simulation_checkbox.isChecked()
         assert not panel.real_hardware_radio.isChecked()
         assert panel.connect_button.text() == "Connect Simulator"
+    finally:
+        window.close()
+        assert controller.shutdown(timeout_s=1)
+
+
+def test_mode_cards_are_unmistakable_accessible_and_theme_safe(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = ConnectionController()
+    window = MainWindow(tmp_path / "application.log", controller)
+    window.show(); qapp.processEvents()
+    panel = window.connection_panel
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *args: QMessageBox.StandardButton.Yes
+    )
+    try:
+        simulation = panel.simulation_checkbox
+        hardware = panel.real_hardware_radio
+        for theme in ("light", "dark"):
+            window._apply_theme(theme); qapp.processEvents()
+            assert not simulation.grab().isNull()
+            assert simulation.last_paint_state == {
+                "theme": theme,
+                "selected": True,
+                "accent": "#0f6cbd",
+                "selected_fill": "#e6f2fb" if theme == "light" else "#173a54",
+                "warning_badge": False,
+                "enabled": True,
+            }
+            assert simulation.property("selectedState") == "selected"
+            assert "is selected" in simulation.accessibleDescription()
+            assert hardware.property("selectedState") == "unselected"
+            assert "not selected" in hardware.accessibleDescription()
+
+        # Click the card's far edge, not its circle or label.
+        QTest.mouseClick(
+            hardware, Qt.MouseButton.LeftButton,
+            pos=QPoint(hardware.width() - 4, hardware.height() // 2),
+        )
+        qapp.processEvents()
+        assert hardware.isChecked()
+        assert hardware.property("selectedState") == "selected"
+        assert "Hardware warning" in hardware.accessibleDescription()
+        assert hardware.last_paint_state["accent"] == "#ca5010"
+        assert hardware.last_paint_state["warning_badge"] is True
+        assert "#b42318" not in panel.mode_indicator.styleSheet().lower()
+        assert controller.snapshot.state is ConnectionState.DISCONNECTED
+        assert controller.snapshot.session_id == 0
+
+        hardware.setEnabled(False); qapp.processEvents(); hardware.grab()
+        assert hardware.last_paint_state["enabled"] is False
+        hardware.setEnabled(True)
+        hardware.setFocus(); qapp.processEvents()
+        assert hardware.hasFocus()
     finally:
         window.close()
         assert controller.shutdown(timeout_s=1)

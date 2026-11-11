@@ -19,6 +19,7 @@ from qpx_electrolyser.gui.plots.realtime import (
     ChannelPlotController,
     ChannelPlotPanel,
     PlotPoint,
+    PlotSnapshot,
 )
 from qpx_electrolyser.instrument.channel_readback import ChannelReadback
 
@@ -89,6 +90,44 @@ def test_two_channel_models_are_independent_monotonic_and_renderable(
         assert not panel.grab().isNull()
     finally:
         assert connection.shutdown(1)
+
+
+def test_live_plot_major_grid_ticks_are_sparse_theme_safe_and_scale_readable(
+    qapp: QApplication,
+) -> None:
+    panel = ChannelPlotPanel(1)
+    snapshot = PlotSnapshot(
+        channel=1,
+        points=(
+            PlotPoint(0.0, 0.0, 0.0, 1),
+            PlotPoint(2.5, 1.2345, 0.0567, 1),
+            PlotPoint(5.0, 2.0, 0.1, 1),
+        ),
+        connected=True,
+        latest_voltage_v=2.0,
+        latest_current_a=0.1,
+        total_samples=3,
+    )
+    panel.apply_snapshot(snapshot)
+    panel.show()
+    try:
+        for theme, expected_grid, expected_alpha in (
+            ("light", "#e1e5ea", 255),
+            ("dark", "#aeb7c2", 55),
+        ):
+            panel.setProperty("uiTheme", theme)
+            for size in ((600, 260), (750, 325), (900, 390)):
+                panel.resize(*size); qapp.processEvents()
+                assert not panel.grab().isNull()
+                assert panel.canvas.last_major_tick_counts == (6, 6, 6)
+                assert panel.canvas.last_grid_style == (
+                    theme, expected_grid, expected_alpha
+                )
+        assert panel.canvas._format_tick(1.23456, "s") == "1.23 s"
+        assert panel.canvas._format_tick(0.0, "V") == "0 V"
+        assert panel.canvas._format_tick(0.001234, "A") == "0.00123 A"
+    finally:
+        panel.close()
 
 
 def test_simultaneous_logging_and_protocols_feed_plots_without_extra_pollers(

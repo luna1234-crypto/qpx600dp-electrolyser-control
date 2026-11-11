@@ -24,6 +24,15 @@
    change. Open a dropdown and confirm deliberate selection and keyboard use work.
 9. Confirm Tools has no Results / Scientific Plotter and existing user files are
    untouched. Scientific post-processing is external.
+10. In Light and Dark themes select Simulation and then cancel/accept the guarded
+    Real Hardware mode warning. Confirm the selected card has a white check,
+    selected text and accent border; Real Hardware is amber with a Hardware badge,
+    never red. Click the card edge and use keyboard focus/Space to verify the full
+    card remains accessible. Confirm mode selection alone never connects.
+11. In Live Data confirm each graph has a sparse, subtle major grid and about six
+    compact tick labels for seconds, volts and amps. Check Light/Dark and Windows
+    100%, 125% and 150% scaling for overlap, then repeat zoom/reset/tooltips and
+    confirm no change to CSV sampling or protocol state.
 
 ## Milestone 15 Continuous Stage Handoff (Simulation Mode)
 

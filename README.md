@@ -658,6 +658,12 @@ defaults and template tools are similarly disclosed only in their relevant
 pages. The layout uses Segoe UI, neutral cards, semantic status colours and
 DPI-aware Qt layouts for Windows 100%, 125% and 150%.
 
+The mode selector uses full-card native radio controls: selected Simulation is
+blue and selected Real Hardware is amber with a Hardware badge. Both include a
+white checked indicator, selected-state text and focus/disabled treatment in
+Light and Dark themes. Selecting Real Hardware still only changes mode; it never
+opens a port, connects, or sends a command.
+
 M18B adds versioned offline Custom Sequence templates (`*.qpxseq.txt`) with
 Save/Save As/Load/Clear and a validation preview. Every new raw-data run now
 uses an operator-selected, exclusively created CSV path before any hardware
@@ -676,6 +682,10 @@ CH2 in a draggable vertical splitter, synchronises time zoom while retaining
 independent Y axes, and provides per-channel maximise/restore. Right-drag
 rectangular zoom, nearest-point tooltips and Auto Range / Reset Zoom use existing
 samples only and submit no instrument work.
+Each time graph uses a sparse six-tick major grid with compact seconds, volts and
+amps labels. Grid contrast adapts to Light/Dark themes and remains behind the
+more prominent blue voltage and orange current traces; no minor grid or extra
+sampling is introduced.
 Mouse-wheel motion over closed selectors and numeric inputs scrolls the
 containing page instead of changing experimental values. Keyboard input and an
 open dropdown remain deliberate edit paths.

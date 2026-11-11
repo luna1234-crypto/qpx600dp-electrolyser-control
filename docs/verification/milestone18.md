@@ -114,3 +114,18 @@ Validation:
 - no Results / Scientific Plotter entry or analysis subsystem; unknown legacy
   settings remain startup-safe; and
 - unchanged raw CSV fields, protocol routes and Simulation behavior.
+
+## Mode and live-data readability follow-up
+
+- Simulation and Real Hardware are whole-card native radio choices with explicit
+  check marks, selected-state text, accent borders, keyboard focus and disabled
+  rendering. Simulation uses blue; normal Real Hardware uses amber plus a
+  Hardware badge. Red remains reserved for faults and Emergency All-Off.
+- Selecting Real Hardware retains the existing default-cancel warning and does
+  not connect or send commands. Tests click outside the indicator/label and
+  confirm the entire card remains the deliberate selection target.
+- CH1/CH2 time plots draw six sparse major ticks on elapsed time, voltage and
+  current axes with compact `s`, `V` and `A` labels. Light and Dark grid palettes
+  are low contrast and remain behind blue voltage/orange current traces.
+- Rendering tests exercise Light/Dark themes and 100%, 125% and 150%-equivalent
+  widget sizes without changing sampling, polling, zoom, tooltip or CSV paths.

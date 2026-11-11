@@ -231,10 +231,14 @@ class ChannelPlotController(QObject):
 
 
 class _PlotCanvas(InteractivePlotCanvas):
+    MAJOR_TICK_COUNT = 6
+
     def __init__(self, channel: int) -> None:
         super().__init__()
         self._channel = channel
         self._snapshot = PlotSnapshot(channel=channel)
+        self.last_major_tick_counts = (0, 0, 0)
+        self.last_grid_style = ("light", "#e1e5ea", 255)
         self.setMinimumHeight(220)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -255,10 +259,15 @@ class _PlotCanvas(InteractivePlotCanvas):
             painter.end()
 
     def _draw(self, painter: QPainter) -> None:
-        painter.fillRect(self.rect(), QColor("#ffffff"))
+        dark = self.window().property("uiTheme") == "dark"
+        background = QColor("#20242b" if dark else "#ffffff")
+        axis_colour = QColor("#d1d6de" if dark else "#4a4a4a")
+        grid_colour = QColor(174, 183, 194, 55) if dark else QColor("#e1e5ea")
+        self.last_grid_style = (
+            "dark" if dark else "light", grid_colour.name(), grid_colour.alpha()
+        )
+        painter.fillRect(self.rect(), background)
         area = QRectF(62, 20, max(20, self.width() - 124), max(20, self.height() - 66))
-        painter.setPen(QPen(QColor("#777777"), 1))
-        painter.drawRect(area)
         points = self._snapshot.points
         full_max_time = max((point.elapsed_s for point in points), default=1.0)
         full_max_time = max(1.0, full_max_time)
@@ -273,21 +282,48 @@ class _PlotCanvas(InteractivePlotCanvas):
             0.0, full_max_time, 0.0, max_current
         )
 
-        painter.setPen(QColor("#444444"))
-        painter.drawText(QRectF(area.left(), area.bottom() + 8, area.width(), 22),
-                         Qt.AlignmentFlag.AlignCenter, "Elapsed time (s)")
-        painter.drawText(QRectF(2, area.top(), 56, 22),
-                         Qt.AlignmentFlag.AlignRight, f"{max_voltage:.3g} V")
-        painter.drawText(QRectF(area.right() + 6, area.top(), 56, 22),
-                         Qt.AlignmentFlag.AlignLeft, f"{max_current:.3g} A")
-        painter.drawText(QRectF(2, area.bottom() - 18, 56, 22),
-                         Qt.AlignmentFlag.AlignRight, f"{min_voltage:.3g} V")
-        painter.drawText(QRectF(area.right() + 6, area.bottom() - 18, 56, 22),
-                         Qt.AlignmentFlag.AlignLeft, f"{min_current:.3g} A")
-        painter.drawText(QRectF(area.left(), area.bottom() - 2, 80, 20),
-                         Qt.AlignmentFlag.AlignLeft, f"{min_time:.3g}")
-        painter.drawText(QRectF(area.right() - 80, area.bottom() - 2, 80, 20),
-                         Qt.AlignmentFlag.AlignRight, f"{max_time:.3g}")
+        # One sparse major grid serves time plus both independently scaled Y axes.
+        painter.setPen(QPen(grid_colour, 1))
+        divisions = self.MAJOR_TICK_COUNT - 1
+        for index in range(self.MAJOR_TICK_COUNT):
+            fraction = index / divisions
+            x = area.left() + fraction * area.width()
+            y = area.bottom() - fraction * area.height()
+            painter.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()))
+            painter.drawLine(QPointF(area.left(), y), QPointF(area.right(), y))
+        painter.setPen(QPen(axis_colour, 1))
+        painter.drawRect(area)
+        painter.setPen(axis_colour)
+        for index in range(self.MAJOR_TICK_COUNT):
+            fraction = index / divisions
+            x = area.left() + fraction * area.width()
+            y = area.bottom() - fraction * area.height()
+            elapsed = min_time + fraction * (max_time - min_time)
+            voltage = min_voltage + fraction * (max_voltage - min_voltage)
+            current = min_current + fraction * (max_current - min_current)
+            painter.drawText(
+                QRectF(x - 36, area.bottom() + 2, 72, 17),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                self._format_tick(elapsed, "s"),
+            )
+            painter.drawText(
+                QRectF(0, y - 9, 57, 18),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                self._format_tick(voltage, "V"),
+            )
+            painter.drawText(
+                QRectF(area.right() + 6, y - 9, 57, 18),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                self._format_tick(current, "A"),
+            )
+        self.last_major_tick_counts = (
+            self.MAJOR_TICK_COUNT, self.MAJOR_TICK_COUNT, self.MAJOR_TICK_COUNT
+        )
+        painter.drawText(
+            QRectF(area.left(), area.bottom() + 19, area.width(), 20),
+            Qt.AlignmentFlag.AlignCenter,
+            "Elapsed time (s)",
+        )
 
         painter.save()
         painter.setClipRect(area)
@@ -323,12 +359,18 @@ class _PlotCanvas(InteractivePlotCanvas):
         legend_y = 5.0
         painter.setPen(QPen(QColor("#0f6cbd"), 3))
         painter.drawLine(QPointF(area.left(), legend_y + 6), QPointF(area.left() + 18, legend_y + 6))
-        painter.setPen(QColor("#222222"))
+        painter.setPen(axis_colour)
         painter.drawText(QRectF(area.left() + 23, legend_y, 100, 18), "Voltage (V)")
         painter.setPen(QPen(QColor("#ca5010"), 3))
         painter.drawLine(QPointF(area.left() + 120, legend_y + 6), QPointF(area.left() + 138, legend_y + 6))
-        painter.setPen(QColor("#222222"))
+        painter.setPen(axis_colour)
         painter.drawText(QRectF(area.left() + 143, legend_y, 100, 18), "Current (A)")
+
+    @staticmethod
+    def _format_tick(value: float, unit: str) -> str:
+        if abs(value) < 5e-13:
+            value = 0.0
+        return f"{value:.3g} {unit}"
 
     @staticmethod
     def _draw_trace(
