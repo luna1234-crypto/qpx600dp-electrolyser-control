@@ -55,10 +55,10 @@ def test_fixed_command_bar_navigation_single_editor_and_live_data(
         assert window.safety_panel.emergency_button.parentWidget() is window.always_visible_header
         assert window.connection_panel.parentWidget() is window.always_visible_header
         assert window.always_visible_header.parentWidget() is window.centralWidget()
-        assert window.dashboard.navigation.count() == 6
-        assert [window.dashboard.navigation.item(index).text() for index in range(6)] == [
+        assert window.dashboard.navigation.count() == 7
+        assert [window.dashboard.navigation.item(index).text() for index in range(7)] == [
             "Dashboard", "Manual Control", "Experiments", "Live Data",
-            "Files & Templates", "Settings",
+            "Recorded Results", "Files & Templates", "Settings",
         ]
         for channel in (1, 2):
             workspace = window.channel_workspaces[channel]
@@ -69,7 +69,7 @@ def test_fixed_command_bar_navigation_single_editor_and_live_data(
             ]
         assert window.main_vertical_splitter.sizes()[0] == 0
         window._show_safety_editor()
-        assert window.dashboard.pages.currentIndex() == 5
+        assert window.dashboard.pages.currentIndex() == 6
         assert window.main_vertical_splitter.sizes()[0] > 0
         window._collapse_safety_panel()
         assert window.main_vertical_splitter.sizes()[0] == 0

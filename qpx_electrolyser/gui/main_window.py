@@ -98,6 +98,7 @@ from qpx_electrolyser.gui.plots.polarisation import (
     PolarisationPlotPanel,
 )
 from qpx_electrolyser.gui.polarisation_panel import PolarisationPanel
+from qpx_electrolyser.gui.recorded_results import RecordedResultsPage
 from qpx_electrolyser.gui.safety_panel import SafetyPanel
 from qpx_electrolyser.gui.voltage_scan_panel import VoltageScanPanel
 from qpx_electrolyser.safety.emergency import EmergencyAllOffController, EmergencySnapshot
@@ -640,6 +641,11 @@ class MainWindow(QMainWindow):
             "lsv": lsv_section,
             "polarisation": polarisation_section,
         }
+
+        # Offline-only imported data. This page deliberately receives no connection,
+        # queue, channel, protocol, logger or safety controller reference.
+        self.recorded_results_page = RecordedResultsPage()
+        self.dashboard.add_page(self.recorded_results_page)
 
         files_body = QWidget()
         files_layout = QVBoxLayout(files_body)
@@ -2463,6 +2469,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         if self._allow_close:
+            self.recorded_results_page.shutdown()
             for controller in self.logging_controllers.values():
                 controller.shutdown()
             self._save_persistent_settings()
@@ -2480,6 +2487,7 @@ class MainWindow(QMainWindow):
             return
         for controller in self.logging_controllers.values():
             controller.shutdown()
+        self.recorded_results_page.shutdown()
         self._save_persistent_settings()
         super().closeEvent(event)
 

@@ -26,6 +26,7 @@ NAVIGATION_ITEMS = (
     "Manual Control",
     "Experiments",
     "Live Data",
+    "Recorded Results",
     "Files & Templates",
     "Settings",
 )

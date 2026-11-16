@@ -657,7 +657,7 @@ Original roadmap task: refine the operator UI. Implemented for QPX600DP without
 changing protocol semantics. A fixed command bar retains connection/mode/status
 and Emergency All-Off; permanent CH1/CH2 cards retain authoritative Output,
 V/I/P, protocol/stage and CSV status. A left rail separates Dashboard, Manual,
-Experiments, Live Data, Files & Templates and Settings. Experiments shows only
+Experiments, Live Data, Recorded Results, Files & Templates and Settings. Experiments shows only
 one selected channel/editor (CP, CA, Voltage Sweep / LSV, Current Sweep,
 Polarisation or Custom Sequence), eliminating the long page and duplicated
 framing while preserving the original widgets and signal routes.
@@ -684,6 +684,13 @@ nearest-point live-plot tooltips and hidden-but-immediately-enforced startup
 safety limits. Internal
 protocol and CSV IDs, instrument state names, controller ownership and guarded
 Output behavior remain unchanged.
+
+A subsequent offline recorded-data viewer adds read-only visualization of
+existing QPX600DP Raw CSV and exact three-column Readable CSV files. It reuses
+the interactive live-plot layer for time, V–I and metadata-gated j–V views,
+operates while disconnected, and has no serial, queue, protocol, output-control
+or live-measurement dependency. This is not a restoration of M15B scientific
+processing: it performs no averaging or processed-data export.
 
 ## Milestone 19 - Windows packaging
 

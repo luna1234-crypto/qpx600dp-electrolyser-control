@@ -112,6 +112,7 @@ class InteractivePlotCanvas(QWidget):
             )
             event.accept()
             return
+        self._show_nearest_tooltip(event.position(), event.globalPosition().toPoint())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # type: ignore[no-untyped-def]

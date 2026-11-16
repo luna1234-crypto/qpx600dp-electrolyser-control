@@ -237,6 +237,7 @@ class _PlotCanvas(InteractivePlotCanvas):
     def __init__(self, channel: int) -> None:
         super().__init__()
         self._channel = channel
+        self._channel_label = f"CH{channel}" if channel in (1, 2) else "Recorded data"
         self._snapshot = PlotSnapshot(channel=channel)
         self.last_major_tick_counts = (0, 0, 0)
         self.last_grid_style = ("light", "#e1e5ea", 255)
@@ -256,6 +257,11 @@ class _PlotCanvas(InteractivePlotCanvas):
         if style not in {"dots", "line_dots"}:
             raise ValueError("CP plot style must be 'dots' or 'line_dots'")
         self._trace_style = style
+        self.update()
+
+    def set_channel_label(self, label: str) -> None:
+        """Set tooltip identity for an offline data source without changing samples."""
+        self._channel_label = str(label).strip() or "Recorded data"
         self.update()
 
     def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]
@@ -355,7 +361,7 @@ class _PlotCanvas(InteractivePlotCanvas):
                 max_time - min_time, 1e-12
             )
             tooltip = (
-                f"CH{self._channel}\nElapsed: {point.elapsed_s:.6g} s\n"
+                f"{self._channel_label}\nElapsed: {point.elapsed_s:.6g} s\n"
                 f"Measured voltage: {point.voltage_v:.6g} V\n"
                 f"Measured current: {point.current_a:.6g} A"
             )

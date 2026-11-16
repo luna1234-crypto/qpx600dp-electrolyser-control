@@ -34,7 +34,10 @@ def test_navigation_summary_cards_and_scaling_safe_geometry(
 ) -> None:
     connection, window = _window(tmp_path)
     try:
-        assert tuple(window.dashboard.navigation.item(i).text() for i in range(6)) == NAVIGATION_ITEMS
+        assert tuple(
+            window.dashboard.navigation.item(i).text()
+            for i in range(window.dashboard.navigation.count())
+        ) == NAVIGATION_ITEMS
         assert window.experiment_selector.experiment_selector.count() == len(EXPERIMENT_ITEMS)
         assert window.channel_workspaces[1].isVisibleTo(window)
         assert window.channel_workspaces[2].isVisibleTo(window)

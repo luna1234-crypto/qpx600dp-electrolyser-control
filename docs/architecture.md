@@ -429,6 +429,16 @@ and controllers keep their signal routes. `ChannelWorkspace` is a permanent
 read-only summary card derived from immutable snapshots and submits no command.
 Connection/mode/status and Emergency All-Off remain in a fixed command bar.
 
+`RecordedResultsPage` is an offline presentation boundary. Its Qt-independent
+`recorded_data` parser reads only operator-selected Raw or exact three-column
+Readable CSV files into immutable imported-data models. A dedicated import
+thread pool prevents file parsing from blocking live control. The page is not
+constructed with a connection, command queue, channel/protocol controller,
+logger or safety transition, and it never subscribes to live measurement
+signals. Time views reuse the live `_PlotCanvas`; V–I and optional j–V views
+reuse the same `InteractivePlotCanvas` zoom/tooltip layer. Rendering is bounded
+to representative display points while the parsed model remains unchanged.
+
 Detailed `SafetyPanel` editing is progressively disclosed from Dashboard or
 Settings. M17-restored CH1/CH2 limits are active before the editor is shown;
 collapse is display-only. The Files & Templates page exposes raw CSV defaults
@@ -464,7 +474,8 @@ labels are paint-only; they neither retain new data nor submit queue work.
 The offline M15B scientific Plotter and processed exports are not part of this
 application. Unknown legacy settings keys remain tolerated and user files are
 never inspected or removed. Scientific post-processing belongs to an external
-tool; this application remains control, safety, raw logging and live plotting.
+tool. The Recorded Results page is visualization-only: it does not calculate
+accepted scientific points or write processed exports.
 
 `EmergencyAllOffController` is orchestration, not an instrument owner: it only
 submits through the shared `ConnectionController` queue, reuses protocol Stop and

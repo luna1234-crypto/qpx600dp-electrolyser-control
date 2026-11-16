@@ -5,7 +5,7 @@
 1. Launch disconnected. Confirm the fixed command bar and Emergency All-Off are
    visible, as are permanent CH1/CH2 Output, V/I/P and protocol summary cards.
 2. Use the left rail to visit Dashboard, Manual Control, Experiments, Live Data,
-   Files & Templates and Settings. Confirm no whole-page protocol wall appears.
+   Recorded Results, Files & Templates and Settings. Confirm no whole-page protocol wall appears.
 3. In Experiments select each channel and CP, CA, Voltage Sweep / LSV, Current
    Sweep, Polarisation and Custom Sequence. Confirm exactly one editor is shown,
    keyboard focus remains local and CH1/CH2 routes remain independent.
@@ -33,6 +33,12 @@
     compact tick labels for seconds, volts and amps. Check Light/Dark and Windows
     100%, 125% and 150% scaling for overlap, then repeat zoom/reset/tooltips and
     confirm no change to CSV sampling or protocol state.
+12. While disconnected, open Recorded Results and import one Raw CSV and one
+    exact three-column Readable CSV. Confirm metadata is shown only for Raw data,
+    switch between time and V–I, and confirm j–V appears only when valid area
+    metadata exists. Exercise Dots/Line + Dots, right-drag zoom, point readout,
+    Auto Range and Reset Zoom. Repeat while a simulator protocol runs and verify
+    its timing, live plot, logging and Output state are unaffected.
 
 ## Milestone 15 Continuous Stage Handoff (Simulation Mode)
 

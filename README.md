@@ -652,7 +652,7 @@ Its fixed command bar contains application identity, explicit Simulation/Real
 Hardware mode, manual port, connection state and Emergency All-Off. Permanent
 CH1/CH2 cards show authoritative Output, measured V/I/P, protocol/stage and CSV
 status. A keyboard-accessible left rail opens Dashboard, Manual Control,
-Experiments, Live Data, Files & Templates and Settings. Experiments uses one
+Experiments, Live Data, Recorded Results, Files & Templates and Settings. Experiments uses one
 channel selector and one CP/CA/Voltage Sweep/Current Sweep/Polarisation/Custom
 Sequence selector, so only the requested editor is visible. Existing panels and
 controllers are reparented rather than reimplemented; backend state machines,
@@ -690,6 +690,15 @@ CH2 in a draggable vertical splitter, synchronises time zoom while retaining
 independent Y axes, and provides per-channel maximise/restore. Right-drag
 rectangular zoom, nearest-point tooltips and Auto Range / Reset Zoom use existing
 samples only and submit no instrument work.
+
+The later **Recorded Results** page is deliberately narrower than the removed
+scientific Plotter: it is a read-only viewer for existing QPX600DP Raw CSVs and
+the exact three-column Readable CSV format. It validates files in an isolated
+worker, detects Raw channel/protocol/stage/area metadata, and reuses the live
+plot interaction layer for time, V–I and (only with recorded area) j–V views.
+It does not average, transform, export or modify data and owns no connection,
+serial, queue, protocol, logger or output-control object. Import failures remain
+local and the viewer is available while disconnected or while an experiment runs.
 Each time graph uses a sparse six-tick major grid with compact seconds, volts and
 amps labels. Grid contrast adapts to Light/Dark themes and remains behind the
 more prominent blue voltage and orange current traces; no minor grid or extra

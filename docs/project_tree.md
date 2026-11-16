@@ -22,6 +22,7 @@ QPX 600 DP/
             paths.py
             settings.py
         data/
+            recorded_data.py
             sequence_templates.py
             __init__.py
             csv_logging.py
@@ -54,6 +55,7 @@ QPX 600 DP/
             custom_sequence_panel.py
             input_guard.py
             polarisation_panel.py
+            recorded_results.py
             safety_panel.py
             voltage_scan_panel.py
             main_window.py
@@ -147,6 +149,7 @@ QPX 600 DP/
         test_real_hardware_scans.py
         test_remote_output_diagnostic.py
         test_realtime_plot.py
+        test_recorded_results.py
         test_serial_transport.py
         test_safety.py
         test_settings.py
