@@ -129,3 +129,34 @@ Validation:
   are low contrast and remain behind blue voltage/orange current traces.
 - Rendering tests exercise Light/Dark themes and 100%, 125% and 150%-equivalent
   widget sizes without changing sampling, polling, zoom, tooltip or CSV paths.
+
+## Recorded Results and paired CSV round-trip — 17 November 2026
+
+- Every run creates a matching exclusive `<base>_raw.csv` and
+  `<base>_readable.csv` pair. Pause/Resume continues the same pair.
+- Raw CSV remains the complete archival record, including the established
+  traceability, protocol, stage, status and error fields.
+- Readable CSV contains exactly numeric elapsed time, measured voltage and
+  measured current for convenient Excel or external Flowcell Plotter use. No
+  separate Flowcell Plotter compatibility acceptance is claimed.
+- Recorded Results is an optional manual, offline import workflow. Protocol-aware
+  Raw import supports CP, CA, scans, Polarisation and Custom Sequence metadata.
+  Compatible same-base Polarisation summary companions provide completed-step
+  means with recorded voltage-SD error bars; Custom Sequence stage metadata
+  provides time-plot boundaries.
+- Missing metadata or a missing/incompatible companion leaves valid basic plots
+  available with a local explanation. Exact three-column Readable imports offer
+  generic Time and V–I plots only.
+- Import owns no serial transport, instrument driver, shared queue, protocol
+  controller or output-control path and remains isolated from live operation.
+
+Automated validation for the recorded-data round-trip implementation:
+
+- focused Recorded Results suite: **18 passed**;
+- complete pytest suite: **587 passed**;
+- package, entrypoint and tests `compileall`: passed; and
+- `git diff --check`: passed.
+
+These results verify the automated round-trip and isolation behavior. A full
+manual Recorded Results acceptance and Flowcell Plotter compatibility validation
+have not been recorded.

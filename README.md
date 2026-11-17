@@ -96,11 +96,14 @@ either channel or both. Every complete measurement request runs at background
 priority through the shared command queue; logging and GUI code never call a
 backend directly and never change an instrument setting or output state.
 
-Before a run, one operator-selected base name creates an exclusive pair:
+Every run uses one operator-selected base name to create an exclusive matching
+pair:
 `<base>_raw.csv` retains the complete established traceability schema unchanged,
 while `<base>_readable.csv` contains only numeric active elapsed time, measured
-voltage and measured current. Existing files are never overwritten. Rows are
-flushed immediately. Pause/Resume keeps the same pair; Stop, disconnect,
+voltage and measured current for convenient use in Excel or the external
+Flowcell Plotter workflow. This describes the file purpose, not separately
+verified Flowcell Plotter compatibility. Existing files are never overwritten.
+Rows are flushed immediately. Pause/Resume keeps the same pair; Stop, disconnect,
 application shutdown or an error closes both deterministically. A readable-file
 failure follows the existing safe logging-failure cleanup.
 
@@ -705,6 +708,9 @@ and is explained beside the retained basic plots. The viewer does not calculate
 new averages, export or modify data and owns no connection,
 serial, queue, protocol, logger or output-control object. Import failures remain
 local and the viewer is available while disconnected or while an experiment runs.
+Readable imports intentionally expose generic Time and V–I plots only. Recorded
+Results is an optional manual-import workflow; full manual acceptance and
+external Flowcell Plotter compatibility are not claimed by its automated tests.
 Each time graph uses a sparse six-tick major grid with compact seconds, volts and
 amps labels. Grid contrast adapts to Light/Dark themes and remains behind the
 more prominent blue voltage and orange current traces; no minor grid or extra

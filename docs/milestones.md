@@ -696,6 +696,22 @@ recorded voltage-SD error bars. Missing advanced metadata is reported without
 discarding valid basic plots. This is not a restoration of M15B scientific
 processing: it performs no new averaging or processed-data export.
 
+### Recorded-data round-trip documentation — 17 November 2026
+
+Every run creates an exclusive matching `<base>_raw.csv` and
+`<base>_readable.csv` pair. Raw is the complete archival/traceability record;
+Readable contains only numeric active elapsed time, measured voltage and
+measured current for convenient Excel or external Flowcell Plotter use. This
+does not constitute a separate Flowcell Plotter compatibility claim.
+
+Recorded Results remains an optional, manually invoked offline import. Raw
+metadata enables protocol-aware CP/CA time plots, scan/LSV V–I and area-gated
+j–V plots, Polarisation completed-step plots from compatible same-base summary
+companions, and Custom Sequence stage boundaries. Exact three-column Readable
+imports expose generic Time and V–I only. The importer has no serial, shared
+queue or output-control access. Automated round-trip evidence is recorded in
+`docs/verification/milestone18.md`; full manual viewer acceptance is not claimed.
+
 ## Milestone 19 - Windows packaging
 
 Original roadmap task: build the Windows executable. This milestone is pending
