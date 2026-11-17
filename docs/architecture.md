@@ -438,6 +438,14 @@ logger or safety transition, and it never subscribes to live measurement
 signals. Time views reuse the live `_PlotCanvas`; V–I and optional j–V views
 reuse the same `InteractivePlotCanvas` zoom/tooltip layer. Rendering is bounded
 to representative display points while the parsed model remains unchanged.
+Protocol metadata selects CP/CA time plots or scan/LSV V–I views; valid area
+metadata gates j–V. Custom Sequence time views add boundaries from recorded
+stage events. Polarisation import looks beside the Raw file for the exclusive
+same-base `*_polarisation_summary.csv` companion and renders its already
+calculated completed-step mean voltage/current-density points with recorded
+population-voltage-SD error bars. Companion discovery and parsing are read-only;
+absence or incompatibility is a local availability advisory and never removes
+valid Raw time or V–I measurements.
 
 Detailed `SafetyPanel` editing is progressively disclosed from Dashboard or
 Settings. M17-restored CH1/CH2 limits are active before the editor is shown;
@@ -474,8 +482,9 @@ labels are paint-only; they neither retain new data nor submit queue work.
 The offline M15B scientific Plotter and processed exports are not part of this
 application. Unknown legacy settings keys remain tolerated and user files are
 never inspected or removed. Scientific post-processing belongs to an external
-tool. The Recorded Results page is visualization-only: it does not calculate
-accepted scientific points or write processed exports.
+tool. The Recorded Results page is visualization-only: it can display
+completed-step points already calculated and flushed by M14, but it does not
+calculate accepted scientific points or write processed exports.
 
 `EmergencyAllOffController` is orchestration, not an instrument owner: it only
 submits through the shared `ConnectionController` queue, reuses protocol Stop and

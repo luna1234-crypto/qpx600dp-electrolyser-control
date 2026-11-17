@@ -689,8 +689,12 @@ A subsequent offline recorded-data viewer adds read-only visualization of
 existing QPX600DP Raw CSV and exact three-column Readable CSV files. It reuses
 the interactive live-plot layer for time, V–I and metadata-gated j–V views,
 operates while disconnected, and has no serial, queue, protocol, output-control
-or live-measurement dependency. This is not a restoration of M15B scientific
-processing: it performs no averaging or processed-data export.
+or live-measurement dependency. Raw protocol metadata selects CP/CA time or
+scan/LSV scientific views, Custom Sequence stage boundaries are retained, and
+an existing same-base M14 companion enables its completed-step mean curve with
+recorded voltage-SD error bars. Missing advanced metadata is reported without
+discarding valid basic plots. This is not a restoration of M15B scientific
+processing: it performs no new averaging or processed-data export.
 
 ## Milestone 19 - Windows packaging
 

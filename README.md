@@ -696,7 +696,13 @@ scientific Plotter: it is a read-only viewer for existing QPX600DP Raw CSVs and
 the exact three-column Readable CSV format. It validates files in an isolated
 worker, detects Raw channel/protocol/stage/area metadata, and reuses the live
 plot interaction layer for time, V–I and (only with recorded area) j–V views.
-It does not average, transform, export or modify data and owns no connection,
+Protocol-aware import selects CP/CA time views, uses recorded Staircase LSV/scan
+point rows for V–I and metadata-gated j–V views, overlays recorded Custom
+Sequence stage boundaries, and discovers a same-base polarisation summary
+companion for completed-step mean curves with voltage-SD error bars. Missing
+metadata or a missing/incompatible companion disables only that advanced view
+and is explained beside the retained basic plots. The viewer does not calculate
+new averages, export or modify data and owns no connection,
 serial, queue, protocol, logger or output-control object. Import failures remain
 local and the viewer is available while disconnected or while an experiment runs.
 Each time graph uses a sparse six-tick major grid with compact seconds, volts and

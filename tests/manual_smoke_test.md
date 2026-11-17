@@ -343,3 +343,13 @@ protocol ownership, confirmation tokens or instrument identity.
     then relaunch and confirm the last valid independent CH1/CH2 limits return
     while the editor starts hidden behind Edit Safety. Confirm the application
     remains DISCONNECTED.
+13. Open Recorded Results while disconnected. Import one Raw file each from CP
+    or CA, Staircase LSV/current scan, Polarisation and Custom Sequence. Confirm
+    CP/CA opens a time view, scans open V–I, a valid recorded area enables j–V,
+    Custom Sequence time data shows stage boundaries, and a same-base
+    `*_polarisation_summary.csv` produces the completed-step mean curve with
+    voltage-SD error bars. Temporarily move a copied summary away and confirm
+    the page explains why that advanced view is unavailable while Time and V–I
+    remain usable. Import an exact three-column Readable CSV and confirm only
+    generic Time and V–I choices appear. Throughout, confirm the live channel,
+    connection, queue and outputs remain unchanged.

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from qpx_electrolyser.data.recorded_data import (
     RecordedDataError, RecordedDataFormat, RecordedDataset, RecordedPlotType,
-    RecordedPoint, load_recorded_csv,
+    RecordedPoint, RecordedStage, load_recorded_csv,
 )
 from qpx_electrolyser.gui.plots.interaction import DisplayPoint, InteractivePlotCanvas
 from qpx_electrolyser.gui.plots.realtime import PlotPoint, PlotSnapshot, _PlotCanvas
@@ -37,6 +37,52 @@ def bounded_display_points(
     return tuple(selected[: maximum - 1] + [points[-1]]) if len(selected) > maximum else tuple(selected)
 
 
+class _RecordedTimeCanvas(_PlotCanvas):
+    """The existing time canvas plus offline-only Custom Sequence boundaries."""
+
+    def __init__(self) -> None:
+        super().__init__(0)
+        self._stages: tuple[RecordedStage, ...] = ()
+
+    def set_stage_boundaries(self, stages: tuple[RecordedStage, ...]) -> None:
+        self._stages = stages
+        self.update()
+
+    def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        super().paintEvent(event)
+        starts = tuple(
+            stage for stage in self._stages if stage.start_elapsed_s is not None
+        )
+        snapshot = self._snapshot
+        if not starts or snapshot is None or not snapshot.points:
+            return
+        full_x0 = snapshot.points[0].elapsed_s
+        full_x1 = snapshot.points[-1].elapsed_s
+        if math.isclose(full_x0, full_x1, abs_tol=1e-12):
+            full_x1 = full_x0 + 1.0
+        x0, x1, _y0, _y1 = self.visible_bounds(full_x0, full_x1, 0.0, 1.0)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#8a6d1d"), 1, Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        for stage in starts:
+            assert stage.start_elapsed_s is not None
+            if not x0 <= stage.start_elapsed_s <= x1:
+                continue
+            x = self._plot_area.left() + self._plot_area.width() * (
+                stage.start_elapsed_s - x0
+            ) / max(x1 - x0, 1e-12)
+            painter.drawLine(
+                QPointF(x, self._plot_area.top()),
+                QPointF(x, self._plot_area.bottom()),
+            )
+            label = f"Stage {stage.index}"
+            if stage.name:
+                label += f" · {stage.name}"
+            painter.drawText(QPointF(x + 4, self._plot_area.top() + 14), label)
+        painter.end()
+
+
 class _RecordedXYCanvas(InteractivePlotCanvas):
     """Existing interaction layer with recorded-data X/Y scientific rendering."""
 
@@ -47,6 +93,7 @@ class _RecordedXYCanvas(InteractivePlotCanvas):
         self._dataset: RecordedDataset | None = None
         self._plot_type = RecordedPlotType.VOLTAGE_CURRENT
         self._trace_style = "dots"
+        self.last_error_bar_count = 0
         self.setMinimumHeight(300)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -85,17 +132,26 @@ class _RecordedXYCanvas(InteractivePlotCanvas):
         painter.fillRect(self.rect(), background)
         area = QRectF(70, 24, max(20, self.width() - 100), max(20, self.height() - 78))
         dataset = self._dataset
-        points = bounded_display_points(dataset.points) if dataset is not None else ()
+        points = bounded_display_points(dataset.xy_points) if dataset is not None else ()
+        summary = dataset.polarisation_summary if dataset is not None else ()
+        error_bars: tuple[float, ...] = ()
         if self._plot_type is RecordedPlotType.VOLTAGE_CURRENT:
             values = tuple((point.current_a, point.voltage_v, point) for point in points)
             x_label, y_label = "Measured current (A)", "Measured voltage (V)"
-        else:
+        elif self._plot_type is RecordedPlotType.CURRENT_DENSITY_VOLTAGE:
             area_value = dataset.active_area_cm2 if dataset is not None else None
             values = tuple(
                 (point.voltage_v, point.current_a / area_value, point)
                 for point in points
             ) if area_value is not None else ()
             x_label, y_label = "Measured voltage (V)", "Current density (A/cm²)"
+        else:
+            values = tuple(
+                (point.mean_current_density_a_cm2, point.mean_voltage_v, point)
+                for point in summary
+            )
+            error_bars = tuple(point.population_voltage_sd_v for point in summary)
+            x_label, y_label = "Mean current density (A/cm²)", "Mean voltage (V)"
         x_values = [item[0] for item in values]
         y_values = [item[1] for item in values]
         full_x0, full_x1 = self._bounds(x_values)
@@ -133,7 +189,7 @@ class _RecordedXYCanvas(InteractivePlotCanvas):
         painter.drawText(QRectF(-area.height() / 2, -10, area.height(), 20), Qt.AlignmentFlag.AlignCenter, y_label)
         painter.restore()
 
-        positions: list[tuple[QPointF, RecordedPoint]] = []
+        positions: list[tuple[QPointF, object]] = []
         path = QPainterPath()
         for index, (x_value, y_value, point) in enumerate(values):
             position = QPointF(
@@ -146,18 +202,47 @@ class _RecordedXYCanvas(InteractivePlotCanvas):
         if self._trace_style == "line_dots":
             painter.setPen(QPen(colour, 2)); painter.drawPath(path)
         painter.setPen(QPen(colour, 1)); painter.setBrush(QBrush(colour))
+        self.last_error_bar_count = 0
+        if error_bars:
+            painter.setPen(QPen(colour, 1))
+            for (position, _point), sd in zip(positions, error_bars, strict=True):
+                half_height = area.height() * sd / max(y1 - y0, 1e-12)
+                painter.drawLine(
+                    QPointF(position.x(), position.y() - half_height),
+                    QPointF(position.x(), position.y() + half_height),
+                )
+                painter.drawLine(
+                    QPointF(position.x() - 4, position.y() - half_height),
+                    QPointF(position.x() + 4, position.y() - half_height),
+                )
+                painter.drawLine(
+                    QPointF(position.x() - 4, position.y() + half_height),
+                    QPointF(position.x() + 4, position.y() + half_height),
+                )
+                self.last_error_bar_count += 1
         for position, _point in positions:
             painter.drawEllipse(position, 3, 3)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         label = dataset.channel_label if dataset is not None else "Recorded data"
-        self.set_interaction_geometry(area, [
-            DisplayPoint(position, (
-                f"{label}\nElapsed: {point.elapsed_s:.6g} s\n"
-                f"Measured voltage: {point.voltage_v:.6g} V\n"
-                f"Measured current: {point.current_a:.6g} A"
-            ))
-            for position, point in positions
-        ])
+        display_points: list[DisplayPoint] = []
+        for position, point in positions:
+            if isinstance(point, RecordedPoint):
+                text = (
+                    f"{label}\nElapsed: {point.elapsed_s:.6g} s\n"
+                    f"Measured voltage: {point.voltage_v:.6g} V\n"
+                    f"Measured current: {point.current_a:.6g} A"
+                )
+            else:
+                text = (
+                    f"{label} · Step {point.step_index}\n"
+                    f"Active end: {point.active_end_s:.6g} s\n"
+                    f"Mean voltage: {point.mean_voltage_v:.6g} V\n"
+                    f"Voltage SD: {point.population_voltage_sd_v:.6g} V\n"
+                    f"Mean current: {point.mean_current_a:.6g} A\n"
+                    f"Samples: {point.sample_count}"
+                )
+            display_points.append(DisplayPoint(position, text))
+        self.set_interaction_geometry(area, display_points)
         self.draw_interaction_overlay(painter)
 
     @staticmethod
@@ -252,8 +337,13 @@ class RecordedResultsPage(QWidget):
         self.error_message = QLabel(""); self.error_message.setObjectName("recordedDataError")
         self.error_message.setWordWrap(True); self.error_message.setProperty("severity", "error")
         right.addWidget(self.error_message)
+        self.availability_message = QLabel("")
+        self.availability_message.setObjectName("recordedDataAvailability")
+        self.availability_message.setWordWrap(True)
+        self.availability_message.setProperty("severity", "warning")
+        right.addWidget(self.availability_message)
         self.plot_stack = QStackedWidget()
-        self.time_canvas = _PlotCanvas(0)
+        self.time_canvas = _RecordedTimeCanvas()
         self.xy_canvas = _RecordedXYCanvas()
         self.plot_stack.addWidget(self.time_canvas); self.plot_stack.addWidget(self.xy_canvas)
         right.addWidget(self.plot_stack, 1)
@@ -350,6 +440,11 @@ class RecordedResultsPage(QWidget):
                 self.plot_type_combo.addItem(
                     "Current density vs Voltage", RecordedPlotType.CURRENT_DENSITY_VOLTAGE.value
                 )
+            if dataset.polarisation_summary:
+                self.plot_type_combo.addItem(
+                    "Polarisation completed-step mean ± voltage SD",
+                    RecordedPlotType.POLARISATION.value,
+                )
             target = self.plot_type_combo.findData(dataset.default_plot_type.value)
             self.plot_type_combo.setCurrentIndex(max(0, target))
             protocols = ", ".join(dataset.protocols) or "not recorded"
@@ -360,10 +455,19 @@ class RecordedResultsPage(QWidget):
             )
             self.validation_status.setText(
                 f"Validated {dataset.data_format.value.title()} CSV · {dataset.channel_label} · "
-                f"{len(dataset.points)} samples · protocol: {protocols} · stages: {stages} · area: {area}"
+                f"{len(dataset.points)} samples · protocol: {protocols} · stages: {stages} · "
+                f"area: {area} · completion: {'recorded' if dataset.completed else 'not recorded'}"
+            )
+            companion = (
+                f"Companion: {dataset.companion_path.name}. "
+                if dataset.companion_path is not None else ""
+            )
+            self.availability_message.setText(
+                companion + " ".join(dataset.advisories)
             )
         else:
             self.validation_status.setText("Import a QPX600DP Raw or Readable CSV to begin.")
+            self.availability_message.clear()
         self.plot_type_combo.blockSignals(False)
         self._update_controls(); self._render_plot()
 
@@ -388,10 +492,18 @@ class RecordedResultsPage(QWidget):
                 total_samples=len(dataset.points),
                 message="Offline recorded data",
             ))
+            self.time_canvas.set_stage_boundaries(
+                dataset.stages if dataset.is_custom_sequence else ()
+            )
             self.plot_stack.setCurrentWidget(self.time_canvas)
         else:
             if plot_type is RecordedPlotType.CURRENT_DENSITY_VOLTAGE and not dataset.supports_current_density:
                 self.error_message.setText("Current-density plotting requires valid Raw CSV active-area metadata.")
+                return
+            if plot_type is RecordedPlotType.POLARISATION and not dataset.polarisation_summary:
+                self.error_message.setText(
+                    "Completed-step polarisation plotting requires a compatible companion summary."
+                )
                 return
             self.xy_canvas.set_trace_style(style)
             self.xy_canvas.set_data(dataset, plot_type)

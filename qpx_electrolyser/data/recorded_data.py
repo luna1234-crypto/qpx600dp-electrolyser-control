@@ -11,6 +11,20 @@ from pathlib import Path
 from qpx_electrolyser.data.csv_logging import READABLE_CSV_COLUMNS
 
 
+_POLARISATION_SUMMARY_COLUMNS = (
+    "step_index",
+    "commanded_current_density_a_cm2",
+    "commanded_current_a",
+    "mean_measured_voltage_v",
+    "population_voltage_sd_v",
+    "mean_measured_current_a",
+    "mean_measured_current_density_a_cm2",
+    "sample_count",
+    "active_start_s",
+    "active_end_s",
+)
+
+
 class RecordedDataError(ValueError):
     """An imported file is malformed, ambiguous, or unsupported."""
 
@@ -24,6 +38,7 @@ class RecordedPlotType(str, Enum):
     TIME = "time"
     VOLTAGE_CURRENT = "voltage_current"
     CURRENT_DENSITY_VOLTAGE = "current_density_voltage"
+    POLARISATION = "polarisation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +49,31 @@ class RecordedPoint:
     protocol: str = ""
     stage_index: int | None = None
     stage_name: str = ""
+    sample_status: str = "ok"
+    scan_point_valid: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RecordedStage:
+    index: int
+    name: str
+    start_elapsed_s: float | None
+    end_elapsed_s: float | None
+    completed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PolarisationSummaryPoint:
+    step_index: int
+    commanded_current_density_a_cm2: float
+    commanded_current_a: float
+    mean_voltage_v: float
+    population_voltage_sd_v: float
+    mean_current_a: float
+    mean_current_density_a_cm2: float
+    sample_count: int
+    active_start_s: float
+    active_end_s: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +85,11 @@ class RecordedDataset:
     protocols: tuple[str, ...] = ()
     stage_indexes: tuple[int, ...] = ()
     active_area_cm2: float | None = None
+    completed: bool = False
+    stages: tuple[RecordedStage, ...] = ()
+    polarisation_summary: tuple[PolarisationSummaryPoint, ...] = ()
+    companion_path: Path | None = None
+    advisories: tuple[str, ...] = ()
 
     @property
     def channel_label(self) -> str:
@@ -55,8 +100,19 @@ class RecordedDataset:
         return self.active_area_cm2 is not None
 
     @property
+    def is_custom_sequence(self) -> bool:
+        return "custom_sequence" in self.protocols
+
+    @property
+    def xy_points(self) -> tuple[RecordedPoint, ...]:
+        reduced = tuple(point for point in self.points if point.scan_point_valid)
+        return reduced or self.points
+
+    @property
     def default_plot_type(self) -> RecordedPlotType:
         protocols = set(self.protocols)
+        if self.polarisation_summary:
+            return RecordedPlotType.POLARISATION
         if "custom_sequence" in protocols or len(protocols) > 1:
             return RecordedPlotType.TIME
         if protocols & {
@@ -82,20 +138,7 @@ _RAW_IDENTIFIERS = {"timestamp_iso", "sample_status", "protocol_name"}
 def load_recorded_csv(path: Path) -> RecordedDataset:
     """Parse one supported CSV without modifying it or any live application state."""
     source = Path(path)
-    if not source.is_file():
-        raise RecordedDataError(f"Recorded CSV does not exist: {source}")
-    try:
-        with source.open("r", newline="", encoding="utf-8-sig") as stream:
-            reader = csv.DictReader(stream)
-            if reader.fieldnames is None:
-                raise RecordedDataError("CSV is empty or has no header row.")
-            headers = tuple(reader.fieldnames)
-            if len(headers) != len(set(headers)):
-                raise RecordedDataError("CSV contains duplicate header names.")
-            rows = list(reader)
-    except (OSError, UnicodeError, csv.Error) as error:
-        raise RecordedDataError(f"Could not read recorded CSV: {error}") from error
-
+    headers, rows = _read_csv(source)
     readable = headers == READABLE_CSV_COLUMNS
     header_set = set(headers)
     raw = _RAW_REQUIRED.issubset(header_set) and bool(_RAW_IDENTIFIERS & header_set)
@@ -104,11 +147,27 @@ def load_recorded_csv(path: Path) -> RecordedDataset:
     if readable:
         return _parse_readable(source, rows)
     if raw:
-        return _parse_raw(source, rows, header_set)
+        return _parse_raw(source, rows)
     expected = ", ".join(READABLE_CSV_COLUMNS)
     raise RecordedDataError(
         "Unsupported CSV header. Expected a QPX600DP Raw CSV or exactly: " + expected
     )
+
+
+def _read_csv(path: Path) -> tuple[tuple[str, ...], list[dict[str, str]]]:
+    if not path.is_file():
+        raise RecordedDataError(f"Recorded CSV does not exist: {path}")
+    try:
+        with path.open("r", newline="", encoding="utf-8-sig") as stream:
+            reader = csv.DictReader(stream)
+            if reader.fieldnames is None:
+                raise RecordedDataError("CSV is empty or has no header row.")
+            headers = tuple(reader.fieldnames)
+            if len(headers) != len(set(headers)):
+                raise RecordedDataError("CSV contains duplicate header names.")
+            return headers, list(reader)
+    except (OSError, UnicodeError, csv.Error) as error:
+        raise RecordedDataError(f"Could not read recorded CSV: {error}") from error
 
 
 def _parse_readable(path: Path, rows: list[dict[str, str]]) -> RecordedDataset:
@@ -125,60 +184,70 @@ def _parse_readable(path: Path, rows: list[dict[str, str]]) -> RecordedDataset:
         points.append(RecordedPoint(elapsed, voltage, current))
     if not points:
         raise RecordedDataError("Readable CSV contains no measurement rows.")
-    return RecordedDataset(path, RecordedDataFormat.READABLE, tuple(points))
+    return RecordedDataset(
+        path, RecordedDataFormat.READABLE, tuple(points),
+        advisories=(
+            "Readable CSV has no protocol, channel, stage or active-area metadata; "
+            "only generic time and V–I plots are available.",
+        ),
+    )
 
 
-def _parse_raw(
-    path: Path, rows: list[dict[str, str]], headers: set[str]
-) -> RecordedDataset:
+def _parse_raw(path: Path, rows: list[dict[str, str]]) -> RecordedDataset:
     points: list[RecordedPoint] = []
     channels: set[int] = set()
     protocols: set[str] = set()
-    stages: set[int] = set()
     areas: set[float] = set()
+    completed = False
+    stage_names: dict[int, str] = {}
+    stage_starts: dict[int, float] = {}
+    stage_ends: dict[int, float] = {}
+    completed_stages: set[int] = set()
+    sequence_stage_totals: set[int] = set()
     for row_number, row in enumerate(rows, start=2):
         status = (row.get("sample_status") or "").strip().lower()
-        measurement_values = (
-            (row.get("elapsed_seconds") or "").strip(),
-            (row.get("measured_voltage_v") or "").strip(),
-            (row.get("measured_current_a") or "").strip(),
-        )
-        # Terminal/error/transition rows legitimately carry no measurement.
-        if not any(measurement_values):
-            continue
-        if not all(measurement_values):
-            if status not in {"", "ok"}:
-                continue
-            raise RecordedDataError(
-                f"Row {row_number}: Raw measurement row has incomplete numeric values."
-            )
-        elapsed = _number(measurement_values[0], row_number, "elapsed_seconds")
-        voltage = _number(measurement_values[1], row_number, "measured_voltage_v")
-        current = _number(measurement_values[2], row_number, "measured_current_a")
-        _validate_sample(elapsed, voltage, current, row_number)
-        if points and elapsed < points[-1].elapsed_s:
-            raise RecordedDataError(
-                f"Row {row_number}: elapsed_seconds is earlier than the preceding sample."
-            )
-        channel = _integer(row.get("channel"), row_number, "channel")
-        if channel not in (1, 2):
-            raise RecordedDataError(f"Row {row_number}: channel must be 1 or 2.")
-        channels.add(channel)
-
+        protocol_state = (row.get("protocol_state") or "").strip().upper()
+        stage_state = (row.get("sequence_stage_state") or "").strip().upper()
+        if protocol_state == "COMPLETED":
+            completed = True
+        channel_text = (row.get("channel") or "").strip()
+        if channel_text:
+            channel = _integer(channel_text, row_number, "channel")
+            if channel not in (1, 2):
+                raise RecordedDataError(f"Row {row_number}: channel must be 1 or 2.")
+            channels.add(channel)
         protocol = (row.get("protocol_name") or "").strip().lower()
-        if (row.get("sequence_run_id") or "").strip() or (
-            row.get("sequence_name") or ""
-        ).strip():
+        is_sequence = bool(
+            (row.get("sequence_run_id") or "").strip()
+            or (row.get("sequence_name") or "").strip()
+        )
+        if is_sequence:
             protocols.add("custom_sequence")
         elif protocol:
             protocols.add(protocol)
         stage_index = _optional_stage_index(row, row_number)
-        if stage_index is not None:
-            stages.add(stage_index)
+        stage_total_text = (row.get("sequence_stage_total") or "").strip()
+        if stage_total_text:
+            stage_total = _integer(stage_total_text, row_number, "sequence_stage_total")
+            if stage_total <= 0:
+                raise RecordedDataError(
+                    f"Row {row_number}: sequence_stage_total must be positive."
+                )
+            sequence_stage_totals.add(stage_total)
         stage_name = (
             (row.get("sequence_stage_type") or "").strip()
             or (row.get("scan_name") or "").strip()
         )
+        elapsed_text = (row.get("elapsed_seconds") or "").strip()
+        elapsed = _number(elapsed_text, row_number, "elapsed_seconds") if elapsed_text else None
+        if stage_index is not None:
+            if stage_name:
+                stage_names.setdefault(stage_index, stage_name)
+            if elapsed is not None:
+                stage_starts.setdefault(stage_index, elapsed)
+                stage_ends[stage_index] = elapsed
+            if status == "stage_completed" or stage_state == "COMPLETED":
+                completed_stages.add(stage_index)
         area_text = (row.get("active_area_cm2") or "").strip()
         if area_text:
             area = _number(area_text, row_number, "active_area_cm2")
@@ -187,8 +256,33 @@ def _parse_raw(
                     f"Row {row_number}: active_area_cm2 must be positive when present."
                 )
             areas.add(area)
+
+        measurement_values = (
+            elapsed_text,
+            (row.get("measured_voltage_v") or "").strip(),
+            (row.get("measured_current_a") or "").strip(),
+        )
+        if not any(measurement_values):
+            continue
+        if not all(measurement_values):
+            if status not in {"", "ok", "lsv_point", "polarisation_summary"}:
+                continue
+            raise RecordedDataError(
+                f"Row {row_number}: Raw measurement row has incomplete numeric values."
+            )
+        assert elapsed is not None
+        voltage = _number(measurement_values[1], row_number, "measured_voltage_v")
+        current = _number(measurement_values[2], row_number, "measured_current_a")
+        _validate_sample(elapsed, voltage, current, row_number)
+        if points and elapsed < points[-1].elapsed_s:
+            raise RecordedDataError(
+                f"Row {row_number}: elapsed_seconds is earlier than the preceding sample."
+            )
+        valid_text = (row.get("scan_point_valid") or "").strip().lower()
+        scan_point_valid = status == "lsv_point" and valid_text in {"", "true", "1"}
         points.append(RecordedPoint(
-            elapsed, voltage, current, protocol, stage_index, stage_name
+            elapsed, voltage, current, protocol, stage_index, stage_name,
+            status or "ok", scan_point_valid,
         ))
 
     if not points:
@@ -197,16 +291,104 @@ def _parse_raw(
         raise RecordedDataError("Raw CSV contains ambiguous mixed-channel measurements.")
     if len(areas) > 1:
         raise RecordedDataError("Raw CSV contains conflicting active-area metadata.")
+    if len(sequence_stage_totals) > 1:
+        raise RecordedDataError("Raw CSV contains conflicting sequence stage totals.")
+    if "custom_sequence" in protocols and sequence_stage_totals:
+        completed = len(completed_stages) == next(iter(sequence_stage_totals))
     area = next(iter(areas)) if areas else None
-    return RecordedDataset(
-        path,
-        RecordedDataFormat.RAW,
-        tuple(points),
-        next(iter(channels)),
-        tuple(sorted(protocols)),
-        tuple(sorted(stages)),
-        area,
+    stages = tuple(
+        RecordedStage(
+            index, stage_names.get(index, ""), stage_starts.get(index),
+            stage_ends.get(index), index in completed_stages,
+        )
+        for index in sorted(set(stage_names) | set(stage_starts) | completed_stages)
     )
+    advisories: list[str] = []
+    polarisation_protocol = bool(
+        protocols & {"polarisation", "steady_state_polarisation"}
+    )
+    summary: tuple[PolarisationSummaryPoint, ...] = ()
+    companion: Path | None = None
+    if polarisation_protocol:
+        summary, companion, companion_advisory = _load_polarisation_companion(path)
+        if companion_advisory:
+            advisories.append(companion_advisory)
+        if area is None:
+            advisories.append(
+                "Active-area metadata is missing; current-density plots are unavailable."
+            )
+    elif area is None:
+        advisories.append(
+            "Active-area metadata is missing; current-density plots are unavailable."
+        )
+    if "custom_sequence" in protocols and not stages:
+        advisories.append(
+            "Custom Sequence stage metadata is missing; stage boundaries are unavailable."
+        )
+    if not completed:
+        advisories.append(
+            "No terminal COMPLETED metadata was found; valid basic measurements remain available."
+        )
+    return RecordedDataset(
+        path, RecordedDataFormat.RAW, tuple(points), next(iter(channels)),
+        tuple(sorted(protocols)), tuple(stage.index for stage in stages), area,
+        completed, stages, summary, companion, tuple(advisories),
+    )
+
+
+def _load_polarisation_companion(
+    raw_path: Path,
+) -> tuple[tuple[PolarisationSummaryPoint, ...], Path | None, str]:
+    exact = raw_path.with_name(f"{raw_path.stem}_polarisation_summary.csv")
+    candidates = sorted(raw_path.parent.glob(
+        f"{raw_path.stem}*_polarisation_summary.csv"
+    ))
+    if exact.is_file():
+        selected = exact
+    elif len(candidates) == 1:
+        selected = candidates[0]
+    elif len(candidates) > 1:
+        return (), None, (
+            "Multiple same-base polarisation summary companions were found; "
+            "the completed-step mean/SD plot is unavailable."
+        )
+    else:
+        return (), None, (
+            "Polarisation summary companion is missing; basic time and V–I plots "
+            "remain available, but the completed-step mean/SD plot is unavailable."
+        )
+    try:
+        headers, rows = _read_csv(selected)
+        if headers != _POLARISATION_SUMMARY_COLUMNS:
+            raise RecordedDataError(
+                "polarisation summary header does not match the application schema"
+            )
+        points: list[PolarisationSummaryPoint] = []
+        for row_number, row in enumerate(rows, start=2):
+            step = _integer(row.get("step_index"), row_number, "step_index")
+            count = _integer(row.get("sample_count"), row_number, "sample_count")
+            density = _number(row.get("commanded_current_density_a_cm2"), row_number, "commanded_current_density_a_cm2")
+            commanded_current = _number(row.get("commanded_current_a"), row_number, "commanded_current_a")
+            mean_voltage = _number(row.get("mean_measured_voltage_v"), row_number, "mean_measured_voltage_v")
+            voltage_sd = _number(row.get("population_voltage_sd_v"), row_number, "population_voltage_sd_v")
+            mean_current = _number(row.get("mean_measured_current_a"), row_number, "mean_measured_current_a")
+            mean_density = _number(row.get("mean_measured_current_density_a_cm2"), row_number, "mean_measured_current_density_a_cm2")
+            active_start = _number(row.get("active_start_s"), row_number, "active_start_s")
+            active_end = _number(row.get("active_end_s"), row_number, "active_end_s")
+            if step <= 0 or count <= 0 or voltage_sd < 0 or active_end < active_start:
+                raise RecordedDataError(f"Row {row_number}: invalid summary bounds, count or SD.")
+            points.append(PolarisationSummaryPoint(
+                step, density, commanded_current, mean_voltage, voltage_sd,
+                mean_current, mean_density, count, active_start, active_end,
+            ))
+        if not points:
+            raise RecordedDataError("polarisation summary contains no completed steps")
+        return tuple(points), selected, ""
+    except RecordedDataError as error:
+        return (), selected, (
+            f"Polarisation summary companion is incompatible ({error}); basic plots "
+            "remain available, but the completed-step mean/SD plot is unavailable."
+        )
 
 
 def _optional_stage_index(row: dict[str, str], row_number: int) -> int | None:
