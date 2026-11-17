@@ -175,6 +175,88 @@ def test_raw_and_readable_detection_with_protocol_channel_stage_and_area(tmp_pat
     assert plain.default_plot_type is RecordedPlotType.TIME
 
 
+def test_non_sequence_raw_ignores_blank_or_zero_optional_sequence_fields(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "cp_raw.csv"
+    blank = _raw_row(elapsed=0, protocol="constant_current", stage=None)
+    zero = _raw_row(elapsed=1, protocol="constant_current", stage=None)
+    zero["sequence_stage_index"] = "0"
+    zero["sequence_stage_total"] = "0"
+    _write_raw(path, [blank, zero])
+
+    dataset = load_recorded_csv(path)
+
+    assert dataset.protocols == ("constant_current",)
+    assert dataset.stage_indexes == ()
+    assert len(dataset.points) == 2
+
+
+def test_readable_csv_bypasses_sequence_metadata_validation(tmp_path: Path) -> None:
+    path = tmp_path / "matching_readable.csv"
+    _write_readable(path)
+
+    dataset = load_recorded_csv(path)
+
+    assert dataset.data_format is RecordedDataFormat.READABLE
+    assert len(dataset.points) == 2
+
+
+def test_custom_sequence_lifecycle_row_and_integer_valued_decimal_stage_load(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sequence_raw.csv"
+    lifecycle = _raw_row(elapsed=0, protocol="custom_sequence", stage=None)
+    lifecycle.update({
+        "measured_voltage_v": "",
+        "measured_current_a": "",
+        "sample_status": "sequence_started",
+        "protocol_state": "STARTING",
+        "sequence_run_id": "run-1",
+        "sequence_stage_index": "0",
+        "sequence_stage_total": "0",
+        "sequence_stage_state": "STARTING",
+    })
+    stage = _raw_row(elapsed=1, protocol="constant_current", stage=None)
+    stage.update({
+        "sequence_run_id": "run-1",
+        "sequence_stage_index": "3.0",
+        "sequence_stage_total": "3.0",
+        "sequence_stage_type": "constant_current",
+        "sequence_stage_state": "RUNNING",
+    })
+    _write_raw(path, [lifecycle, stage])
+
+    dataset = load_recorded_csv(path)
+
+    assert dataset.protocols == ("custom_sequence",)
+    assert dataset.stage_indexes == (3,)
+
+
+@pytest.mark.parametrize(
+    ("stage_index", "stage_total", "message"),
+    [
+        ("1", "0", "sequence_stage_total must be positive"),
+        ("4", "3", "sequence_stage_index must be between 1"),
+    ],
+)
+def test_invalid_custom_sequence_stage_metadata_is_rejected(
+    tmp_path: Path, stage_index: str, stage_total: str, message: str,
+) -> None:
+    path = tmp_path / "invalid_sequence_raw.csv"
+    row = _raw_row(protocol="constant_current", stage=None)
+    row.update({
+        "sequence_run_id": "run-invalid",
+        "sequence_stage_index": stage_index,
+        "sequence_stage_total": stage_total,
+        "sequence_stage_type": "constant_current",
+    })
+    _write_raw(path, [row])
+
+    with pytest.raises(RecordedDataError, match=message):
+        load_recorded_csv(path)
+
+
 def test_custom_sequence_and_polarisation_default_plot_selection(tmp_path: Path) -> None:
     sequence = tmp_path / "sequence.csv"
     rows = [
@@ -182,6 +264,9 @@ def test_custom_sequence_and_polarisation_default_plot_selection(tmp_path: Path)
         _raw_row(elapsed=1, protocol="constant_current", stage=2),
     ]
     rows[0]["sequence_run_id"] = rows[1]["sequence_run_id"] = "run-1"
+    for row, stage_type in zip(rows, ("constant_voltage", "constant_current")):
+        row["sequence_stage_total"] = "2"
+        row["sequence_stage_type"] = stage_type
     _write_raw(sequence, rows)
     assert load_recorded_csv(sequence).default_plot_type is RecordedPlotType.TIME
 

@@ -226,12 +226,48 @@ def _parse_raw(path: Path, rows: list[dict[str, str]]) -> RecordedDataset:
         elif protocol:
             protocols.add(protocol)
         stage_index = _optional_stage_index(row, row_number)
+        sequence_stage_index_text = (
+            row.get("sequence_stage_index") or ""
+        ).strip()
         stage_total_text = (row.get("sequence_stage_total") or "").strip()
-        if stage_total_text:
-            stage_total = _integer(stage_total_text, row_number, "sequence_stage_total")
+        sequence_stage_type = (row.get("sequence_stage_type") or "").strip()
+        sequence_stage_index = (
+            _integer(
+                sequence_stage_index_text, row_number, "sequence_stage_index"
+            )
+            if sequence_stage_index_text
+            else None
+        )
+        sequence_stage_total = (
+            _integer(stage_total_text, row_number, "sequence_stage_total")
+            if stage_total_text
+            else None
+        )
+        is_actual_sequence_stage = is_sequence and bool(
+            sequence_stage_type
+            or (sequence_stage_index is not None and sequence_stage_index != 0)
+            or (sequence_stage_total is not None and sequence_stage_total != 0)
+        )
+        if is_actual_sequence_stage:
+            if sequence_stage_index is None:
+                raise RecordedDataError(
+                    f"Row {row_number}: sequence_stage_index is required for a "
+                    "Custom Sequence stage."
+                )
+            if sequence_stage_total is None:
+                raise RecordedDataError(
+                    f"Row {row_number}: sequence_stage_total is required for a "
+                    "Custom Sequence stage."
+                )
+            stage_total = sequence_stage_total
             if stage_total <= 0:
                 raise RecordedDataError(
                     f"Row {row_number}: sequence_stage_total must be positive."
+                )
+            if not 1 <= sequence_stage_index <= stage_total:
+                raise RecordedDataError(
+                    f"Row {row_number}: sequence_stage_index must be between 1 "
+                    f"and sequence_stage_total ({stage_total})."
                 )
             sequence_stage_totals.add(stage_total)
         stage_name = (
@@ -398,6 +434,8 @@ def _optional_stage_index(row: dict[str, str], row_number: int) -> int | None:
             value = _integer(text, row_number, field)
             if value < 0:
                 raise RecordedDataError(f"Row {row_number}: {field} cannot be negative.")
+            if field == "sequence_stage_index" and value == 0:
+                continue
             return value
     return None
 
